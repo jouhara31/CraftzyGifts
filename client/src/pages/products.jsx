@@ -1,0 +1,992 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import Header from "../components/Header";
+import { addToCart } from "../utils/cart";
+import { getWishlist, toggleWishlist } from "../utils/wishlist";
+import { getProductImage } from "../utils/productMedia";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const PAGE_SIZE = 16;
+const PRICE_FILTER_MIN = 0;
+const PRICE_FILTER_MAX = 40000;
+const PRICE_FILTER_STEP = 500;
+const CATEGORY_FILTER_TREE = [
+  { category: "Valentine's Day", subcategories: [] },
+  {
+    category: "Birthday",
+    subcategories: [
+      "For Him",
+      "For Her",
+      "For Boys",
+      "For Girls",
+      "For Husband",
+      "For Wife",
+      "For Boyfriend",
+      "For Girlfriend",
+      "For Brother",
+      "For Sister",
+      "For Dad",
+      "For Mom",
+      "For Friends",
+    ],
+  },
+  {
+    category: "Anniversary",
+    subcategories: [
+      "For Couples",
+      "For Husband",
+      "For Wife",
+      "For Boyfriend",
+      "For Girlfriend",
+      "For Parents",
+      "For Friends",
+    ],
+  },
+  {
+    category: "Wedding",
+    subcategories: [
+      "Couples",
+      "Groom",
+      "Bride",
+      "Bride to be Gifts",
+      "Groom to be",
+      "Bridesmaid Gifts",
+      "For Friends",
+    ],
+  },
+  {
+    category: "Engagement",
+    subcategories: ["For Couples", "For Bride to be", "For Groom to be"],
+  },
+  { category: "Festivals", subcategories: [] },
+  {
+    category: "Special Days",
+    subcategories: [
+      "Valentine's Day Gifts",
+      "Friendship Day",
+      "Mother's Day",
+      "Doctors Day Gifts",
+      "Father's Day Gifts",
+      "Women's Day",
+      "New Year Gifts",
+      "Holiday",
+      "Men's Day",
+      "Year Ending",
+      "Children's Day",
+    ],
+  },
+  {
+    category: "Other Occasions",
+    subcategories: [
+      "Congratulations",
+      "Housewarming",
+      "Home Visit",
+      "New Born",
+      "Retirement",
+      "Dad to Be",
+      "Mom to Be",
+      "Token of Love",
+      "Apology Gifts",
+      "Party",
+    ],
+  },
+  {
+    category: "Thank You",
+    subcategories: ["Thank You Advocate", "Thank You Doctor", "Token of Love"],
+  },
+  {
+    category: "Gourmet Gifts",
+    subcategories: ["Yummy Hamper", "Snacks Hamper", "Coffee Hamper"],
+  },
+  {
+    category: "Corporate",
+    subcategories: [
+      "Vacuum Mug Gift Set",
+      "Powerbank Gift Set",
+      "Pendrive Gift Set",
+      "Pen Gift Set",
+      "Mug Gift Set",
+      "Mouse Gift Set",
+      "Keychain Gift Set",
+      "Diary Gift Set",
+      "Bottle Gift Set",
+      "Belt Gift Set",
+      "Appreciation",
+      "Promotion",
+      "Kerala",
+    ],
+  },
+  { category: "Return gifts", subcategories: [] },
+  {
+    category: "Kerala Specials",
+    subcategories: [
+      "Handicrafts",
+      "Kerala Hampers",
+      "Vishu Kani Items",
+      "Thiru Udayada",
+      "Spices",
+      "Snacks",
+    ],
+  },
+  { category: "Gift Items", subcategories: [] },
+];
+
+const parseOptionalNumber = (value) => {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const numeric = Number(text);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const clampPriceFilterValue = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return PRICE_FILTER_MAX;
+  return Math.min(Math.max(Math.round(numeric), PRICE_FILTER_MIN), PRICE_FILTER_MAX);
+};
+
+const filterAndSortProducts = (
+  source,
+  { query, category, customOnly, minPrice, maxPrice, sort }
+) => {
+  const normalizedQuery = query.trim().toLowerCase();
+  const min = parseOptionalNumber(minPrice);
+  const max = parseOptionalNumber(maxPrice);
+
+  let filtered = source.filter((item) => {
+    const text = `${item?.name || ""} ${item?.category || ""} ${
+      item?.description || ""
+    }`.toLowerCase();
+    const queryMatch = !normalizedQuery || text.includes(normalizedQuery);
+    const categoryMatch =
+      category === "All" ||
+      (item?.category || "").toLowerCase() === category.toLowerCase();
+    const customMatch = !customOnly || Boolean(item?.isCustomizable);
+    const price = Number(item?.price || 0);
+    const minMatch = min === null || price >= min;
+    const maxMatch = max === null || price <= max;
+    return queryMatch && categoryMatch && customMatch && minMatch && maxMatch;
+  });
+
+  if (sort === "price_asc") {
+    filtered = filtered.sort((a, b) => a.price - b.price);
+  } else if (sort === "price_desc") {
+    filtered = filtered.sort((a, b) => b.price - a.price);
+  } else if (sort === "name_asc") {
+    filtered = filtered.sort((a, b) => a.name.localeCompare(b.name));
+  } else if (sort === "name_desc") {
+    filtered = filtered.sort((a, b) => b.name.localeCompare(a.name));
+  }
+
+  return filtered;
+};
+
+const paginateProducts = (items, page) => {
+  const total = items.length;
+  const pages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
+  const currentPage = Math.min(Math.max(page, 1), pages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+
+  return {
+    items: items.slice(start, start + PAGE_SIZE),
+    total,
+    page: currentPage,
+    pages,
+  };
+};
+
+const normalizeProductsResponse = (data) => {
+  if (Array.isArray(data)) {
+    return {
+      items: data,
+      total: data.length,
+      page: 1,
+      pages: 1,
+    };
+  }
+
+  const items = Array.isArray(data?.items) ? data.items : [];
+  const total =
+    typeof data?.total === "number" ? data.total : items.length;
+  const page = typeof data?.page === "number" ? data.page : 1;
+  const pages =
+    typeof data?.pages === "number"
+      ? Math.max(data.pages, 1)
+      : Math.max(Math.ceil(total / PAGE_SIZE), 1);
+
+  return { items, total, page, pages };
+};
+
+const formatPrice = (value) => Number(value || 0).toLocaleString("en-IN");
+const parsePrice = (value) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = Number(String(value ?? "").replace(/[^\d.]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const readStoredUserRole = () => {
+  try {
+    const raw = localStorage.getItem("user");
+    if (!raw) return "";
+    const parsed = JSON.parse(raw);
+    return String(parsed?.role || "").trim().toLowerCase();
+  } catch {
+    return "";
+  }
+};
+
+const getWishlistIdSet = () =>
+  new Set(getWishlist().map((entry) => String(entry.id)));
+
+const buildPaginationItems = (currentPage, totalPages) => {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = [1];
+  const start = Math.max(2, currentPage - 1);
+  const end = Math.min(totalPages - 1, currentPage + 1);
+
+  if (start > 2) pages.push("ellipsis-left");
+  for (let pageNo = start; pageNo <= end; pageNo += 1) {
+    pages.push(pageNo);
+  }
+  if (end < totalPages - 1) pages.push("ellipsis-right");
+  pages.push(totalPages);
+
+  return pages;
+};
+
+export default function Products() {
+  const [catalog, setCatalog] = useState({
+    items: [],
+    total: 0,
+    page: 1,
+    pages: 1,
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [addedItemId, setAddedItemId] = useState("");
+  const [cartAnimatingId, setCartAnimatingId] = useState("");
+  const [wishlistAnimatingId, setWishlistAnimatingId] = useState("");
+  const [wishlistIds, setWishlistIds] = useState(() => getWishlistIdSet());
+  const [userRole, setUserRole] = useState(() => readStoredUserRole());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const query = searchParams.get("q") || searchParams.get("search") || "";
+  const category = searchParams.get("category") || "All";
+  const sort = searchParams.get("sort") || "newest";
+  const customOnly = searchParams.get("custom") === "1";
+  const minPrice = searchParams.get("minPrice") || "";
+  const maxPrice = searchParams.get("maxPrice") || "";
+  const selectedCategoryConfig =
+    CATEGORY_FILTER_TREE.find(
+      (item) => item.category.toLowerCase() === category.toLowerCase()
+    ) || CATEGORY_FILTER_TREE[0];
+  const page = Math.max(Number(searchParams.get("page")) || 1, 1);
+  const [priceSliderValue, setPriceSliderValue] = useState(() =>
+    clampPriceFilterValue(maxPrice || PRICE_FILTER_MAX)
+  );
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [activeMenuCategory, setActiveMenuCategory] = useState(
+    () => (category !== "All" ? category : CATEGORY_FILTER_TREE[0]?.category || "")
+  );
+  const categoryMenuRef = useRef(null);
+  const navigate = useNavigate();
+  const pageItems = useMemo(
+    () => buildPaginationItems(page, catalog.pages),
+    [page, catalog.pages]
+  );
+  const activeMenuCategoryGroup =
+    CATEGORY_FILTER_TREE.find((item) => item.category === activeMenuCategory) ||
+    selectedCategoryConfig;
+  const normalizedQuery = String(query).trim().toLowerCase();
+  const selectedSubcategoryLabel =
+    category !== "All"
+      ? selectedCategoryConfig.subcategories.find(
+          (item) => item.toLowerCase() === normalizedQuery
+        ) || ""
+      : "";
+  const categoryToggleLabel =
+    category === "All"
+      ? "All categories"
+      : selectedSubcategoryLabel
+      ? `${category} - ${selectedSubcategoryLabel}`
+      : category;
+  const isSellerAccount = userRole === "seller";
+
+  useEffect(() => {
+    const syncWishlist = () => {
+      setWishlistIds(getWishlistIdSet());
+    };
+    syncWishlist();
+    window.addEventListener("wishlist:updated", syncWishlist);
+    return () => {
+      window.removeEventListener("wishlist:updated", syncWishlist);
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncUserRole = () => setUserRole(readStoredUserRole());
+    window.addEventListener("user:updated", syncUserRole);
+    return () => window.removeEventListener("user:updated", syncUserRole);
+  }, []);
+
+  useEffect(() => {
+    setPriceSliderValue(clampPriceFilterValue(maxPrice || PRICE_FILTER_MAX));
+  }, [maxPrice]);
+
+  useEffect(() => {
+    if (category !== "All") {
+      setActiveMenuCategory(category);
+    }
+  }, [category]);
+
+  useEffect(() => {
+    if (!categoryMenuOpen) return undefined;
+
+    const handleOutsideClick = (event) => {
+      if (categoryMenuRef.current && !categoryMenuRef.current.contains(event.target)) {
+        setCategoryMenuOpen(false);
+      }
+    };
+
+    const handleEscape = (event) => {
+      if (event.key === "Escape") setCategoryMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [categoryMenuOpen]);
+
+  const updateParams = (updates, resetPage = true) => {
+    const next = new URLSearchParams(searchParams);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (
+        value === null ||
+        value === undefined ||
+        value === false ||
+        value === ""
+      ) {
+        next.delete(key);
+      } else {
+        next.set(key, String(value));
+      }
+    });
+
+    if (resetPage) {
+      next.delete("page");
+    }
+
+    setSearchParams(next, { replace: true });
+  };
+
+  const applyCategoryFromMenu = (nextCategory) => {
+    setCategoryMenuOpen(false);
+    updateParams({
+      category: nextCategory === "All" ? null : nextCategory,
+      q: null,
+      search: null,
+    });
+  };
+
+  const applySubcategoryFromMenu = (nextSubcategory) => {
+    setCategoryMenuOpen(false);
+    updateParams({
+      category: activeMenuCategoryGroup.category,
+      q: nextSubcategory || null,
+      search: null,
+    });
+  };
+
+  const clearAllFilters = () => {
+    setSearchParams(new URLSearchParams(), { replace: true });
+  };
+
+  const requireLogin = () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/login");
+      return false;
+    }
+    return true;
+  };
+
+  const toCartItem = (item) => ({
+    id: item._id,
+    name: item.name,
+    price: item.price,
+    mrp: item.mrp,
+    isCustomizable: item.isCustomizable,
+    category: item.category,
+    deliveryMinDays: item.deliveryMinDays,
+    deliveryMaxDays: item.deliveryMaxDays,
+    image: getProductImage(item),
+    seller: {
+      id: String(item?.seller?._id || item?.seller?.id || "").trim(),
+      name: String(item?.seller?.name || "").trim(),
+      storeName: String(item?.seller?.storeName || "").trim(),
+      profileImage: String(item?.seller?.profileImage || "").trim(),
+    },
+  });
+
+  const addItemToCart = (item) => {
+    const availableStock = Number(item?.stock || 0);
+    if (availableStock <= 0) return false;
+    if (isSellerAccount) return false;
+    if (!requireLogin()) return false;
+    setCartAnimatingId(String(item._id));
+    addToCart(toCartItem(item));
+    setAddedItemId(String(item._id));
+    return true;
+  };
+
+  const updateWishlistForItem = (item) => {
+    if (!requireLogin()) return;
+    setWishlistAnimatingId(String(item._id));
+    const next = toggleWishlist({
+      id: item._id,
+      name: item.name,
+      price: item.price,
+      tag: item.category,
+      category: item.category,
+      image: getProductImage(item),
+    });
+    setWishlistIds(new Set(next.map((entry) => String(entry.id))));
+  };
+
+  useEffect(() => {
+    let ignore = false;
+
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const params = new URLSearchParams();
+        if (query) params.set("search", query);
+        if (category !== "All") params.set("category", category);
+        if (customOnly) params.set("customizable", "true");
+        if (minPrice) params.set("minPrice", minPrice);
+        if (maxPrice) params.set("maxPrice", maxPrice);
+        params.set("sort", sort);
+        params.set("page", String(page));
+        params.set("limit", String(PAGE_SIZE));
+
+        const res = await fetch(`${API_URL}/api/products?${params.toString()}`);
+        if (!res.ok) throw new Error("Unable to fetch products");
+        const data = await res.json();
+        if (ignore) return;
+        const normalized = normalizeProductsResponse(data);
+
+        if (Array.isArray(data)) {
+          // Supports older backend responses by applying filters client-side.
+          const hydratedCatalog = paginateProducts(
+            filterAndSortProducts(normalized.items, {
+              query,
+              category,
+              customOnly,
+              minPrice,
+              maxPrice,
+              sort,
+            }),
+            page
+          );
+
+          setCatalog(hydratedCatalog);
+          return;
+        }
+
+        setCatalog(normalized);
+      } catch {
+        if (ignore) return;
+        setCatalog({
+          items: [],
+          total: 0,
+          page: 1,
+          pages: 1,
+        });
+        setError("Unable to load live catalog.");
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    };
+
+    load();
+
+    return () => {
+      ignore = true;
+    };
+  }, [query, category, customOnly, minPrice, maxPrice, sort, page]);
+
+  useEffect(() => {
+    if (catalog.pages > 0 && page > catalog.pages) {
+      const next = new URLSearchParams(searchParams);
+      if (catalog.pages > 1) {
+        next.set("page", String(catalog.pages));
+      } else {
+        next.delete("page");
+      }
+      setSearchParams(next, { replace: true });
+    }
+  }, [catalog.pages, page, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!addedItemId) return undefined;
+    const timer = window.setTimeout(() => setAddedItemId(""), 900);
+    return () => window.clearTimeout(timer);
+  }, [addedItemId]);
+
+  useEffect(() => {
+    if (!cartAnimatingId) return undefined;
+    const timer = window.setTimeout(() => setCartAnimatingId(""), 420);
+    return () => window.clearTimeout(timer);
+  }, [cartAnimatingId]);
+
+  useEffect(() => {
+    if (!wishlistAnimatingId) return undefined;
+    const timer = window.setTimeout(() => setWishlistAnimatingId(""), 420);
+    return () => window.clearTimeout(timer);
+  }, [wishlistAnimatingId]);
+
+  return (
+    <div className="page products-page">
+      <Header
+        onFilterClick={() => setFiltersOpen(true)}
+        isFilterActive={filtersOpen}
+      />
+
+      <div className={`catalog-shell ${filtersOpen ? "filters-open" : ""}`}>
+        <button
+          className={`catalog-sidebar-backdrop ${filtersOpen ? "show" : ""}`}
+          type="button"
+          aria-label="Close filters"
+          onClick={() => setFiltersOpen(false)}
+        />
+
+        <aside
+          className={`catalog-sidebar ${filtersOpen ? "open" : ""}`}
+          aria-label="Product filters"
+        >
+          <div className="catalog-toolbar">
+            <div className="catalog-sidebar-categories">
+              <p className="catalog-sidebar-label">All categories</p>
+              <div className={`catalog-category-dropdown ${categoryMenuOpen ? "open" : ""}`} ref={categoryMenuRef}>
+                <button
+                  type="button"
+                  className="catalog-category-toggle"
+                  aria-haspopup="dialog"
+                  aria-expanded={categoryMenuOpen}
+                  onClick={() => setCategoryMenuOpen((prev) => !prev)}
+                >
+                  <span>{categoryToggleLabel}</span>
+                  <span className="catalog-category-caret" aria-hidden="true">
+                    ▾
+                  </span>
+                </button>
+
+                {categoryMenuOpen && (
+                  <div className="catalog-categories-grid expanded catalog-categories-menu" role="dialog">
+                    <div className="catalog-categories-main">
+                      {CATEGORY_FILTER_TREE.map((item) => {
+                        const isActive = activeMenuCategoryGroup.category === item.category;
+                        return (
+                          <button
+                            key={item.category}
+                            type="button"
+                            className={`catalog-tree-item ${isActive ? "active" : ""}`}
+                            onMouseEnter={() => setActiveMenuCategory(item.category)}
+                            onFocus={() => setActiveMenuCategory(item.category)}
+                            onClick={() => applyCategoryFromMenu(item.category)}
+                          >
+                            <span>{item.category}</span>
+                            <span className="catalog-tree-arrow" aria-hidden="true">
+                              ›
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="catalog-categories-sub">
+                      <div className="catalog-categories-sub-head">
+                        <p>{activeMenuCategoryGroup.category}</p>
+                        <button
+                          className="catalog-view-all-btn"
+                          type="button"
+                          onClick={() => applyCategoryFromMenu(activeMenuCategoryGroup.category)}
+                        >
+                          View all
+                        </button>
+                      </div>
+                      <div className="catalog-categories-sub-list">
+                        {activeMenuCategoryGroup.subcategories.length > 0 ? (
+                          activeMenuCategoryGroup.subcategories.map((item) => {
+                            const isActive = normalizedQuery === item.toLowerCase();
+                            return (
+                              <button
+                                key={`${activeMenuCategoryGroup.category}-${item}`}
+                                type="button"
+                                className={`catalog-sub-item ${isActive ? "active" : ""}`}
+                                onClick={() => applySubcategoryFromMenu(item)}
+                              >
+                                {item}
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <button
+                            type="button"
+                            className="catalog-sub-item"
+                            onClick={() => applySubcategoryFromMenu("")}
+                          >
+                            Shop {activeMenuCategoryGroup.category}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="catalog-toolbar-head">
+              <div>
+                <p className="catalog-filter-title">Filter by</p>
+              </div>
+              <button
+                className="catalog-sidebar-close"
+                type="button"
+                aria-label="Close filters"
+                onClick={() => setFiltersOpen(false)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 6l12 12" />
+                  <path d="M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="catalog-sidebar-section">
+              <p className="catalog-sidebar-label">Sort by</p>
+              <div className="catalog-controls">
+                <select
+                  className="catalog-select"
+                  value={sort}
+                  onChange={(event) =>
+                    updateParams({
+                      sort:
+                        event.target.value === "newest"
+                          ? null
+                          : event.target.value,
+                    })
+                  }
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="price_asc">Price: Low to high</option>
+                  <option value="price_desc">Price: High to low</option>
+                  <option value="name_asc">Name: A to Z</option>
+                  <option value="name_desc">Name: Z to A</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="catalog-sidebar-section catalog-price-section">
+              <p className="catalog-sidebar-label">Filter by price</p>
+              <div className="catalog-price-slider-wrap">
+                <input
+                  className="catalog-price-slider"
+                  type="range"
+                  min={PRICE_FILTER_MIN}
+                  max={PRICE_FILTER_MAX}
+                  step={PRICE_FILTER_STEP}
+                  value={priceSliderValue}
+                  onChange={(event) => {
+                    const nextValue = clampPriceFilterValue(event.target.value);
+                    setPriceSliderValue(nextValue);
+                    updateParams({
+                      minPrice: null,
+                      maxPrice: nextValue >= PRICE_FILTER_MAX ? null : nextValue,
+                    });
+                  }}
+                  aria-label="Maximum price"
+                />
+                <div className="catalog-price-slider-meta">
+                  <p className="catalog-price-slider-value">
+                    Price: <strong>₹{formatPrice(PRICE_FILTER_MIN)}</strong> —{" "}
+                    <strong>₹{formatPrice(priceSliderValue)}</strong>
+                  </p>
+                </div>
+                <div className="catalog-price-quick-list">
+                  <button
+                    className={`catalog-price-quick-btn ${
+                      !minPrice && maxPrice === "2000" ? "active" : ""
+                    }`}
+                    type="button"
+                    onClick={() => {
+                      setPriceSliderValue(2000);
+                      updateParams({ minPrice: null, maxPrice: "2000" });
+                    }}
+                  >
+                    Below ₹2000
+                  </button>
+                  <button
+                    className={`catalog-price-quick-btn ${
+                      minPrice === "2000" && maxPrice === "3000" ? "active" : ""
+                    }`}
+                    type="button"
+                    onClick={() => {
+                      setPriceSliderValue(3000);
+                      updateParams({ minPrice: "2000", maxPrice: "3000" });
+                    }}
+                  >
+                    ₹2000 - ₹3000
+                  </button>
+                  <button
+                    className={`catalog-price-quick-btn ${
+                      minPrice === "3000" && !maxPrice ? "active" : ""
+                    }`}
+                    type="button"
+                    onClick={() => {
+                      setPriceSliderValue(PRICE_FILTER_MAX);
+                      updateParams({ minPrice: "3000", maxPrice: null });
+                    }}
+                  >
+                    Above ₹3000
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="catalog-sidebar-section">
+              <p className="catalog-sidebar-label">Features</p>
+              <label className="catalog-check">
+                <input
+                  type="checkbox"
+                  checked={customOnly}
+                  onChange={(event) =>
+                    updateParams({ custom: event.target.checked ? "1" : null })
+                  }
+                />
+                Customizable only
+              </label>
+            </div>
+
+            <button className="btn ghost catalog-sidebar-reset" type="button" onClick={clearAllFilters}>
+              Reset filters
+            </button>
+          </div>
+        </aside>
+
+        <section className="catalog-results">
+          {(loading || error) && (
+            <div className="catalog-meta">
+              {error && <p className="field-hint">{error}</p>}
+            </div>
+          )}
+          {isSellerAccount && (
+            <div className="catalog-meta">
+              <p className="field-hint">
+                Seller accounts cannot place orders. Login with a customer account to buy.
+              </p>
+            </div>
+          )}
+
+          {catalog.items.length === 0 && !loading ? (
+            <div className="catalog-empty">
+              <h3>No products found</h3>
+            </div>
+          ) : (
+            <div className="product-grid catalog-product-grid">
+              {catalog.items.map((item) => {
+                const sellerName =
+                  item?.seller?.storeName || item?.seller?.name || "Craftzy seller";
+                const livePrice = parsePrice(item?.price);
+                const mrp = parsePrice(item?.mrp);
+                const hasDiscount = mrp > livePrice;
+                const discountPercent = hasDiscount
+                  ? Math.round(((mrp - livePrice) / mrp) * 100)
+                  : 0;
+                const stockCount = Number(item?.stock || 0);
+                const isOutOfStock = stockCount <= 0;
+                const isWishlisted = wishlistIds.has(String(item._id));
+                const itemId = String(item._id);
+                const isWishlistAnimating = wishlistAnimatingId === itemId;
+                const isCartAnimating = cartAnimatingId === itemId;
+                const isAdded = addedItemId === itemId;
+                const disablePurchase = isOutOfStock || isSellerAccount;
+
+                return (
+                  <article key={item._id} className="product-card catalog-product-card">
+                    <div className="catalog-product-media">
+                      {item.isCustomizable && (
+                        <span className="catalog-custom-tag">Customizable</span>
+                      )}
+                      <button
+                        className={`catalog-wishlist-btn ${
+                          isWishlisted ? "active" : ""
+                        } ${isWishlistAnimating ? "is-animating" : ""}`}
+                        type="button"
+                        aria-label={
+                          isWishlisted ? "Remove from wishlist" : "Add to wishlist"
+                        }
+                        onClick={() => updateWishlistForItem(item)}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09A6 6 0 0 1 16.5 3C19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35Z" />
+                        </svg>
+                      </button>
+                      <Link className="catalog-image-link" to={`/products/${item._id}`}>
+                        <img
+                          className="product-image"
+                          src={getProductImage(item)}
+                          alt={item.name}
+                        />
+                      </Link>
+                    </div>
+
+                    <div className="product-body catalog-product-body">
+                      <h3 className="catalog-product-title">
+                        <Link to={`/products/${item._id}`}>{item.name}</Link>
+                      </h3>
+                      <p className="catalog-product-seller">by {sellerName}</p>
+
+                      <div className="catalog-price-row">
+                        <strong className="catalog-price-live">
+                          ₹{formatPrice(livePrice)}
+                        </strong>
+                        {hasDiscount && (
+                          <span className="catalog-price-original">
+                            ₹{formatPrice(mrp)}
+                          </span>
+                        )}
+                        {hasDiscount && (
+                          <span className="catalog-offer">{discountPercent}% off</span>
+                        )}
+                      </div>
+                      <div className="product-flags catalog-stock-flags">
+                        <span className={`status-pill ${isOutOfStock ? "locked" : "available"}`}>
+                          {isOutOfStock ? "Out of stock" : `${stockCount} in stock`}
+                        </span>
+                      </div>
+
+                      <div className="catalog-action-row">
+                        <button
+                          className="catalog-buy-btn"
+                          type="button"
+                          disabled={disablePurchase}
+                          onClick={() =>
+                            navigate(item?._id ? `/products/${item._id}` : "/products")
+                          }
+                        >
+                          {isOutOfStock ? "Out of stock" : "Buy now"}
+                        </button>
+                        <button
+                          className={`catalog-cart-btn ${
+                            isAdded ? "added" : ""
+                          } ${isCartAnimating ? "is-animating" : ""}`}
+                          type="button"
+                          disabled={disablePurchase}
+                          aria-label={
+                            isOutOfStock
+                              ? `${item.name} is out of stock`
+                              : isSellerAccount
+                              ? "Seller accounts cannot add to cart"
+                              : isAdded
+                              ? `${item.name} added to cart`
+                              : "Add to cart"
+                          }
+                          onClick={() => {
+                            addItemToCart(item);
+                          }}
+                        >
+                          {isAdded ? (
+                            <>
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M5 12.5l4 4L19 7.5" />
+                              </svg>
+                              <span>Added</span>
+                            </>
+                          ) : (
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <circle cx="9" cy="20" r="1.4" />
+                              <circle cx="18" cy="20" r="1.4" />
+                              <path d="M3 4h2l2.4 10.1a1.6 1.6 0 0 0 1.56 1.24h8.56a1.6 1.6 0 0 0 1.56-1.24L21 7H7.2" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {catalog.pages > 1 && (
+        <nav className="catalog-pagination" aria-label="Catalog pagination">
+          <button
+            className="catalog-page-nav"
+            type="button"
+            onClick={() => updateParams({ page: Math.max(page - 1, 1) }, false)}
+            disabled={page <= 1 || loading}
+            aria-label="Go to previous page"
+          >
+            <svg className="catalog-page-icon" viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M11.5 4.5L6 10l5.5 5.5" />
+            </svg>
+          </button>
+
+          <ul className="catalog-page-list">
+            {pageItems.map((item, index) => {
+              if (typeof item !== "number") {
+                return (
+                  <li key={`${item}-${index}`} className="catalog-page-ellipsis" aria-hidden="true">
+                    ...
+                  </li>
+                );
+              }
+
+              return (
+                <li key={item}>
+                  <button
+                    className={`catalog-page-btn ${item === page ? "active" : ""}`}
+                    type="button"
+                    onClick={() => updateParams({ page: item }, false)}
+                    disabled={loading}
+                    aria-current={item === page ? "page" : undefined}
+                    aria-label={`Go to page ${item}`}
+                  >
+                    {item}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          <button
+            className="catalog-page-nav"
+            type="button"
+            onClick={() =>
+              updateParams(
+                { page: Math.min(page + 1, catalog.pages) },
+                false
+              )
+            }
+            disabled={page >= catalog.pages || loading}
+            aria-label="Go to next page"
+          >
+            <svg className="catalog-page-icon" viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M8.5 4.5L14 10l-5.5 5.5" />
+            </svg>
+          </button>
+        </nav>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,255 @@
+﻿ 
+ Project Title 
+     
+ 
+ 
+ 
+CraftzyGifts - An Online Gifts  & 
+ Custom Hamper System 
+ 
+ 
+ 
+ 
+ 
+Sr. No  
+CONTENT 
+  
+Page No  
+1  
+Introduction and Objectives  
+3 
+ 
+  
+2  
+Project Category  
+4 
+  
+3  
+Analysis   
+5 
+  
+4  
+Project Structure   
+9 
+  
+5  
+Tools / Platform / Hardware / Software Requirements  
+11 
+  
+6  
+Industry / Client Details  
+12 
+  
+7  
+Scope and Future Enhancements  
+13 
+  
+ 
+ 
+ 
+ 
+ 
+ 	 
+1. Introduction and Objectives of the Project: 
+Introduction: 
+           CraftzyGifts is a Web-based Multi-vendor Marketplace designed for handmade gifts, gift hampers, and craft items. The platform allows multiple crafters (sellers) to sell their products online. Customers can either purchase ready-made hampers or create fully customized gift hampers.The platform ensures quality control and smooth management through the Admin panel, making it a trusted and organized online marketplace. 
+Objectives: 
+1. Allow customers to buy ready-made products or build fully customized hampers. 
+2. Provide home-based crafters an easy-to-use platform to sell handmade products online. 
+3. Include making and decoration charges to cover the manual effort for custom hampers. 
+4. Enable reference image upload to guide sellers in designing the hampers. 
+5. Admin control for monitoring sellers, products, and orders. 
+6. Create a responsive, user-friendly web application for seamless browsing and ordering. 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+2. Project Category: 
+• Category: Web-based Multi-Vendor E-commerce System 
+• Technologies / Stack: MERN Stack o MongoDB: Database storage  o Express.js: Back-end server framework o React.js: Front-end UI development o Node.js: Server-side scripting 
+• Concept: Uses MongoDB collections to store data, CRUD operations, role-based access, and dynamic web pages for product browsing and custom hamper creation. 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+3. Analysis: 
+ Data Flow Diagrams (DFDs): 
+• Level 0 DFD: 
+Customers → Browse / Order → Admin System → Sellers → Order Processing  
+
+        
+ 
+• Level 1 DFD: 
+ 
+Customer Module: 
+o Register/Login o Browse Products o Add to Cart o Place Order o View Orders 
+ 
+Seller Module: 
+o Register/Login o Add/Edit/Delete Products o View Orders o Update Status 
+ 
+Admin Module: 
+o Approve/Reject Sellers o Manage Categories o Monitor Products & Orders 
+                         
+    
+ Level 1 DFD  
+
+   
+• ER DIAGRAM  
+
+ 
+4. Project Structure: 
+Modules & Description: 
+1. Authentication Module 
+o User registration and login  
+o Role-based access (Admin / Seller / Customer) 
+ 
+2. Admin Module 
+o Approve/reject sellers 
+o Manage product categories and view all products o Monitor all orders (ready/custom) o Generate reports (sellers, products, orders) 
+ 
+3. Seller Module o Add/Edit/Delete products 
+o Mark items available for custom hampers o View and update order status 
+ 
+4. Customer Module 
+o Browse products by category/seller o Add to cart, checkout, place orders o View order history 
+5. Custom Hamper Module 
+o Select box/basket type o Choose individual items 
+o Add personal message and Upload reference image o Calculate making and decoration charges  o Submit order 
+ 
+ 
+ 
+Data Structures & Process Logic: 
+• React state arrays for cart and selected hamper items 
+• MongoDB collections for persistent storage Testing Process: 
+• Unit Testing: Each module tested individually (Login, Add Product, Cart) 
+• Integration Testing: Customer → Order → Seller → Admin workflow 
+• UI Testing: React Testing Library and Postman for APIs 
+ 
+Reports Generation: 
+• Admin: Seller list, Product list, Orders, Custom Hampers 
+• Seller: Orders received, Products sold, Earnings 
+• Customer: Order history, Custom hamper details 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+5.Tools / Platform, Hardware and Software Requirements: 
+ 
+Software Requirements: 
+• Node.js & npm 
+• MongoDB 
+• React.js 
+• VS Code 
+• Browser: Chrome 
+   Hardware Requirements: 
+• Processor: Intel i5 
+• RAM: 16 GB 
+• Storage: 238GB  
+• Internet Connection Platform: 
+• Web-based, responsive across desktop and mobile 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+6. Industry / Client: 
+This project is developed as an academic project. 
+    However, the system can be adapted and deployed for small-scale craft businesses or local gift shops in the future.  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+7. Future Scope and Enhancements:  
+   The future scope of CraftzyGifts includes expanding the platform through mobile apps, international shipping, and support for multiple languages and currencies. Enhancements like AI-based product recommendations, AR previews for customized hampers, and subscription services can improve customer experience. 
+   
+   Sellers can benefit from advanced analytics, inventory integration, and marketing tools, while technological upgrades such as AI chatbots, blockchain for product authenticity, and social media integration can boost efficiency and trust. The platform can also grow through corporate gifting, collaborations, and event-based promotions, while promoting sustainability and supporting local artisans. These developments can transform CraftzyGifts into a global, smart, and socially responsible gifting ecosystem. 
+
+
+
+ 
+
+
+2 
+ 
+
+2 
+ 
+
+
+
+
+1
+ 
+
