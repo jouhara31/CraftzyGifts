@@ -263,9 +263,8 @@ export default function ProductDetail() {
       ? sellerProfileImageRaw
       : `${API_URL}/${sellerProfileImageRaw.replace(/^\/+/, "")}`);
   const unitPrice = parsePrice(product?.price);
-  const mrp = Math.max(0, parsePrice(product?.mrp));
-  const hasMrp = mrp > 0;
-  const hasDiscount = hasMrp && mrp > unitPrice;
+  const mrp = parsePrice(product?.mrp);
+  const hasDiscount = mrp > unitPrice;
   const discountPercent = hasDiscount
     ? Math.round(((mrp - unitPrice) / mrp) * 100)
     : 0;
@@ -310,17 +309,7 @@ export default function ProductDetail() {
       ? selectedPackagingCharge
       : Math.max(0, baseMakingCharge)
     : 0;
-  const perItemPrice = unitPrice + effectiveCustomizationCharge;
-  const displayHamperPrice = perItemPrice * quantity;
-  const displayMrp = hasMrp ? mrp * quantity : 0;
-  const displayCustomizationCharge = effectiveCustomizationCharge * quantity;
-  const displayPriceText = formatPrice(displayHamperPrice);
-  const priceDisplayClassName =
-    displayPriceText.length >= 7
-      ? "pdp-price-display tight"
-      : displayPriceText.length >= 5
-        ? "pdp-price-display compact"
-        : "pdp-price-display";
+  const displayHamperPrice = unitPrice + selectedPackagingCharge;
 
   useEffect(() => {
     setSelectedOccasion((prev) =>
@@ -615,28 +604,27 @@ export default function ProductDetail() {
               </div>
 
               <div className="pdp-hero-price">
-                <div className="pdp-price-headline">
-                  <p className={priceDisplayClassName}>₹{displayPriceText}</p>
-                  {hasDiscount && <span className="pdp-discount-inline">-{discountPercent}%</span>}
-                </div>
+                <p className="pdp-price-display">₹{formatPrice(displayHamperPrice)}/-</p>
                 <div className="pdp-price-meta-card">
-                  {hasMrp && (
-                    <p className="pdp-mrp-line">
-                      <span>M.R.P.</span> <del>₹{formatPrice(displayMrp)}</del>
+                  {hasDiscount ? (
+                    <p>
+                      <span>-{discountPercent}%</span> off on M.R.P. ₹{formatPrice(mrp)}
                     </p>
+                  ) : (
+                    <p>M.R.P. ₹{formatPrice(unitPrice)}</p>
                   )}
                   {isCustomizationEnabled &&
                   hasCustomizationSelection &&
                   baseMakingCharge > 0 &&
                   !hasChargeablePackagingStyle ? (
-                    <p>+ ₹{formatPrice(displayCustomizationCharge)} customization charge</p>
+                    <p>+ ₹{formatPrice(baseMakingCharge)} customization charge</p>
                   ) : (
                     <p>Inclusive of all taxes</p>
                   )}
                   {isCustomizationEnabled &&
                     hasCustomizationSelection &&
                     selectedPackagingCharge > 0 && (
-                    <p>+ ₹{formatPrice(displayCustomizationCharge)} packaging style</p>
+                    <p>+ ₹{formatPrice(selectedPackagingCharge)} packaging style</p>
                   )}
                   <p className="pdp-price-meta-sub">
                     {deliveryWindowText
