@@ -490,11 +490,19 @@ exports.getPublicSellerStore = async (req, res) => {
       return res.status(400).json({ message: "Seller id is required." });
     }
 
-    const seller = await User.findOne({
+    const requesterId = String(req.user?.id || "").trim();
+    const isOwner = requesterId && requesterId === sellerId;
+    const sellerFilter = {
       _id: sellerId,
       role: "seller",
-      sellerStatus: "approved",
-    }).select("name storeName profileImage about supportEmail phone pickupAddress");
+    };
+    if (!isOwner) {
+      sellerFilter.sellerStatus = "approved";
+    }
+
+    const seller = await User.findOne(sellerFilter).select(
+      "name storeName profileImage storeCoverImage about supportEmail phone pickupAddress createdAt"
+    );
     if (!seller) {
       return res.status(404).json({ message: "Seller store not found." });
     }

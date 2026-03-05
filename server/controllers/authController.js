@@ -53,6 +53,7 @@ exports.login = async (req, res) => {
       message: "Login successful",
       token,
       user: {
+        id: String(user._id || ""),
         name: user.name,
         email: user.email,
         role: user.role,
@@ -61,6 +62,7 @@ exports.login = async (req, res) => {
         phone: user.phone,
         supportEmail: user.supportEmail,
         profileImage: user.profileImage,
+        storeCoverImage: user.storeCoverImage,
       },
     });
   } catch (error) {

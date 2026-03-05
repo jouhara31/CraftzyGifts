@@ -21,6 +21,21 @@ const readStoredUser = () => {
   }
 };
 
+const readUserIdFromToken = () => {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) return "";
+    const payload = token.split(".")?.[1];
+    if (!payload) return "";
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const decoded = JSON.parse(atob(padded));
+    return String(decoded?.id || "").trim();
+  } catch {
+    return "";
+  }
+};
+
 const persistUserToStorage = (nextUser) => {
   if (!nextUser || typeof nextUser !== "object") return;
   const profileImage = typeof nextUser.profileImage === "string" ? nextUser.profileImage : "";
@@ -133,12 +148,16 @@ export default function SellerDashboard() {
       ).length;
       persistUserToStorage({
         ...existingUser,
+        id: profileData.id,
         name: profileData.name,
         email: profileData.email,
         role: profileData.role,
         sellerStatus: profileData.sellerStatus,
         storeName: profileData.storeName,
+        phone: profileData.phone,
+        supportEmail: profileData.supportEmail,
         profileImage: profileData.profileImage,
+        storeCoverImage: profileData.storeCoverImage,
         sellerPendingOrders: pendingOrders,
       });
       window.dispatchEvent(new Event("user:updated"));
@@ -320,6 +339,55 @@ export default function SellerDashboard() {
     navigate(`/products/${productId}`);
   };
 
+  const openMyStore = async (withEdit = false) => {
+    setError("");
+    setNotice("");
+    const fallbackUser = readStoredUser();
+    let ownSellerId = String(
+      sellerProfile?.id || sellerProfile?._id || fallbackUser?.id || fallbackUser?._id || ""
+    ).trim();
+    if (!ownSellerId) {
+      ownSellerId = readUserIdFromToken();
+    }
+    if (!ownSellerId) {
+      const token = localStorage.getItem("token");
+      if (token) {
+        try {
+          const res = await fetch(`${API_URL}/api/users/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await res.json();
+          if (res.ok) {
+            ownSellerId = String(data?.id || data?._id || "").trim();
+            if (ownSellerId) {
+              setSellerProfile(data);
+              persistUserToStorage({
+                ...fallbackUser,
+                id: ownSellerId,
+                name: data.name,
+                email: data.email,
+                role: data.role,
+                sellerStatus: data.sellerStatus,
+                storeName: data.storeName,
+                phone: data.phone,
+                supportEmail: data.supportEmail,
+                profileImage: data.profileImage,
+                storeCoverImage: data.storeCoverImage,
+              });
+            }
+          }
+        } catch {
+          // Fallback handled below.
+        }
+      }
+    }
+    if (!ownSellerId) {
+      setError("Unable to open store now. Please refresh dashboard once.");
+      return;
+    }
+    navigate(`/store/${ownSellerId}${withEdit ? "?edit=1" : ""}`);
+  };
+
   return (
     <div className="page seller-page">
       <Header variant="seller" />
@@ -341,6 +409,12 @@ export default function SellerDashboard() {
         <div className="seller-actions">
           <button className="btn primary" type="button" onClick={() => goToProducts({ new: true })}>
             Add new product
+          </button>
+          <button className="btn ghost" type="button" onClick={() => openMyStore(false)}>
+            View my store
+          </button>
+          <button className="btn ghost" type="button" onClick={() => openMyStore(true)}>
+            Edit store profile
           </button>
           <button className="btn ghost" type="button" onClick={downloadReport}>
             Download report

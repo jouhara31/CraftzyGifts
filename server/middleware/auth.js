@@ -18,6 +18,20 @@ const auth = (req, res, next) => {
   }
 };
 
+const optionalAuth = (req, _res, next) => {
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token) return next();
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "secret123");
+    req.user = { id: decoded.id, role: decoded.role };
+  } catch {
+    // Ignore invalid token for optional auth routes.
+  }
+  return next();
+};
+
 const requireRole = (...roles) => (req, res, next) => {
   if (!req.user || !roles.includes(req.user.role)) {
     return res.status(403).json({ message: "Forbidden" });
@@ -47,4 +61,4 @@ const requireApprovedSeller = async (req, res, next) => {
   }
 };
 
-module.exports = { auth, requireRole, requireApprovedSeller };
+module.exports = { auth, optionalAuth, requireRole, requireApprovedSeller };

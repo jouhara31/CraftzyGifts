@@ -247,7 +247,7 @@ export default function ProductDetail() {
   );
 
   const sellerName = product?.seller?.storeName || product?.seller?.name || "";
-  const sellerId = String(product?.seller?._id || "").trim();
+  const sellerId = String(product?.seller?._id || product?.seller || "").trim();
   const sellerProfile =
     sellerStoreData?.seller && typeof sellerStoreData.seller === "object"
       ? sellerStoreData.seller

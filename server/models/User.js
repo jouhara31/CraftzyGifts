@@ -20,6 +20,7 @@ const userSchema = new mongoose.Schema(
     supportEmail: { type: String },
     about: { type: String },
     profileImage: { type: String },
+    storeCoverImage: { type: String },
     pickupAddress: {
       line1: { type: String },
       city: { type: String },

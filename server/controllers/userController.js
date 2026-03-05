@@ -1,6 +1,6 @@
 const User = require("../models/User");
 
-const normalizeProfileImage = (value, fallback = "") => {
+const normalizeImageValue = (value, fallback = "") => {
   if (typeof value !== "string") return fallback;
   const text = String(value || "").trim();
   if (!text) return "";
@@ -12,6 +12,7 @@ const normalizeProfileImage = (value, fallback = "") => {
 };
 
 const toProfilePayload = (user) => ({
+  id: String(user._id || ""),
   name: user.name,
   email: user.email,
   role: user.role,
@@ -22,13 +23,14 @@ const toProfilePayload = (user) => ({
   supportEmail: user.supportEmail,
   about: user.about,
   profileImage: user.profileImage || "",
+  storeCoverImage: user.storeCoverImage || "",
   pickupAddress: user.pickupAddress || {},
 });
 
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "name email role createdAt phone storeName sellerStatus supportEmail about profileImage pickupAddress"
+      "name email role createdAt phone storeName sellerStatus supportEmail about profileImage storeCoverImage pickupAddress"
     );
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(toProfilePayload(user));
@@ -39,7 +41,16 @@ exports.getMe = async (req, res) => {
 
 exports.updateMe = async (req, res) => {
   try {
-    const { name, phone, storeName, supportEmail, about, profileImage, pickupAddress } = req.body;
+    const {
+      name,
+      phone,
+      storeName,
+      supportEmail,
+      about,
+      profileImage,
+      storeCoverImage,
+      pickupAddress,
+    } = req.body;
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -49,7 +60,10 @@ exports.updateMe = async (req, res) => {
     if (typeof supportEmail === "string") user.supportEmail = supportEmail.trim();
     if (typeof about === "string") user.about = about.trim();
     if (typeof profileImage === "string") {
-      user.profileImage = normalizeProfileImage(profileImage, user.profileImage || "");
+      user.profileImage = normalizeImageValue(profileImage, user.profileImage || "");
+    }
+    if (typeof storeCoverImage === "string") {
+      user.storeCoverImage = normalizeImageValue(storeCoverImage, user.storeCoverImage || "");
     }
 
     if (pickupAddress && typeof pickupAddress === "object") {

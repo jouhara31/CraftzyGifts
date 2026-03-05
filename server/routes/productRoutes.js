@@ -10,11 +10,11 @@ const {
   updateProduct,
   deleteProduct,
 } = require("../controllers/productController");
-const { auth, requireRole, requireApprovedSeller } = require("../middleware/auth");
+const { auth, optionalAuth, requireRole, requireApprovedSeller } = require("../middleware/auth");
 
 router.get("/", getProducts);
 router.get("/seller/me", auth, requireRole("seller"), requireApprovedSeller, getSellerProducts);
-router.get("/seller/:sellerId/public", getPublicSellerStore);
+router.get("/seller/:sellerId/public", optionalAuth, getPublicSellerStore);
 router.get(
   "/customization-options",
   auth,
