@@ -7056,7 +7056,7 @@ button {
 .seller-store-brand-row {
   position: relative;
   min-height: 72px;
-  margin-top: -26px;
+  margin-top: -14px;
   padding-left: calc(72px + 12px);
 }
 
@@ -7557,7 +7557,7 @@ button {
     display: grid;
     grid-template-columns: 1fr;
     justify-items: start;
-    margin-top: -22px;
+    margin-top: -12px;
   }
 
   .seller-store-brand-copy {
