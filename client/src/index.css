@@ -5287,6 +5287,7 @@ button {
   min-width: 0;
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 9px;
 }
 
@@ -5317,6 +5318,10 @@ button {
   color: #2b1f21;
   font-size: 1.05rem;
   font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pdp-inline-seller-about {
