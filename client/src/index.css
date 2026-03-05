@@ -7007,7 +7007,7 @@ button {
   min-height: 42px;
   padding: 0 20px;
   border-radius: 999px;
-  border: 1px solid rgba(69, 44, 52, 0.34);
+  border: 0;
   font-size: 0.84rem;
   font-weight: 700;
   letter-spacing: 0.03em;
@@ -7024,7 +7024,6 @@ button {
 .seller-store-headline-actions button.btn.ghost {
   background: transparent;
   color: #2f2427;
-  border-color: rgba(69, 44, 52, 0.34);
   box-shadow: none;
 }
 
@@ -7032,7 +7031,6 @@ button {
 .seller-store-headline-actions button.btn.primary {
   background: transparent;
   color: #4f1622;
-  border-color: rgba(79, 22, 34, 0.52);
   box-shadow: none;
 }
 
