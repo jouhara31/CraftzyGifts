@@ -691,7 +691,7 @@ export default function SellerStore() {
               </article>
 
               <aside className="seller-store-owner-card">
-                <p className="seller-store-owner-title">Shop Owner</p>
+                <p className="seller-store-owner-title">{sellerName}</p>
                 <div className="seller-store-owner-photo" aria-hidden="true">
                   {sellerProfileImage ? <img src={sellerProfileImage} alt="" /> : sellerInitial}
                 </div>
