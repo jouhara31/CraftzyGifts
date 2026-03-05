@@ -7119,10 +7119,6 @@ button {
   padding-left: calc(72px + 12px);
 }
 
-.seller-store-brand-row.is-editing .seller-store-brand-edit {
-  margin-top: 14px;
-}
-
 .seller-store-brand-copy,
 .seller-store-brand-edit {
   min-width: 0;
@@ -7258,7 +7254,6 @@ button {
   padding: 0;
   display: grid;
   place-items: center;
-  border-radius: 999px;
 }
 
 .seller-store-avatar-edit svg {
@@ -7645,10 +7640,6 @@ button {
     grid-template-columns: 1fr;
     justify-items: start;
     margin-top: -12px;
-  }
-
-  .seller-store-brand-row.is-editing .seller-store-brand-edit {
-    margin-top: 0;
   }
 
   .seller-store-brand-copy {

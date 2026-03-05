@@ -590,7 +590,7 @@ export default function SellerStore() {
                   ) : null}
                 </div>
                 <div className="seller-store-main-body">
-                  <div className={`seller-store-brand-row ${isOwnerSeller && editMode ? "is-editing" : ""}`}>
+                  <div className="seller-store-brand-row">
                     <div className={`seller-store-avatar ${isOwnerSeller && editMode ? "is-editable" : ""}`} aria-hidden="true">
                       {sellerProfileImage ? <img src={sellerProfileImage} alt="" /> : sellerInitial}
                       {isOwnerSeller && editMode ? (
@@ -603,7 +603,7 @@ export default function SellerStore() {
                           >
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                               <path
-                                d="M4 16.8V20h3.2l9.4-9.4-3.2-3.2L4 16.8Zm14.8-8.6a.85.85 0 0 0 0-1.2l-1.8-1.8a.85.85 0 0 0-1.2 0L14.3 6.7l3.2 3.2 1.3-1.7Z"
+                                d="M4 16.9V20h3.1l9.4-9.4-3.1-3.1L4 16.9Zm14.7-8.5a.9.9 0 0 0 0-1.2l-1.9-1.9a.9.9 0 0 0-1.2 0l-1.5 1.5 3.1 3.1 1.5-1.5Z"
                                 fill="currentColor"
                               />
                             </svg>
