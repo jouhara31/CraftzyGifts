@@ -607,11 +607,11 @@ export default function ProductDetail() {
                 <p className="pdp-price-display">₹{formatPrice(displayHamperPrice)}/-</p>
                 <div className="pdp-price-meta-card">
                   {hasDiscount ? (
-                    <p>
+                    <p className="pdp-mrp-discount-line">
                       <span>-{discountPercent}%</span> off on M.R.P. ₹{formatPrice(mrp)}
                     </p>
                   ) : (
-                    <p>M.R.P. ₹{formatPrice(unitPrice)}</p>
+                    <p className="pdp-mrp-discount-line">M.R.P. ₹{formatPrice(unitPrice)}</p>
                   )}
                   {isCustomizationEnabled &&
                   hasCustomizationSelection &&
