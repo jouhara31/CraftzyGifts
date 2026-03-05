@@ -7054,16 +7054,22 @@ button {
 }
 
 .seller-store-brand-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
+  position: relative;
+  min-height: 72px;
   margin-top: -26px;
+  padding-left: calc(72px + 12px);
 }
 
 .seller-store-brand-copy,
 .seller-store-brand-edit {
   min-width: 0;
+}
+
+.seller-store-brand-copy {
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .seller-store-brand-copy h3 {
@@ -7095,7 +7101,10 @@ button {
   box-shadow: 0 6px 20px rgba(13, 52, 62, 0.18);
   overflow: hidden;
   flex-shrink: 0;
-  position: relative;
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
 }
 
 .seller-store-avatar img {
@@ -7543,9 +7552,20 @@ button {
   }
 
   .seller-store-brand-row {
+    min-height: 0;
+    padding-left: 0;
+    display: grid;
     grid-template-columns: 1fr;
     justify-items: start;
     margin-top: -22px;
+  }
+
+  .seller-store-brand-copy {
+    min-height: 0;
+  }
+
+  .seller-store-avatar {
+    position: static;
   }
 
   .seller-store-inline-form {
