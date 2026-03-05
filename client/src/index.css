@@ -6973,15 +6973,19 @@ button {
   border-radius: 20px;
   padding: 16px;
   display: grid;
-  gap: 14px;
+  gap: 8px;
 }
 
 .seller-store-headline {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: flex-end;
   gap: 10px;
-  padding: 4px 2px;
+  padding: 0;
+}
+
+.seller-store-headline > div:first-child {
+  display: none;
 }
 
 .seller-store-headline-actions {
@@ -7036,7 +7040,7 @@ button {
 }
 
 .seller-store-cover {
-  height: 170px;
+  height: 220px;
   background: linear-gradient(120deg, #dbe7ea 0%, #edf1f3 100%);
   position: relative;
 }
