@@ -7113,10 +7113,11 @@ button {
 }
 
 .seller-store-brand-row {
-  position: relative;
-  min-height: 72px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
   margin-top: -14px;
-  padding-left: calc(72px + 12px);
 }
 
 .seller-store-brand-copy,
@@ -7158,12 +7159,9 @@ button {
   background: linear-gradient(145deg, rgba(9, 95, 104, 0.2), rgba(173, 226, 233, 0.5));
   border: 3px solid rgba(255, 255, 255, 0.92);
   box-shadow: 0 6px 20px rgba(13, 52, 62, 0.18);
-  overflow: visible;
+  overflow: hidden;
   flex-shrink: 0;
-  position: absolute;
-  left: 0;
-  top: 0;
-  z-index: 2;
+  position: relative;
 }
 
 .seller-store-avatar img {
@@ -7180,7 +7178,6 @@ button {
   flex-wrap: wrap;
   gap: 10px 20px;
   margin-top: 12px;
-  padding-left: calc(72px + 12px);
 }
 
 .seller-store-kpi {
@@ -7285,7 +7282,7 @@ button {
 }
 
 .seller-store-brand-row.is-editing .seller-store-brand-edit {
-  margin-top: 14px;
+  margin-top: 25px;
 }
 
 .seller-store-brand-edit input,
