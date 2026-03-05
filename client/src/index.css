@@ -7243,8 +7243,21 @@ button {
 }
 
 .seller-store-cover-edit {
-  right: 10px;
-  bottom: 10px;
+  width: 22px;
+  height: 22px;
+  right: 8px;
+  bottom: -6px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  box-shadow: 0 2px 5px rgba(9, 35, 42, 0.28);
+}
+
+.seller-store-cover-edit svg {
+  width: 12px;
+  height: 12px;
+  display: block;
 }
 
 .seller-store-avatar-edit {

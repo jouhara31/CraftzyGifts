@@ -577,7 +577,12 @@ export default function SellerStore() {
                         onClick={() => coverInputRef.current?.click()}
                         aria-label="Edit store cover"
                       >
-                        Edit cover
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path
+                            d="M4 16.9V20h3.1l9.4-9.4-3.1-3.1L4 16.9Zm14.7-8.5a.9.9 0 0 0 0-1.2l-1.9-1.9a.9.9 0 0 0-1.2 0l-1.5 1.5 3.1 3.1 1.5-1.5Z"
+                            fill="currentColor"
+                          />
+                        </svg>
                       </button>
                       <input
                         ref={coverInputRef}
