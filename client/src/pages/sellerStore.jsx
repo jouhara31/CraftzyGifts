@@ -263,10 +263,11 @@ export default function SellerStore() {
   }, [isOwnerSeller, editRequested, sellerDraftSeed]);
 
   const sellerName = String(seller?.storeName || seller?.name || "Seller Store").trim();
+  const sellerOwnerName = String(seller?.name || seller?.storeName || "Seller").trim();
   const sellerAbout =
     String(seller?.about || "").trim() ||
     "Handmade gifting collections with curated items and custom options.";
-  const sellerInitial = sellerName.charAt(0).toUpperCase() || "S";
+  const sellerInitial = sellerOwnerName.charAt(0).toUpperCase() || "S";
   const sellerEmail = String(seller?.supportEmail || "").trim();
   const sellerPhone = String(seller?.phone || "").trim();
   const phoneHref = toPhoneHref(sellerPhone);
@@ -691,11 +692,11 @@ export default function SellerStore() {
               </article>
 
               <aside className="seller-store-owner-card">
-                <p className="seller-store-owner-title">{sellerName}</p>
+                <p className="seller-store-owner-title">{sellerOwnerName}</p>
                 <div className="seller-store-owner-photo" aria-hidden="true">
                   {sellerProfileImage ? <img src={sellerProfileImage} alt="" /> : sellerInitial}
                 </div>
-                <p className="seller-store-owner-name">{sellerName}</p>
+                <p className="seller-store-owner-name">{sellerOwnerName}</p>
                 <div className="seller-store-owner-contacts">
                   {sellerPhone ? <span>{sellerPhone}</span> : null}
                   {sellerEmail ? <span>{sellerEmail}</span> : null}
