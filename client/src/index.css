@@ -6993,12 +6993,10 @@ button {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(66, 40, 46, 0.14);
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(246, 241, 238, 0.72));
-  box-shadow: 0 12px 26px rgba(48, 28, 35, 0.14);
-  backdrop-filter: blur(8px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .seller-store-headline-actions .btn,
@@ -7009,10 +7007,12 @@ button {
   min-height: 42px;
   padding: 0 20px;
   border-radius: 999px;
-  border: 1px solid transparent;
+  border: 1px solid rgba(69, 44, 52, 0.34);
   font-size: 0.84rem;
   font-weight: 700;
   letter-spacing: 0.03em;
+  background: transparent;
+  color: #2f2427;
   transition:
     transform 0.18s ease,
     box-shadow 0.18s ease,
@@ -7022,18 +7022,18 @@ button {
 
 .seller-store-headline-actions .btn.ghost,
 .seller-store-headline-actions button.btn.ghost {
-  background: rgba(255, 255, 255, 0.94);
-  color: #3f2b31;
-  border-color: rgba(82, 45, 56, 0.2);
-  box-shadow: 0 4px 10px rgba(48, 28, 35, 0.08);
+  background: transparent;
+  color: #2f2427;
+  border-color: rgba(69, 44, 52, 0.34);
+  box-shadow: none;
 }
 
 .seller-store-headline-actions .btn.primary,
 .seller-store-headline-actions button.btn.primary {
-  background: linear-gradient(135deg, #7b1c26 0%, #4f1622 100%);
-  color: #fff;
-  border-color: rgba(68, 15, 28, 0.42);
-  box-shadow: 0 8px 16px rgba(72, 18, 32, 0.26);
+  background: transparent;
+  color: #4f1622;
+  border-color: rgba(79, 22, 34, 0.52);
+  box-shadow: none;
 }
 
 .seller-store-headline-actions .btn:hover,
@@ -7043,13 +7043,14 @@ button {
 
 .seller-store-headline-actions .btn.primary:hover,
 .seller-store-headline-actions button.btn.primary:hover {
-  box-shadow: 0 12px 20px rgba(72, 18, 32, 0.32);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 6px 14px rgba(38, 24, 30, 0.14);
 }
 
 .seller-store-headline-actions .btn.ghost:hover,
 .seller-store-headline-actions button.btn.ghost:hover {
-  background: #ffffff;
-  box-shadow: 0 8px 14px rgba(48, 28, 35, 0.12);
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: 0 6px 12px rgba(38, 24, 30, 0.1);
 }
 
 .seller-store-headline-actions .btn:focus-visible,
