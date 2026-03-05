@@ -7061,10 +7061,18 @@ button {
   margin-top: -26px;
 }
 
+.seller-store-brand-copy,
+.seller-store-brand-edit {
+  min-width: 0;
+}
+
 .seller-store-brand-copy h3 {
   margin: 0;
   color: #1f2c31;
   font-family: var(--font-display);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .seller-store-brand-copy p {
@@ -7103,6 +7111,7 @@ button {
   flex-wrap: wrap;
   gap: 10px 20px;
   margin-top: 12px;
+  padding-left: calc(72px + 12px);
 }
 
 .seller-store-kpi {
@@ -7545,6 +7554,7 @@ button {
 
   .seller-store-kpi-row {
     gap: 8px 12px;
+    padding-left: 0;
   }
 
   .seller-store-follow-btn {
