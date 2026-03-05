@@ -7037,17 +7037,17 @@ button {
 .seller-store-headline-actions .btn:hover,
 .seller-store-headline-actions button:hover {
   transform: translateY(-1px);
+  background: transparent !important;
+  color: #ffffff !important;
 }
 
 .seller-store-headline-actions .btn.primary:hover,
 .seller-store-headline-actions button.btn.primary:hover {
-  background: rgba(255, 255, 255, 0.72);
   box-shadow: 0 6px 14px rgba(38, 24, 30, 0.14);
 }
 
 .seller-store-headline-actions .btn.ghost:hover,
 .seller-store-headline-actions button.btn.ghost:hover {
-  background: rgba(255, 255, 255, 0.58);
   box-shadow: 0 6px 12px rgba(38, 24, 30, 0.1);
 }
 
