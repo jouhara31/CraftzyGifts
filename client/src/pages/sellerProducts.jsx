@@ -4,6 +4,9 @@ import Header from "../components/Header";
 import { getProductImage } from "../utils/productMedia";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const MAX_SELLING_PRICE = 200000;
+const MAX_MRP = 500000;
+const MAX_SURCHARGE = 50000;
 const LEGACY_OPTION_LABELS = {
   giftBoxes: "Gift boxes",
   chocolates: "Chocolates",
@@ -11,6 +14,8 @@ const LEGACY_OPTION_LABELS = {
   perfumes: "Perfumes",
   cards: "Cards",
 };
+
+const roundMoney = (value) => Math.round(Number(value || 0) * 100) / 100;
 
 const createId = (prefix) =>
   `${prefix}_${Math.random().toString(36).slice(2, 9)}_${Date.now()
@@ -265,7 +270,7 @@ const toPayloadPackagingStyles = (styles = []) =>
         id: String(style?.id || createId(`pack_${index}`)),
         title,
         detail: String(style?.detail || "").trim(),
-        extraCharge: Number.isFinite(extraCharge) && extraCharge >= 0 ? extraCharge : 0,
+        extraCharge,
         active: style?.active !== false,
       };
     })
@@ -371,8 +376,8 @@ const buildInitialProductForm = () => ({
 });
 
 const buildProductPayload = (formState) => {
-  const price = Number(formState.price);
-  const parsedMrp = Number(formState.mrp);
+  const price = roundMoney(formState.price);
+  const parsedMrp = roundMoney(formState.mrp);
   const parsedDeliveryMin = Number.parseInt(formState.deliveryMinDays, 10);
   const parsedDeliveryMax = Number.parseInt(formState.deliveryMaxDays, 10);
   const deliveryMinDays = Number.isInteger(parsedDeliveryMin)
@@ -390,18 +395,18 @@ const buildProductPayload = (formState) => {
     category: formState.category.trim(),
     price,
     mrp:
-      Number.isFinite(parsedMrp) && parsedMrp > 0
-        ? Math.max(parsedMrp, Number.isFinite(price) ? price : 0)
-        : 0,
+      Number.isFinite(parsedMrp) && parsedMrp > 0 ? parsedMrp : 0,
     stock: Number(formState.stock),
     deliveryMinDays,
     deliveryMaxDays,
     occasions: normalizeTextAreaLines(formState.occasionsText, 8),
     includedItems: normalizeTextAreaLines(formState.includedItemsText, 20),
     highlights: normalizeTextAreaLines(formState.highlightsText, 20),
-    packagingStyles: toPayloadPackagingStyles(formState.packagingStyles),
+    packagingStyles: formState.isCustomizable
+      ? toPayloadPackagingStyles(formState.packagingStyles)
+      : [],
     isCustomizable: Boolean(formState.isCustomizable),
-    makingCharge: formState.isCustomizable ? Number(formState.makingCharge || 0) : 0,
+    makingCharge: formState.isCustomizable ? roundMoney(formState.makingCharge || 0) : 0,
     status: formState.status === "inactive" ? "inactive" : "active",
     images: formState.imageData ? [formState.imageData] : [],
     customizationCatalog: formState.isCustomizable
@@ -415,8 +420,14 @@ const validatePayload = (payload) => {
   if (!Number.isFinite(payload.price) || payload.price <= 0) {
     return "Price must be greater than zero.";
   }
+  if (payload.price > MAX_SELLING_PRICE) {
+    return `Price cannot exceed ₹${MAX_SELLING_PRICE.toLocaleString("en-IN")}.`;
+  }
   if (!Number.isFinite(payload.mrp) || payload.mrp < 0) {
     return "MRP cannot be negative.";
+  }
+  if (payload.mrp > MAX_MRP) {
+    return `MRP cannot exceed ₹${MAX_MRP.toLocaleString("en-IN")}.`;
   }
   if (payload.mrp > 0 && payload.mrp < payload.price) {
     return "MRP must be greater than or equal to selling price.";
@@ -440,14 +451,36 @@ const validatePayload = (payload) => {
   if (!Number.isFinite(payload.makingCharge) || payload.makingCharge < 0) {
     return "Making charge cannot be negative.";
   }
-  const hasInvalidPackagingStyle = (payload.packagingStyles || []).some(
-    (style) =>
-      !style.title ||
-      !Number.isFinite(style.extraCharge) ||
-      Number(style.extraCharge) < 0
-  );
-  if (hasInvalidPackagingStyle) {
-    return "Please provide valid packaging style title and non-negative extra charge.";
+  if (payload.isCustomizable && payload.makingCharge > MAX_SURCHARGE) {
+    return `Making charge cannot exceed ₹${MAX_SURCHARGE.toLocaleString("en-IN")}.`;
+  }
+  if (!payload.isCustomizable && payload.makingCharge > 0) {
+    return "Making charge is only allowed for customizable products.";
+  }
+  if ((payload.packagingStyles || []).length > 12) {
+    return "You can add up to 12 packaging styles only.";
+  }
+  const titleSet = new Set();
+  for (const style of payload.packagingStyles || []) {
+    const title = String(style?.title || "").trim();
+    if (!title) {
+      return "Please provide a title for each packaging style.";
+    }
+    const normalizedTitle = title.toLowerCase();
+    if (titleSet.has(normalizedTitle)) {
+      return "Packaging style titles must be unique.";
+    }
+    titleSet.add(normalizedTitle);
+
+    if (!Number.isFinite(style.extraCharge)) {
+      return `Packaging style "${title}" has an invalid extra charge.`;
+    }
+    if (Number(style.extraCharge) < 0) {
+      return `Packaging style "${title}" cannot have a negative extra charge.`;
+    }
+    if (Number(style.extraCharge) > MAX_SURCHARGE) {
+      return `Packaging style "${title}" cannot exceed ₹${MAX_SURCHARGE.toLocaleString("en-IN")}.`;
+    }
   }
   return "";
 };

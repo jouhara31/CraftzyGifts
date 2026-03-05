@@ -2,6 +2,10 @@ const Product = require("../models/Product");
 const User = require("../models/User");
 const { ensureCustomizationMaster } = require("../utils/customizationMaster");
 
+const MAX_SELLING_PRICE = 200000;
+const MAX_MRP = 500000;
+const MAX_SURCHARGE = 50000;
+
 const escapeRegex = (value = "") =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -27,16 +31,26 @@ const parseBoolean = (value, fallback = false) => {
   return fallback;
 };
 
+const roundMoney = (value) => Math.round(Number(value || 0) * 100) / 100;
+
+const parseMoneyInput = (value, fallback = 0) => {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === "string" && !value.trim()) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return Number.NaN;
+  return roundMoney(parsed);
+};
+
 const parseMakingCharge = (value, fallback = 0) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
-  return parsed;
+  return roundMoney(parsed);
 };
 
 const parsePrice = (value, fallback = 0) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
-  return parsed;
+  return roundMoney(parsed);
 };
 
 const parseBoundedInt = (
@@ -82,6 +96,41 @@ const parsePackagingStyles = (value, fallback = []) => {
     })
     .filter(Boolean)
     .slice(0, 12);
+};
+
+const validatePackagingStylesInput = (value, { isCustomizable = true } = {}) => {
+  if (value === undefined || value === null) return "";
+  if (!Array.isArray(value)) return "Packaging styles must be a valid array.";
+  if (value.length > 12) return "You can add up to 12 packaging styles only.";
+  if (!isCustomizable && value.length > 0) {
+    return "Packaging styles are allowed only for customizable products.";
+  }
+
+  const seenTitles = new Set();
+  for (let index = 0; index < value.length; index += 1) {
+    const style = value[index] || {};
+    const title = String(style?.title || style?.name || "").trim();
+    if (!title) return `Packaging style ${index + 1} title is required.`;
+
+    const normalizedTitle = title.toLowerCase();
+    if (seenTitles.has(normalizedTitle)) {
+      return "Packaging style titles must be unique.";
+    }
+    seenTitles.add(normalizedTitle);
+
+    const extraCharge = parseMoneyInput(style?.extraCharge, 0);
+    if (!Number.isFinite(extraCharge)) {
+      return `Packaging style "${title}" has an invalid extra charge.`;
+    }
+    if (extraCharge < 0) {
+      return `Packaging style "${title}" cannot have a negative extra charge.`;
+    }
+    if (extraCharge > MAX_SURCHARGE) {
+      return `Packaging style "${title}" cannot exceed ₹${MAX_SURCHARGE.toLocaleString("en-IN")}.`;
+    }
+  }
+
+  return "";
 };
 
 const parseProductStatus = (value, fallback = "active") => {
@@ -515,14 +564,55 @@ exports.getCustomizationMasterOptions = async (req, res) => {
 
 exports.createProduct = async (req, res) => {
   try {
-    const price = parsePrice(req.body.price, 0);
+    const price = parseMoneyInput(req.body.price, 0);
+    if (!Number.isFinite(price)) {
+      return res.status(400).json({ message: "Price must be a valid number." });
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      return res.status(400).json({ message: "Price must be greater than zero." });
+    }
+    if (price > MAX_SELLING_PRICE) {
+      return res.status(400).json({
+        message: `Price cannot exceed ₹${MAX_SELLING_PRICE.toLocaleString("en-IN")}.`,
+      });
+    }
+
     const stock = parseStock(req.body.stock, 0);
     const isCustomizable = parseBoolean(req.body.isCustomizable, false);
-    const makingCharge = isCustomizable
-      ? parseMakingCharge(req.body.makingCharge, 0)
+    const makingChargeInput = isCustomizable
+      ? parseMoneyInput(req.body.makingCharge, 0)
       : 0;
-    const parsedMrp = parsePrice(req.body.mrp, 0);
-    const mrp = parsedMrp > 0 ? Math.max(parsedMrp, price) : 0;
+    if (isCustomizable && !Number.isFinite(makingChargeInput)) {
+      return res.status(400).json({ message: "Making charge must be a valid number." });
+    }
+    if (isCustomizable && makingChargeInput < 0) {
+      return res.status(400).json({ message: "Making charge cannot be negative." });
+    }
+    const makingCharge = isCustomizable ? makingChargeInput : 0;
+    if (makingCharge > MAX_SURCHARGE) {
+      return res.status(400).json({
+        message: `Making charge cannot exceed ₹${MAX_SURCHARGE.toLocaleString("en-IN")}.`,
+      });
+    }
+
+    const parsedMrp = parseMoneyInput(req.body.mrp, 0);
+    if (!Number.isFinite(parsedMrp)) {
+      return res.status(400).json({ message: "MRP must be a valid number." });
+    }
+    if (parsedMrp < 0) {
+      return res.status(400).json({ message: "MRP cannot be negative." });
+    }
+    if (parsedMrp > 0 && parsedMrp < price) {
+      return res.status(400).json({
+        message: "MRP must be greater than or equal to selling price.",
+      });
+    }
+    if (parsedMrp > MAX_MRP) {
+      return res.status(400).json({
+        message: `MRP cannot exceed ₹${MAX_MRP.toLocaleString("en-IN")}.`,
+      });
+    }
+    const mrp = parsedMrp > 0 ? parsedMrp : 0;
     const deliveryMinDays = parseBoundedInt(req.body.deliveryMinDays, 0, {
       min: 0,
       max: 30,
@@ -539,7 +629,16 @@ exports.createProduct = async (req, res) => {
     const occasions = parseStringList(req.body.occasions, [], 8);
     const includedItems = parseStringList(req.body.includedItems, [], 20);
     const highlights = parseStringList(req.body.highlights, [], 20);
-    const packagingStyles = parsePackagingStyles(req.body.packagingStyles, []);
+    const packagingValidationError = validatePackagingStylesInput(
+      req.body.packagingStyles,
+      { isCustomizable }
+    );
+    if (packagingValidationError) {
+      return res.status(400).json({ message: packagingValidationError });
+    }
+    const packagingStyles = isCustomizable
+      ? parsePackagingStyles(req.body.packagingStyles, [])
+      : [];
     const images = parseImageUrls(req.body.images, []);
     const status = parseProductStatus(req.body.status, "active");
     const customizationCatalog = isCustomizable
@@ -550,7 +649,7 @@ exports.createProduct = async (req, res) => {
         name: req.body?.name,
         description: req.body?.description,
         category: req.body?.category,
-        price: req.body?.price,
+        price,
         images,
       },
       sellerId: req.user.id,
@@ -599,6 +698,9 @@ exports.updateProduct = async (req, res) => {
     delete updates.moderationNotes;
 
     const has = (field) => Object.prototype.hasOwnProperty.call(updates, field);
+    const nextCustomizable = has("isCustomizable")
+      ? parseBoolean(updates.isCustomizable, product.isCustomizable)
+      : product.isCustomizable;
 
     if (has("name")) {
       updates.name = String(updates.name || "").trim();
@@ -610,18 +712,49 @@ exports.updateProduct = async (req, res) => {
       updates.category = String(updates.category || "").trim();
     }
     if (has("price")) {
-      updates.price = parsePrice(updates.price, product.price || 0);
+      const nextPrice = parseMoneyInput(updates.price, 0);
+      if (!Number.isFinite(nextPrice)) {
+        return res.status(400).json({ message: "Price must be a valid number." });
+      }
+      updates.price = nextPrice;
+      if (!Number.isFinite(updates.price) || updates.price <= 0) {
+        return res.status(400).json({ message: "Price must be greater than zero." });
+      }
+      if (updates.price > MAX_SELLING_PRICE) {
+        return res.status(400).json({
+          message: `Price cannot exceed ₹${MAX_SELLING_PRICE.toLocaleString("en-IN")}.`,
+        });
+      }
     }
     if (has("mrp")) {
+      const parsedMrp = parseMoneyInput(updates.mrp, 0);
+      if (!Number.isFinite(parsedMrp)) {
+        return res.status(400).json({ message: "MRP must be a valid number." });
+      }
       const basePrice = has("price")
         ? updates.price
         : parsePrice(product.price, 0);
-      const parsedMrp = parsePrice(updates.mrp, product.mrp || 0);
-      updates.mrp = parsedMrp > 0 ? Math.max(parsedMrp, basePrice) : 0;
+      if (parsedMrp < 0) {
+        return res.status(400).json({ message: "MRP cannot be negative." });
+      }
+      if (parsedMrp > 0 && parsedMrp < basePrice) {
+        return res.status(400).json({
+          message: "MRP must be greater than or equal to selling price.",
+        });
+      }
+      if (parsedMrp > MAX_MRP) {
+        return res.status(400).json({
+          message: `MRP cannot exceed ₹${MAX_MRP.toLocaleString("en-IN")}.`,
+        });
+      }
+      updates.mrp = parsedMrp > 0 ? parsedMrp : 0;
     } else if (has("price")) {
       const currentMrp = parsePrice(product.mrp, 0);
-      if (currentMrp > 0) {
-        updates.mrp = Math.max(currentMrp, updates.price);
+      if (currentMrp > 0 && currentMrp < updates.price) {
+        return res.status(400).json({
+          message:
+            "MRP must be greater than or equal to selling price. Update MRP along with price.",
+        });
       }
     }
     if (has("status")) {
@@ -645,10 +778,20 @@ exports.updateProduct = async (req, res) => {
       );
     }
     if (has("packagingStyles")) {
+      const packagingValidationError = validatePackagingStylesInput(
+        updates.packagingStyles,
+        { isCustomizable: nextCustomizable }
+      );
+      if (packagingValidationError) {
+        return res.status(400).json({ message: packagingValidationError });
+      }
       updates.packagingStyles = parsePackagingStyles(
         updates.packagingStyles,
         product.packagingStyles || []
       );
+      if (!nextCustomizable) {
+        updates.packagingStyles = [];
+      }
     }
     if (has("deliveryMinDays") || has("deliveryMaxDays")) {
       const nextMin = has("deliveryMinDays")
@@ -672,10 +815,27 @@ exports.updateProduct = async (req, res) => {
       updates.stock = parseStock(updates.stock, product.stock || 0);
     }
     if (Object.prototype.hasOwnProperty.call(updates, "isCustomizable")) {
-      updates.isCustomizable = parseBoolean(updates.isCustomizable, product.isCustomizable);
+      updates.isCustomizable = nextCustomizable;
     }
     if (Object.prototype.hasOwnProperty.call(updates, "makingCharge")) {
-      updates.makingCharge = parseMakingCharge(updates.makingCharge, product.makingCharge || 0);
+      const parsedMakingCharge = parseMoneyInput(updates.makingCharge, 0);
+      if (!Number.isFinite(parsedMakingCharge)) {
+        return res.status(400).json({ message: "Making charge must be a valid number." });
+      }
+      if (parsedMakingCharge < 0) {
+        return res.status(400).json({ message: "Making charge cannot be negative." });
+      }
+      updates.makingCharge = parsedMakingCharge;
+      if (updates.makingCharge > MAX_SURCHARGE) {
+        return res.status(400).json({
+          message: `Making charge cannot exceed ₹${MAX_SURCHARGE.toLocaleString("en-IN")}.`,
+        });
+      }
+      if (!nextCustomizable && updates.makingCharge > 0) {
+        return res.status(400).json({
+          message: "Making charge is allowed only for customizable products.",
+        });
+      }
     }
     if (Object.prototype.hasOwnProperty.call(updates, "images")) {
       updates.images = parseImageUrls(updates.images, product.images || []);
@@ -687,12 +847,10 @@ exports.updateProduct = async (req, res) => {
       );
     }
 
-    const nextCustomizable = Object.prototype.hasOwnProperty.call(updates, "isCustomizable")
-      ? updates.isCustomizable
-      : product.isCustomizable;
     if (!nextCustomizable) {
       updates.makingCharge = 0;
       updates.customizationCatalog = [];
+      updates.packagingStyles = [];
     }
 
     const shouldReModerate = ["name", "description", "category", "images", "price"].some((field) =>
