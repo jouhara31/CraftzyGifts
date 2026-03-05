@@ -7284,6 +7284,10 @@ button {
   width: 100%;
 }
 
+.seller-store-brand-row.is-editing .seller-store-brand-edit {
+  margin-top: 14px;
+}
+
 .seller-store-brand-edit input,
 .seller-store-brand-edit textarea,
 .seller-store-inline-form input,
@@ -7660,6 +7664,10 @@ button {
 
   .seller-store-brand-copy {
     min-height: 0;
+  }
+
+  .seller-store-brand-row.is-editing .seller-store-brand-edit {
+    margin-top: 0;
   }
 
   .seller-store-avatar {

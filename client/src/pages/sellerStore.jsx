@@ -595,7 +595,7 @@ export default function SellerStore() {
                   ) : null}
                 </div>
                 <div className="seller-store-main-body">
-                  <div className="seller-store-brand-row">
+                  <div className={`seller-store-brand-row ${isOwnerSeller && editMode ? "is-editing" : ""}`}>
                     <div className={`seller-store-avatar ${isOwnerSeller && editMode ? "is-editable" : ""}`} aria-hidden="true">
                       {sellerProfileImage ? <img src={sellerProfileImage} alt="" /> : sellerInitial}
                       {isOwnerSeller && editMode ? (
