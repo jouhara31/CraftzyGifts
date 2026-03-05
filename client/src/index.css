@@ -7119,12 +7119,8 @@ button {
   padding-left: calc(72px + 12px);
 }
 
-.seller-store-brand-row.is-editing {
-  margin-top: 10px;
-}
-
-.seller-store-brand-row.is-editing .seller-store-avatar {
-  top: 4px;
+.seller-store-brand-row.is-editing .seller-store-brand-edit {
+  margin-top: 14px;
 }
 
 .seller-store-brand-copy,
@@ -7651,8 +7647,8 @@ button {
     margin-top: -12px;
   }
 
-  .seller-store-brand-row.is-editing {
-    margin-top: 4px;
+  .seller-store-brand-row.is-editing .seller-store-brand-edit {
+    margin-top: 0;
   }
 
   .seller-store-brand-copy {
