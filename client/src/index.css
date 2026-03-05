@@ -7247,13 +7247,15 @@ button {
 }
 
 .seller-store-avatar-edit {
-  width: 24px;
-  height: 24px;
-  right: -4px;
-  bottom: -4px;
+  width: 22px;
+  height: 22px;
+  right: 2px;
+  bottom: 2px;
   padding: 0;
   display: grid;
   place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  box-shadow: 0 2px 5px rgba(9, 35, 42, 0.28);
 }
 
 .seller-store-avatar-edit svg {
