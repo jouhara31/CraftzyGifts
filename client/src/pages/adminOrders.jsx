@@ -108,16 +108,16 @@ export default function AdminOrders() {
         </div>
         {visibleOrders.map((order) => (
           <div key={order._id} className="order-row admin-order-row">
-            <span>{order._id?.slice(-8)?.toUpperCase()}</span>
-            <span>{order.customer?.name || "Customer"}</span>
-            <span>{order.seller?.storeName || order.seller?.name || "Seller"}</span>
-            <span>{order.product?.name || "Product"}</span>
-            <span>{order.status}</span>
-            <span>
+            <span data-label="Order">{order._id?.slice(-8)?.toUpperCase()}</span>
+            <span data-label="Customer">{order.customer?.name || "Customer"}</span>
+            <span data-label="Seller">{order.seller?.storeName || order.seller?.name || "Seller"}</span>
+            <span data-label="Product">{order.product?.name || "Product"}</span>
+            <span data-label="Status">{order.status}</span>
+            <span data-label="Payment">
               {String(order.paymentMode || "").toUpperCase()} / {order.paymentStatus}
             </span>
-            <span className="order-total">{money(order.total)}</span>
-            <span>{new Date(order.createdAt).toLocaleDateString("en-IN")}</span>
+            <span className="order-total" data-label="Total">{money(order.total)}</span>
+            <span data-label="Date">{new Date(order.createdAt).toLocaleDateString("en-IN")}</span>
           </div>
         ))}
       </div>

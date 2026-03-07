@@ -170,6 +170,80 @@ const HeaderMenuIcon = ({ kind }) => {
   return null;
 };
 
+const HeaderUtilityIcon = ({ kind }) => {
+  if (kind === "bell") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 4a4 4 0 0 0-4 4v2.2c0 .9-.3 1.8-.9 2.5L6 14.2V16h12v-1.8l-1.1-1.5a4.2 4.2 0 0 1-.9-2.5V8a4 4 0 0 0-4-4Z" />
+        <path d="M9.5 18a2.5 2.5 0 0 0 5 0" />
+      </svg>
+    );
+  }
+  if (kind === "menu") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 7h16" />
+        <path d="M4 12h16" />
+        <path d="M4 17h16" />
+      </svg>
+    );
+  }
+  if (kind === "close") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6 6l12 12" />
+        <path d="M18 6 6 18" />
+      </svg>
+    );
+  }
+  if (kind === "search") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="11" cy="11" r="6.5" />
+        <path d="M16 16l4 4" />
+      </svg>
+    );
+  }
+  return null;
+};
+
+const HeaderBottomNavIcon = ({ kind }) => {
+  if (kind === "home") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m4 11 8-7 8 7" />
+        <path d="M6.5 10.5V20h11v-9.5" />
+      </svg>
+    );
+  }
+  if (kind === "products") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="4" y="4" width="6" height="6" rx="1.2" />
+        <rect x="14" y="4" width="6" height="6" rx="1.2" />
+        <rect x="4" y="14" width="6" height="6" rx="1.2" />
+        <rect x="14" y="14" width="6" height="6" rx="1.2" />
+      </svg>
+    );
+  }
+  if (kind === "wishlist") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 20s-7-4.3-7-9a4.5 4.5 0 0 1 8-2.6A4.5 4.5 0 0 1 19 11c0 4.7-7 9-7 9z" />
+      </svg>
+    );
+  }
+  if (kind === "profile") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="8" r="3.2" />
+        <path d="M5.5 19a6.5 6.5 0 0 1 13 0" />
+      </svg>
+    );
+  }
+  return null;
+};
+
 export default function Header({ variant, onFilterClick, isFilterActive = false }) {
   const [user, setUser] = useState(readStoredUser);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -194,8 +268,12 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       return "";
     }
   });
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [mobileMenuPanelStyle, setMobileMenuPanelStyle] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
+  const headerRef = useRef(null);
   const accountRef = useRef(null);
   const notificationRef = useRef(null);
   const notificationButtonRef = useRef(null);
@@ -457,6 +535,88 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const activeCategoryGroup =
     categoryTree.find((item) => item.label === activeMenuCategory) ||
     categoryTree[0];
+  const customerMobileLinks = [
+    { label: "Home", href: "/" },
+    { label: "Products", href: "/products" },
+    { label: "About Us", href: "/#about-us" },
+    { label: "Contact", href: "/#support" },
+  ];
+  const customerBottomNavItems = [
+    { label: "Home", to: "/", icon: "home", active: location.pathname === "/" },
+    {
+      label: "Products",
+      to: "/products",
+      icon: "products",
+      active: location.pathname === "/products" || location.pathname.startsWith("/products/"),
+    },
+    {
+      label: "Wishlist",
+      to: toAuthPath("/wishlist"),
+      icon: "wishlist",
+      active: location.pathname === "/wishlist",
+    },
+    {
+      label: user ? "Profile" : "Login",
+      to: user ? "/profile" : "/login",
+      icon: "profile",
+      active: user ? location.pathname === "/profile" : location.pathname === "/login",
+    },
+  ];
+  const showMobileCategoryTabs = location.pathname === "/products";
+
+  const updateMobileMenuPanelPosition = () => {
+    const headerNode = headerRef.current;
+    if (!headerNode) {
+      setMobileMenuPanelStyle(null);
+      return;
+    }
+
+    const activeMenuButton = Array.from(
+      headerNode.querySelectorAll(".customer-menu-toggle")
+    ).find((node) => node instanceof HTMLElement && node.offsetParent !== null);
+
+    if (!activeMenuButton) {
+      setMobileMenuPanelStyle(null);
+      return;
+    }
+
+    const headerRect = headerNode.getBoundingClientRect();
+    const buttonRect = activeMenuButton.getBoundingClientRect();
+
+    setMobileMenuPanelStyle({
+      top: `${Math.max(buttonRect.bottom - headerRect.top + 8, 0)}px`,
+      right: `${Math.max(headerRect.right - buttonRect.right, 0)}px`,
+    });
+  };
+
+  const closeMobileMenu = () => setMobileMenuOpen(false);
+  const closeMobileOverlays = () => {
+    setMobileMenuOpen(false);
+    setMobileSearchOpen(false);
+    setAllCategoriesOpen(false);
+    setAccountOpen(false);
+  };
+  const toggleMobileMenu = () => {
+    setMobileMenuOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setMobileSearchOpen(false);
+        setAccountOpen(false);
+        setAllCategoriesOpen(false);
+      }
+      return next;
+    });
+  };
+  const toggleMobileSearch = () => {
+    setMobileSearchOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setMobileMenuOpen(false);
+        setAllCategoriesOpen(false);
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!isSellerNav || !user) {
@@ -641,6 +801,32 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           document.body
         )
       : null;
+  const customerBottomNavPortal =
+    !isCartRoute && typeof document !== "undefined"
+      ? createPortal(
+          <nav
+            className={`header-mobile-bottom-nav ${
+              mobileMenuOpen || mobileSearchOpen ? "is-hidden" : ""
+            }`}
+            aria-label="Quick navigation"
+          >
+            {customerBottomNavItems.map((item) => (
+              <Link
+                key={item.label}
+                className={`header-mobile-bottom-link ${item.active ? "active" : ""}`}
+                to={item.to}
+                onClick={closeMobileOverlays}
+              >
+                <span className="header-mobile-bottom-icon">
+                  <HeaderBottomNavIcon kind={item.icon} />
+                </span>
+                <span className="header-mobile-bottom-label">{item.label}</span>
+              </Link>
+            ))}
+          </nav>,
+          document.body
+        )
+      : null;
 
   useEffect(() => {
     setAllCategoriesOpen(false);
@@ -689,6 +875,42 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     };
   }, [isCartRoute, location.pathname, location.search]);
 
+  useEffect(() => {
+    setMobileMenuOpen(false);
+    setMobileSearchOpen(Boolean(new URLSearchParams(location.search).get("q") || ""));
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) {
+      setMobileMenuPanelStyle(null);
+      return undefined;
+    }
+
+    const syncPosition = () => updateMobileMenuPanelPosition();
+    syncPosition();
+
+    window.addEventListener("resize", syncPosition);
+    window.addEventListener("scroll", syncPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", syncPosition);
+      window.removeEventListener("scroll", syncPosition, true);
+    };
+  }, [mobileMenuOpen, location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen && !mobileSearchOpen) return undefined;
+
+    const handleEscape = (event) => {
+      if (event.key !== "Escape") return;
+      setMobileMenuOpen(false);
+      setMobileSearchOpen(false);
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [mobileMenuOpen, mobileSearchOpen]);
+
   if (isAuthNav) {
     const isRegisterRoute = location.pathname === "/register";
     const sellerIntent = new URLSearchParams(location.search).get("seller") === "1";
@@ -733,7 +955,11 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
 
   if (isSellerNav) {
       return (
-        <header className="main-header seller-header seller-nav-header">
+        <header
+          className={`main-header seller-header seller-nav-header${mobileMenuOpen ? " mobile-menu-open" : ""}${
+            mobileSearchOpen ? " mobile-search-open" : ""
+          }`}
+        >
           <Link className="brand" to="/">
             <img src={brandLogo} alt="Craftzy Gifts logo" className="brand-logo-head" />
             <span className="brand-head-copy">
@@ -766,6 +992,26 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           </form>
 
           <div className="seller-profile-wrap">
+            <div className="seller-mobile-actions">
+              <button
+                className={`icon-btn mobile-header-btn ${mobileSearchOpen ? "active" : ""}`}
+                type="button"
+                aria-label={mobileSearchOpen ? "Close search" : "Open search"}
+                aria-expanded={mobileSearchOpen}
+                onClick={toggleMobileSearch}
+              >
+                <HeaderUtilityIcon kind={mobileSearchOpen ? "close" : "search"} />
+              </button>
+              <button
+                className={`icon-btn mobile-header-btn ${mobileMenuOpen ? "active" : ""}`}
+                type="button"
+                aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+                aria-expanded={mobileMenuOpen}
+                onClick={toggleMobileMenu}
+              >
+                <HeaderUtilityIcon kind={mobileMenuOpen ? "close" : "menu"} />
+              </button>
+            </div>
             <div className="seller-notification-menu" ref={notificationRef}>
               <button
                 ref={notificationButtonRef}
@@ -798,6 +1044,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                     strokeLinecap="round"
                   />
                 </svg>
+                <span className="seller-notification-label">Alerts</span>
                 {notificationUnreadCount > 0 && (
                   <span className="icon-badge">{notificationUnreadCount}</span>
                 )}
@@ -869,6 +1116,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           <Link
             className={`nav-link ${sellerActive("/seller/dashboard") ? "active" : ""}`}
             to="/seller/dashboard"
+            onClick={closeMobileMenu}
           >
             Overview
           </Link>
@@ -877,30 +1125,35 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               sellerActive("/seller/store") || location.pathname.startsWith("/store/") ? "active" : ""
             }`}
             to={sellerStorePath}
+            onClick={closeMobileMenu}
           >
             My Store
           </Link>
           <Link
             className={`nav-link ${sellerActive("/seller/products") ? "active" : ""}`}
             to="/seller/products"
+            onClick={closeMobileMenu}
           >
             Products
           </Link>
           <Link
             className={`nav-link ${sellerActive("/seller/listed-items") ? "active" : ""}`}
             to="/seller/listed-items"
+            onClick={closeMobileMenu}
           >
             Custom Hamper Items
           </Link>
           <Link
             className={`nav-link ${sellerActive("/seller/orders") ? "active" : ""}`}
             to="/seller/orders"
+            onClick={closeMobileMenu}
           >
             Orders
           </Link>
           <Link
             className={`nav-link ${sellerActive("/seller/payments") ? "active" : ""}`}
             to="/seller/payments"
+            onClick={closeMobileMenu}
           >
             Payments
           </Link>
@@ -979,8 +1232,14 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   }
 
   return (
-    <header className="main-header modern-shop-header">
-      <div className="header-utility-bar">
+    <>
+      <header
+        ref={headerRef}
+        className={`main-header modern-shop-header${mobileMenuOpen ? " mobile-menu-open" : ""}${
+          mobileSearchOpen ? " mobile-search-open" : ""
+        }${showMobileCategoryTabs ? " mobile-tabs-enabled" : ""}`}
+      >
+        <div className="header-utility-bar">
         <div className="utility-left">
           <span className="utility-item">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1009,6 +1268,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
         </div>
         <div className="utility-right">
           <a href="/">Home</a>
+          <a href="/products">Products</a>
           <a href="/#about-us">About Us</a>
           <a href="/#support">Contact</a>
         </div>
@@ -1134,6 +1394,16 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               </div>
             )}
 
+            <button
+              className={`icon-btn mobile-header-btn ${mobileSearchOpen ? "active" : ""}`}
+              type="button"
+              aria-label={mobileSearchOpen ? "Close search" : "Open search"}
+              aria-expanded={mobileSearchOpen}
+              onClick={toggleMobileSearch}
+            >
+              <HeaderUtilityIcon kind={mobileSearchOpen ? "close" : "search"} />
+            </button>
+
             <Link className="icon-btn" to={toAuthPath("/wishlist")} aria-label="Wishlist">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -1159,7 +1429,153 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               </svg>
               {cartCount > 0 && <span className="icon-badge">{cartCount}</span>}
             </Link>
+            <button
+              className={`icon-btn mobile-header-btn customer-menu-toggle ${
+                mobileMenuOpen ? "active" : ""
+              }`}
+              type="button"
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="customerMobileMenu"
+              onClick={toggleMobileMenu}
+            >
+              <HeaderUtilityIcon kind={mobileMenuOpen ? "close" : "menu"} />
+            </button>
           </div>
+
+          <div className="header-mobile-actions-row">
+            <Link className="icon-btn" to={toAuthPath("/wishlist")} aria-label="Wishlist">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 20s-7-4.3-7-9a4.5 4.5 0 0 1 8-2.6A4.5 4.5 0 0 1 19 11c0 4.7-7 9-7 9z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+              </svg>
+              {wishlistCount > 0 && <span className="icon-badge">{wishlistCount}</span>}
+            </Link>
+            <button
+              className={`icon-btn mobile-header-btn ${mobileSearchOpen ? "active" : ""}`}
+              type="button"
+              aria-label={mobileSearchOpen ? "Close search" : "Open search"}
+              aria-expanded={mobileSearchOpen}
+              onClick={toggleMobileSearch}
+            >
+              <HeaderUtilityIcon kind={mobileSearchOpen ? "close" : "search"} />
+            </button>
+            <Link className="icon-btn" to={toAuthPath("/cart")} aria-label="Cart">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M6 6h15l-1.5 8.5H8.5L6 6z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <circle cx="9" cy="19" r="1.5" />
+                <circle cx="18" cy="19" r="1.5" />
+              </svg>
+              {cartCount > 0 && <span className="icon-badge">{cartCount}</span>}
+            </Link>
+            <button
+              className={`icon-btn mobile-header-btn customer-menu-toggle ${
+                mobileMenuOpen ? "active" : ""
+              }`}
+              type="button"
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="customerMobileMenu"
+              onClick={toggleMobileMenu}
+            >
+              <HeaderUtilityIcon kind={mobileMenuOpen ? "close" : "menu"} />
+            </button>
+          </div>
+      </div>
+
+      <div
+        id="customerMobileMenu"
+        className="header-mobile-panel"
+        aria-hidden={!mobileMenuOpen}
+        style={mobileMenuPanelStyle || undefined}
+      >
+        <div className="header-mobile-section">
+          <p className="header-mobile-title">Navigation</p>
+          <div className="header-mobile-links">
+            {customerMobileLinks.map((item) => (
+              <a key={item.label} className="header-mobile-link" href={item.href} onClick={closeMobileMenu}>
+                {item.label}
+              </a>
+            ))}
+            {showCategoryToggle ? (
+              <button
+                className="header-mobile-link header-mobile-link-button"
+                type="button"
+                onClick={() => {
+                  onFilterClick?.();
+                  closeMobileMenu();
+                }}
+              >
+                Filters
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="header-mobile-section">
+          <p className="header-mobile-title">Account</p>
+          <div className="header-mobile-links">
+            {user ? (
+              <>
+                <Link className="header-mobile-link" to="/profile" onClick={closeMobileMenu}>
+                  My Profile
+                </Link>
+                <button
+                  className="header-mobile-link header-mobile-link-button"
+                  type="button"
+                  onClick={() => {
+                    closeMobileMenu();
+                    handleLogout();
+                  }}
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <>
+                <Link className="header-mobile-link" to="/login" onClick={closeMobileMenu}>
+                  Login
+                </Link>
+                <Link className="header-mobile-link" to="/register?seller=1" onClick={closeMobileMenu}>
+                  Become a Seller
+                </Link>
+              </>
+            )}
+            <Link className="header-mobile-link" to={toAuthPath("/wishlist")} onClick={closeMobileMenu}>
+              Wishlist
+            </Link>
+            <Link className="header-mobile-link" to={toAuthPath("/cart")} onClick={closeMobileMenu}>
+              Cart
+            </Link>
+          </div>
+        </div>
+
+        {!isCartRoute ? (
+          <div className="header-mobile-section">
+            <p className="header-mobile-title">Browse Categories</p>
+            <div className="header-mobile-categories">
+              {customerNavItems.map((item) => (
+                <Link
+                  key={item.label}
+                  className={`header-mobile-link ${isCustomerItemActive(item.path) ? "active" : ""}`}
+                  to={item.path}
+                  onClick={closeMobileMenu}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {!isCartRoute && (
@@ -1302,7 +1718,9 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           </div>
         </nav>
       )}
-    </header>
+      </header>
+      {customerBottomNavPortal}
+    </>
   );
 }
 

@@ -382,10 +382,10 @@ export default function SellerOrders() {
           return (
             <article key={orderId || `order-${index}`} className="order-card">
               <div className="order-row">
-                <span>{orderCode}</span>
-                <span>{orderDate}</span>
-                <span>{customerName}</span>
-                <span>
+                <span data-label="Order">{orderCode}</span>
+                <span data-label="Date">{orderDate}</span>
+                <span data-label="Customer">{customerName}</span>
+                <span data-label="Product">
                   {productName}
                   {customizationBadge ? ` (${customizationBadge})` : ""}
                   {hasExpandableDetails && (
@@ -400,8 +400,8 @@ export default function SellerOrders() {
                     </button>
                   )}
                 </span>
-                <span>{paymentLabel}</span>
-                <span>
+                <span data-label="Payment">{paymentLabel}</span>
+                <span data-label="Status">
                   <span className={`status-pill ${orderStatusClass(orderStatus)}`}>
                     {orderStatus || "unknown"}
                   </span>
@@ -442,7 +442,7 @@ export default function SellerOrders() {
                     </span>
                   )}
                 </span>
-                <span className="order-total">₹{totalAmount}</span>
+                <span className="order-total" data-label="Total">₹{totalAmount}</span>
               </div>
 
               {hasExpandableDetails && isExpanded && (

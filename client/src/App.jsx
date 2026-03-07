@@ -34,6 +34,7 @@ import AdminSettings from "./pages/adminSettings";
 import AdminAccount from "./pages/adminAccount";
 import Footer from "./components/footer";
 import SellerRoute from "./components/SellerRoute";
+import AdminRoute from "./components/AdminRoute";
 
 function App() {
   const { pathname } = useLocation();
@@ -116,16 +117,86 @@ function App() {
             </SellerRoute>
           }
         />
-        <Route path="/admin/dashboard" element={<AdminDashboard />} />
-        <Route path="/admin/sellers" element={<AdminSellers />} />
-        <Route path="/admin/products" element={<AdminProducts />} />
-        <Route path="/admin/orders" element={<AdminOrders />} />
-        <Route path="/admin/reports" element={<AdminReports />} />
-        <Route path="/admin/customers" element={<AdminCustomers />} />
-        <Route path="/admin/inventory" element={<AdminInventory />} />
-        <Route path="/admin/analytics" element={<AdminAnalytics />} />
-        <Route path="/admin/settings" element={<AdminSettings />} />
-        <Route path="/admin/account" element={<AdminAccount />} />
+        <Route
+          path="/admin/dashboard"
+          element={
+            <AdminRoute>
+              <AdminDashboard />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/sellers"
+          element={
+            <AdminRoute>
+              <AdminSellers />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/products"
+          element={
+            <AdminRoute>
+              <AdminProducts />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/orders"
+          element={
+            <AdminRoute>
+              <AdminOrders />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/reports"
+          element={
+            <AdminRoute>
+              <AdminReports />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/customers"
+          element={
+            <AdminRoute>
+              <AdminCustomers />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/inventory"
+          element={
+            <AdminRoute>
+              <AdminInventory />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/analytics"
+          element={
+            <AdminRoute>
+              <AdminAnalytics />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/settings"
+          element={
+            <AdminRoute>
+              <AdminSettings />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/account"
+          element={
+            <AdminRoute>
+              <AdminAccount />
+            </AdminRoute>
+          }
+        />
       </Routes>
       {!hideFooter && <Footer />}
     </>

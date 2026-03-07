@@ -140,14 +140,14 @@ export default function AdminInventory() {
           const cls = stock <= 0 ? "locked" : "warning";
           return (
             <div key={item._id} className="order-row admin-inventory-row">
-              <span>{item.name || "Product"}</span>
-              <span>{item.seller?.storeName || item.seller?.name || "Seller"}</span>
-              <span>{item.category || "General"}</span>
-              <span>{stock}</span>
-              <span>
+              <span data-label="Product">{item.name || "Product"}</span>
+              <span data-label="Seller">{item.seller?.storeName || item.seller?.name || "Seller"}</span>
+              <span data-label="Category">{item.category || "General"}</span>
+              <span data-label="Stock">{stock}</span>
+              <span data-label="Status">
                 <span className={`status-pill ${cls}`}>{label}</span>
               </span>
-              <span>₹{Number(item.price || 0).toLocaleString("en-IN")}</span>
+              <span data-label="Price">₹{Number(item.price || 0).toLocaleString("en-IN")}</span>
             </div>
           );
         })}

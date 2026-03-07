@@ -1,7 +1,7 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { fallbackPathForRole, readActiveUserRole } from "../utils/authRoute";
 
-export default function SellerRoute({ children }) {
+export default function AdminRoute({ children }) {
   const location = useLocation();
   const token = localStorage.getItem("token");
 
@@ -11,7 +11,7 @@ export default function SellerRoute({ children }) {
 
   const role = readActiveUserRole(token);
 
-  if (role !== "seller") {
+  if (role !== "admin") {
     return <Navigate to={fallbackPathForRole(role)} replace />;
   }
 
