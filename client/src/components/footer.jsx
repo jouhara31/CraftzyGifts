@@ -8,15 +8,15 @@ export default function Footer() {
         <article className="market-benefit-item">
           <span className="market-benefit-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24">
-              <path d="M3 7h11v8H3z" />
-              <path d="M14 10h3l2 2v3h-5z" />
-              <circle cx="7" cy="17" r="1.6" />
-              <circle cx="17" cy="17" r="1.6" />
+              <path d="M4 8.5 12 4l8 4.5-8 4.5-8-4.5Z" />
+              <path d="M4 8.5V16l8 4 8-4V8.5" />
+              <path d="M12 13v7" />
+              <path d="M8.5 6l7 4" />
             </svg>
           </span>
           <div>
-            <h4>Free Delivery</h4>
-            <p>On orders over ₹499</p>
+            <h4>Curated Gifts</h4>
+            <p>Thoughtful picks for every occasion</p>
           </div>
         </article>
 
@@ -27,23 +27,20 @@ export default function Footer() {
             </svg>
           </span>
           <div>
-            <h4>Secure Payments</h4>
-            <p>100% secure checkout</p>
+            <h4>Secure Checkout</h4>
+            <p>UPI, cards, and net banking support</p>
           </div>
         </article>
 
         <article className="market-benefit-item">
           <span className="market-benefit-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24">
-              <path d="M4 8V4h4" />
-              <path d="M20 16v4h-4" />
-              <path d="M20 8a7 7 0 0 0-12-3L4 8" />
-              <path d="M4 16a7 7 0 0 0 12 3l4-3" />
+              <path d="M12 4.5 13.9 8l3.9.6-2.8 2.8.7 4-3.7-1.8-3.7 1.8.7-4L6.2 8.6l3.9-.6L12 4.5Z" />
             </svg>
           </span>
           <div>
-            <h4>Easy Returns</h4>
-            <p>7-day return policy</p>
+            <h4>Personalised Orders</h4>
+            <p>Custom notes and hamper options on select gifts</p>
           </div>
         </article>
 
@@ -56,8 +53,8 @@ export default function Footer() {
             </svg>
           </span>
           <div>
-            <h4>24/7 Support</h4>
-            <p>Dedicated help center</p>
+            <h4>Order Support</h4>
+            <p>Help with tracking, delivery, and updates</p>
           </div>
         </article>
       </div>
