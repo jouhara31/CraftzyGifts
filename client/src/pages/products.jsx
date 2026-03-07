@@ -234,7 +234,12 @@ export default function Products() {
   const [priceSliderValue, setPriceSliderValue] = useState(() =>
     clampPriceFilterValue(maxPrice || PRICE_FILTER_MAX)
   );
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return true;
+    }
+    return !window.matchMedia("(max-width: 980px)").matches;
+  });
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [activeMenuCategory, setActiveMenuCategory] = useState(
     () => (category !== "All" ? category : categoryOptions[0]?.category || "")
@@ -287,6 +292,27 @@ export default function Products() {
     return () => {
       ignore = true;
     };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia("(max-width: 980px)");
+    const syncSidebarState = (event) => {
+      setFiltersOpen(!event.matches);
+    };
+
+    syncSidebarState(mediaQuery);
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", syncSidebarState);
+      return () => mediaQuery.removeEventListener("change", syncSidebarState);
+    }
+
+    mediaQuery.addListener(syncSidebarState);
+    return () => mediaQuery.removeListener(syncSidebarState);
   }, []);
 
   useEffect(() => {

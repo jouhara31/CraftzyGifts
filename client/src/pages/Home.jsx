@@ -300,7 +300,7 @@ export default function Home() {
             View all products
           </Link>
         </div>
-        <div className="product-grid">
+        <div className="product-grid featured-crafts-grid">
           {featuredProducts.map((item) => {
             const isCustomizable = Boolean(item.isCustomizable);
             const detailLink = item._id ? `/products/${item._id}` : "/products";

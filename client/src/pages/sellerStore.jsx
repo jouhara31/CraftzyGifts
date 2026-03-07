@@ -482,11 +482,11 @@ export default function SellerStore() {
     getPickupAddressText(seller?.pickupAddress) || "Pickup address will be shared by seller";
   const sellerSupportChannelLabel = isOwnerSeller
     ? supportEmailConfigured
-      ? "Private inbox active"
-      : "Private inbox ready"
+      ? "Inbox active"
+      : "Inbox ready"
     : "Private seller inbox";
   const sellerSupportMessage = isOwnerSeller
-    ? "Customer messages stay private and arrive in your seller dashboard."
+    ? "Customer messages stay private and show up in your seller dashboard."
     : "Send a secure message and our team will contact you soon.";
   const listedProducts = Number(storeData?.stats?.totalProducts || products.length || 0);
   const totalFeedbacks = Number(storeData?.stats?.totalFeedbacks || feedbacks.length || 0);
@@ -1158,11 +1158,11 @@ export default function SellerStore() {
                   {isOwnerSeller ? "Customer inbox" : "Store team"}
                 </span>
                 <p className="seller-store-owner-title">
-                  {isOwnerSeller ? "Private contact channel" : sellerName}
+                  {isOwnerSeller ? "Private inbox" : sellerName}
                 </p>
                 <p className="seller-store-owner-name">
                   {isOwnerSeller
-                    ? "Questions from shoppers reach you in the dashboard."
+                    ? "Questions from shoppers land here inside your dashboard."
                     : `Managed by ${sellerOwnerName}`}
                 </p>
                 <div className="seller-store-owner-contacts">

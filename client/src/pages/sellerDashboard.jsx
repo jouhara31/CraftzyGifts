@@ -758,6 +758,41 @@ export default function SellerDashboard() {
                 )}
               </div>
             </div>
+
+            <div className="seller-panel seller-dashboard-panel">
+              <div className="card-head seller-dashboard-head">
+                <div>
+                  <h3 className="card-title">Customer messages</h3>
+                  <p className="seller-dashboard-panel-subtitle">
+                    Secure contact requests sent from your public store page.
+                  </p>
+                </div>
+                <span className="chip">{contactRequestTotal} total</span>
+              </div>
+              <div className="seller-dashboard-message-list">
+                {contactRequests.map((item) => (
+                  <article key={item.id} className="seller-dashboard-message-card">
+                    <div className="seller-dashboard-message-head">
+                      <div className="seller-dashboard-message-meta">
+                        <strong>{item.senderName || "Customer"}</strong>
+                        <span>{item.senderEmail || "Email not provided"}</span>
+                      </div>
+                      <span>{fullDateLabel(item.createdAt)}</span>
+                    </div>
+                    <p className="seller-dashboard-message-body">
+                      {truncateText(item.message, 180)}
+                    </p>
+                    <a className="btn seller-dashboard-message-reply" href={`mailto:${item.senderEmail}`}>
+                      <MessageActionIcon />
+                      Reply by email
+                    </a>
+                  </article>
+                ))}
+                {!loading && contactRequests.length === 0 && (
+                  <p className="field-hint">No customer messages yet.</p>
+                )}
+              </div>
+            </div>
           </div>
 
           <aside className="seller-dashboard-rail">
@@ -873,41 +908,6 @@ export default function SellerDashboard() {
                 <button className="btn ghost" type="button" onClick={() => openMyStore(true)}>
                   Edit profile
                 </button>
-              </div>
-            </div>
-
-            <div className="seller-panel seller-dashboard-panel">
-              <div className="card-head seller-dashboard-head">
-                <div>
-                  <h3 className="card-title">Customer messages</h3>
-                  <p className="seller-dashboard-panel-subtitle">
-                    Secure contact requests sent from your public store page.
-                  </p>
-                </div>
-                <span className="chip">{contactRequestTotal} total</span>
-              </div>
-              <div className="seller-dashboard-message-list">
-                {contactRequests.map((item) => (
-                  <article key={item.id} className="seller-dashboard-message-card">
-                    <div className="seller-dashboard-message-head">
-                      <div className="seller-dashboard-message-meta">
-                        <strong>{item.senderName || "Customer"}</strong>
-                        <span>{item.senderEmail || "Email not provided"}</span>
-                      </div>
-                      <span>{fullDateLabel(item.createdAt)}</span>
-                    </div>
-                    <p className="seller-dashboard-message-body">
-                      {truncateText(item.message, 180)}
-                    </p>
-                    <a className="btn seller-dashboard-message-reply" href={`mailto:${item.senderEmail}`}>
-                      <MessageActionIcon />
-                      Reply by email
-                    </a>
-                  </article>
-                ))}
-                {!loading && contactRequests.length === 0 && (
-                  <p className="field-hint">No customer messages yet.</p>
-                )}
               </div>
             </div>
 
