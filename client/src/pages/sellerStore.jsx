@@ -289,6 +289,8 @@ export default function SellerStore() {
   const { sellerId } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const editRequested = searchParams.get("edit") === "1";
+  const requestedTab = resolveRequestedStoreTab(searchParams.get("tab"));
   const coverInputRef = useRef(null);
   const avatarInputRef = useRef(null);
   const ratingPopoverRef = useRef(null);
@@ -441,8 +443,6 @@ export default function SellerStore() {
     String(viewer?.role || "").toLowerCase() === "seller" &&
     viewerId &&
     String(sellerId || "").trim() === viewerId;
-  const editRequested = searchParams.get("edit") === "1";
-  const requestedTab = resolveRequestedStoreTab(searchParams.get("tab"));
 
   useEffect(() => {
     if (!isOwnerSeller) {
