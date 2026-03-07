@@ -154,6 +154,37 @@ const resolveImageSource = (value) => {
   return `${API_URL}/${text.replace(/^\/+/, "")}`;
 };
 
+const normalizeReviewImages = (value = []) =>
+  Array.from(
+    new Set(
+      (Array.isArray(value) ? value : [])
+        .map((entry) => String(entry || "").trim())
+        .filter(
+          (entry) =>
+            /^https?:\/\//i.test(entry) || /^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(entry)
+        )
+    )
+  ).slice(0, 4);
+
+const moveFeedbackViewerIndex = (viewer, direction) => {
+  if (!viewer || !Array.isArray(viewer.images) || viewer.images.length === 0) {
+    return viewer;
+  }
+  const currentIndex = Math.min(
+    Math.max(Number(viewer.index || 0), 0),
+    viewer.images.length - 1
+  );
+  const nextIndex = Math.min(
+    Math.max(currentIndex + direction, 0),
+    viewer.images.length - 1
+  );
+  if (nextIndex === currentIndex) return viewer;
+  return {
+    ...viewer,
+    index: nextIndex,
+  };
+};
+
 const buildDraftFromSeller = (seller = {}) => ({
   storeName: String(seller?.storeName || seller?.name || "").trim(),
   ownerName: String(seller?.name || seller?.storeName || "").trim(),
@@ -245,6 +276,7 @@ export default function SellerStore() {
   const avatarInputRef = useRef(null);
   const ratingPopoverRef = useRef(null);
   const feedbackListRef = useRef(null);
+  const feedbackSwipeStartRef = useRef({ x: 0, y: 0 });
   const autoEditAppliedRef = useRef(false);
   const feedbackLoadAttemptedRef = useRef(false);
   const [loading, setLoading] = useState(true);
@@ -261,6 +293,7 @@ export default function SellerStore() {
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [isRatingPopoverOpen, setIsRatingPopoverOpen] = useState(false);
   const [activeProductRatingId, setActiveProductRatingId] = useState("");
+  const [activeFeedbackViewer, setActiveFeedbackViewer] = useState(null);
   const [draft, setDraft] = useState(buildDraftFromSeller({}));
   const [storeData, setStoreData] = useState({
     seller: null,
@@ -702,6 +735,12 @@ export default function SellerStore() {
   }, [isProductsTab]);
 
   useEffect(() => {
+    if (!isFeedbackTab) {
+      setActiveFeedbackViewer(null);
+    }
+  }, [isFeedbackTab]);
+
+  useEffect(() => {
     if (!isRatingPopoverOpen) return;
     const handlePointerDown = (event) => {
       if (!ratingPopoverRef.current) return;
@@ -750,9 +789,76 @@ export default function SellerStore() {
     };
   }, [activeProductRatingId]);
 
+  useEffect(() => {
+    if (!activeFeedbackViewer) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setActiveFeedbackViewer(null);
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        setActiveFeedbackViewer((prev) => moveFeedbackViewerIndex(prev, -1));
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        setActiveFeedbackViewer((prev) => moveFeedbackViewerIndex(prev, 1));
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeFeedbackViewer]);
+
   const handleSeeCustomerReviews = () => {
     setIsRatingPopoverOpen(false);
     feedbackListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const activeFeedbackImages = Array.isArray(activeFeedbackViewer?.images)
+    ? activeFeedbackViewer.images
+    : [];
+  const activeFeedbackIndex =
+    activeFeedbackImages.length > 0
+      ? Math.min(
+          Math.max(Number(activeFeedbackViewer?.index || 0), 0),
+          activeFeedbackImages.length - 1
+        )
+      : 0;
+  const activeFeedbackImageSrc = activeFeedbackImages[activeFeedbackIndex] || "";
+  const activeFeedbackImageCount = activeFeedbackImages.length;
+  const canViewPrevFeedbackImage = activeFeedbackIndex > 0;
+  const canViewNextFeedbackImage =
+    activeFeedbackIndex < activeFeedbackImageCount - 1;
+  const activeFeedbackImageAlt = `Customer review image ${
+    activeFeedbackIndex + 1
+  } for ${activeFeedbackViewer?.productName || "Gift hamper"}`;
+  const handleFeedbackViewerTouchStart = (event) => {
+    const touch = event.changedTouches?.[0];
+    if (!touch) return;
+    feedbackSwipeStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+    };
+  };
+  const handleFeedbackViewerTouchEnd = (event) => {
+    if (activeFeedbackImageCount <= 1) return;
+    const touch = event.changedTouches?.[0];
+    if (!touch) return;
+    const { x, y } = feedbackSwipeStartRef.current;
+    const deltaX = touch.clientX - x;
+    const deltaY = touch.clientY - y;
+    feedbackSwipeStartRef.current = { x: 0, y: 0 };
+    if (Math.abs(deltaX) < 44 || Math.abs(deltaX) <= Math.abs(deltaY)) return;
+    setActiveFeedbackViewer((prev) =>
+      moveFeedbackViewerIndex(prev, deltaX < 0 ? 1 : -1)
+    );
   };
 
   return (
@@ -1363,6 +1469,7 @@ export default function SellerStore() {
                     <div className="seller-store-feedback-list" ref={feedbackListRef}>
                       {feedbacks.map((item, index) => {
                         const feedbackProductId = String(item?.productId || "").trim();
+                        const reviewImages = normalizeReviewImages(item?.images);
                         const canOpenProduct = Boolean(feedbackProductId);
                         const openProduct = () => {
                           if (!canOpenProduct) return;
@@ -1418,13 +1525,49 @@ export default function SellerStore() {
                           ) : (
                             <p className="field-hint">Customer did not add a written review.</p>
                           )}
-                            <p className="field-hint">
-                              {item?.createdAt ? formatDate(item.createdAt) : "Date unavailable"}
-                            </p>
-                          </article>
-                        );
-                      })}
-                    </div>
+                          {reviewImages.length > 0 ? (
+                            <div
+                              className="seller-store-feedback-images"
+                              aria-label="Customer review photos"
+                            >
+                              {reviewImages.map((image, imageIndex) => (
+                                <button
+                                  key={`${item?.id || index}-review-image-${imageIndex}`}
+                                  type="button"
+                                  className="seller-store-feedback-image-btn"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setActiveFeedbackViewer({
+                                      images: reviewImages,
+                                      index: imageIndex,
+                                      customerName: item?.customerName || "Customer",
+                                      productName: item?.productName || "Gift hamper",
+                                      createdAt: item?.createdAt || null,
+                                    });
+                                  }}
+                                  onKeyDown={(event) => {
+                                    event.stopPropagation();
+                                  }}
+                                  aria-label={`Open review image ${imageIndex + 1} from ${
+                                    item?.customerName || "customer"
+                                  }`}
+                                >
+                                  <img
+                                    src={image}
+                                    alt={`Customer review image ${imageIndex + 1}`}
+                                    loading="lazy"
+                                  />
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                          <p className="field-hint">
+                            {item?.createdAt ? formatDate(item.createdAt) : "Date unavailable"}
+                          </p>
+                        </article>
+                      );
+                    })}
+                  </div>
                   ) : null}
                 </>
               ) : selectedTab === STORE_TABS[2] ? (
@@ -1513,6 +1656,80 @@ export default function SellerStore() {
           </>
         )}
       </div>
+      {activeFeedbackViewer ? (
+        <div
+          className="seller-store-review-viewer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Customer review image"
+          onClick={() => setActiveFeedbackViewer(null)}
+        >
+          <div
+            className="seller-store-review-viewer-card"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="seller-store-review-viewer-close"
+              aria-label="Close review image"
+              onClick={() => setActiveFeedbackViewer(null)}
+            >
+              ×
+            </button>
+            <div
+              className="seller-store-review-viewer-stage"
+              onTouchStart={handleFeedbackViewerTouchStart}
+              onTouchEnd={handleFeedbackViewerTouchEnd}
+            >
+              <p className="seller-store-review-viewer-count">
+                {activeFeedbackIndex + 1}/{activeFeedbackImageCount || 1}
+              </p>
+              <button
+                type="button"
+                className="seller-store-review-viewer-nav seller-store-review-viewer-nav-prev"
+                aria-label="Show previous review image"
+                onClick={() =>
+                  setActiveFeedbackViewer((prev) =>
+                    moveFeedbackViewerIndex(prev, -1)
+                  )
+                }
+                disabled={!canViewPrevFeedbackImage}
+              >
+                ‹
+              </button>
+              <img
+                className="seller-store-review-viewer-image"
+                src={activeFeedbackImageSrc}
+                alt={activeFeedbackImageAlt}
+              />
+              <button
+                type="button"
+                className="seller-store-review-viewer-nav seller-store-review-viewer-nav-next"
+                aria-label="Show next review image"
+                onClick={() =>
+                  setActiveFeedbackViewer((prev) =>
+                    moveFeedbackViewerIndex(prev, 1)
+                  )
+                }
+                disabled={!canViewNextFeedbackImage}
+              >
+                ›
+              </button>
+            </div>
+            <div className="seller-store-review-viewer-copy">
+              <p>
+                <strong>{activeFeedbackViewer.customerName}</strong> on{" "}
+                {activeFeedbackViewer.productName}
+              </p>
+              <p>
+                {activeFeedbackViewer.createdAt
+                  ? formatDate(activeFeedbackViewer.createdAt)
+                  : "Date unavailable"}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
