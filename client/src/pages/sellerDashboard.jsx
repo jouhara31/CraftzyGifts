@@ -76,11 +76,28 @@ const monthLabel = (date) =>
     year: "numeric",
   }).format(date);
 
+const fullDateLabel = (value) => {
+  if (!value) return "Not available";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not available";
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+};
+
 const isSameMonth = (dateValue, baseDate) => {
   const date = new Date(dateValue);
   if (Number.isNaN(date.getTime())) return false;
   return date.getMonth() === baseDate.getMonth() && date.getFullYear() === baseDate.getFullYear();
 };
+
+const formatStatusLabel = (value) =>
+  String(value || "")
+    .trim()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase()) || "Unknown";
 
 export default function SellerDashboard() {
   const [sellerProfile, setSellerProfile] = useState(readStoredUser);
@@ -90,13 +107,13 @@ export default function SellerDashboard() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const navigate = useNavigate();
-  const clearSessionAndRedirect = () => {
+  const clearSessionAndRedirect = useCallback(() => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
     window.dispatchEvent(new Event("user:updated"));
     navigate("/login");
-  };
+  }, [navigate]);
 
   const loadDashboard = useCallback(async () => {
     const token = localStorage.getItem("token");
@@ -166,7 +183,7 @@ export default function SellerDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [navigate]);
+  }, [clearSessionAndRedirect]);
 
   useEffect(() => {
     loadDashboard();
@@ -179,6 +196,14 @@ export default function SellerDashboard() {
     typeof sellerStatus === "string" && sellerStatus.length > 0
       ? sellerStatus.slice(0, 1).toUpperCase() + sellerStatus.slice(1)
       : "Pending";
+  const sellerLocation =
+    [sellerProfile?.pickupAddress?.city, sellerProfile?.pickupAddress?.state]
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+      .join(", ") || "Location not shared";
+  const sellerJoinedLabel = fullDateLabel(sellerProfile?.createdAt);
+  const sellerSupportLabel =
+    sellerProfile?.supportEmail || sellerProfile?.phone || "Support contact not added";
 
   const orderStatusClass = (status) => {
     if (["placed", "pending_payment", "return_requested"].includes(status)) return "warning";
@@ -261,6 +286,9 @@ export default function SellerDashboard() {
     return {
       now,
       stats,
+      monthlyRevenue,
+      avgOrderValue,
+      activeListings,
       monthlyOrders,
       inProgressOrders,
       topProducts: rankedProducts.slice(0, 3),
@@ -270,6 +298,49 @@ export default function SellerDashboard() {
       returnRequestedCount,
     };
   }, [orders, products]);
+
+  const pendingOpsCount =
+    insights.awaitingAcceptanceCount + insights.lowStockCount + insights.returnRequestedCount;
+  const heroHighlights = [
+    {
+      label: "This month",
+      value: money(insights.monthlyRevenue),
+      note: `${insights.monthlyOrders.length} orders in ${monthLabel(insights.now)}`,
+    },
+    {
+      label: "Open tasks",
+      value: String(pendingOpsCount),
+      note: pendingOpsCount > 0 ? "Orders, returns, or stock need attention" : "No urgent actions right now",
+    },
+    {
+      label: "Live listings",
+      value: String(insights.activeListings),
+      note: `${insights.lowStockCount} low stock • Avg order ${money(insights.avgOrderValue)}`,
+    },
+  ];
+  const actionItems = [
+    {
+      label: "Orders waiting acceptance",
+      value: insights.awaitingAcceptanceCount,
+      note: "New orders to review and move into processing.",
+      cta: "Review",
+      onClick: () => goToOrders("placed"),
+    },
+    {
+      label: "Low-stock listings",
+      value: insights.lowStockCount,
+      note: "Products with 5 or fewer items remaining.",
+      cta: "Restock",
+      onClick: () => goToProducts({ lowStock: true }),
+    },
+    {
+      label: "Return requests",
+      value: insights.returnRequestedCount,
+      note: "Customer return or refund requests pending action.",
+      cta: "Handle",
+      onClick: () => goToOrders("return_requested"),
+    },
+  ];
 
   const downloadReport = () => {
     setError("");
@@ -389,40 +460,50 @@ export default function SellerDashboard() {
   };
 
   return (
-    <div className="page seller-page">
+    <div className="page seller-page seller-dashboard-page">
       <Header variant="seller" />
 
-      <section className="seller-hero">
-        <div>
+      <section className="seller-hero seller-dashboard-hero">
+        <div className="seller-dashboard-hero-main">
           <p className="seller-kicker">Seller Hub</p>
           <h2>Welcome back, {sellerName}</h2>
           <p className="seller-subtitle">
             Manage listings, track orders, and grow your craft business with
             real-time insights.
           </p>
-          <div className="seller-meta">
+          <div className="seller-meta seller-dashboard-meta">
             <span className="seller-chip">Store: {storeName}</span>
             <span className="seller-chip">Status: {sellerStatusLabel}</span>
             <span className="seller-chip">{orders.length} total orders</span>
+            <span className="seller-chip">Joined: {sellerJoinedLabel}</span>
+          </div>
+          <div className="seller-actions seller-dashboard-actions">
+            <button className="btn primary" type="button" onClick={() => goToProducts({ new: true })}>
+              Add new product
+            </button>
+            <button className="btn ghost" type="button" onClick={() => openMyStore(false)}>
+              View my store
+            </button>
+            <button className="btn ghost" type="button" onClick={() => openMyStore(true)}>
+              Edit store profile
+            </button>
+            <button className="btn ghost" type="button" onClick={downloadReport}>
+              Download report
+            </button>
+            <button className="btn ghost" type="button" onClick={loadDashboard}>
+              Refresh data
+            </button>
           </div>
         </div>
-        <div className="seller-actions">
-          <button className="btn primary" type="button" onClick={() => goToProducts({ new: true })}>
-            Add new product
-          </button>
-          <button className="btn ghost" type="button" onClick={() => openMyStore(false)}>
-            View my store
-          </button>
-          <button className="btn ghost" type="button" onClick={() => openMyStore(true)}>
-            Edit store profile
-          </button>
-          <button className="btn ghost" type="button" onClick={downloadReport}>
-            Download report
-          </button>
-          <button className="btn ghost" type="button" onClick={loadDashboard}>
-            Refresh data
-          </button>
-        </div>
+        <aside className="seller-dashboard-hero-aside" aria-label="Overview highlights">
+          {heroHighlights.map((item) => (
+            <article key={item.label} className="seller-dashboard-glance-card">
+              <p>{item.label}</p>
+              <strong>{item.value}</strong>
+              <span>{item.note}</span>
+            </article>
+          ))}
+        </aside>
       </section>
 
       {sellerStatus !== "approved" && (
@@ -436,115 +517,175 @@ export default function SellerDashboard() {
       {error && <p className="field-hint">{error}</p>}
       {notice && <p className="field-hint">{notice}</p>}
 
-      <div className="seller-main">
-        <div className="seller-overview">
-          <div className="seller-panel">
-            <div className="card-head">
-              <h3 className="card-title">This month</h3>
-              <span className="chip">{monthLabel(insights.now)}</span>
-            </div>
-            <div className="stat-grid">
-              {insights.stats.map((item) => (
-                <div key={item.label} className="stat-card">
-                  <p className="stat-label">{item.label}</p>
-                  <p className="stat-value">{item.value}</p>
-                  <p className="stat-delta">{item.delta}</p>
+      <div className="seller-main seller-dashboard-main">
+        <div className="seller-overview seller-dashboard-grid">
+          <div className="seller-dashboard-primary">
+            <div className="seller-panel seller-dashboard-panel">
+              <div className="card-head seller-dashboard-head">
+                <div>
+                  <h3 className="card-title">This month</h3>
+                  <p className="seller-dashboard-panel-subtitle">
+                    Track revenue, order volume, average ticket size, and listing health.
+                  </p>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="seller-panel">
-            <div className="card-head">
-              <h3 className="card-title">Orders in progress</h3>
-              <button className="btn ghost" type="button" onClick={() => goToOrders()}>
-                View all
-              </button>
-            </div>
-            <div className="orders-table compact">
-              <div className="order-row order-head">
-                <span>Order</span>
-                <span>Customer</span>
-                <span>Status</span>
-                <span>Total</span>
+                <span className="chip">{monthLabel(insights.now)}</span>
               </div>
-              {insights.inProgressOrders.slice(0, 3).map((order) => (
-                <div key={order._id} className="order-row">
-                  <span>{order._id?.slice(-8)?.toUpperCase()}</span>
-                  <span>{order.customer?.name || "Customer"}</span>
-                  <span className={`status-pill ${orderStatusClass(order.status)}`}>
-                    {order.status}
-                  </span>
-                  <span className="order-total">{money(order.total)}</span>
-                </div>
-              ))}
-              {!loading && insights.inProgressOrders.length === 0 && (
-                <p className="field-hint">No in-progress orders right now.</p>
-              )}
-            </div>
-          </div>
-
-          <div className="seller-panel">
-            <div className="card-head">
-              <h3 className="card-title">Action items</h3>
-            </div>
-            <ul className="seller-list">
-              <li>
-                <span>{insights.awaitingAcceptanceCount} orders waiting acceptance</span>
-                <button className="btn ghost" type="button" onClick={() => goToOrders("placed")}>
-                  Review
-                </button>
-              </li>
-              <li>
-                <span>Update stock for {insights.lowStockCount} listings</span>
-                <button
-                  className="btn ghost"
-                  type="button"
-                  onClick={() => goToProducts({ lowStock: true })}
-                >
-                  Restock
-                </button>
-              </li>
-              <li>
-                <span>{insights.returnRequestedCount} return requests pending</span>
-                <button
-                  className="btn ghost"
-                  type="button"
-                  onClick={() => goToOrders("return_requested")}
-                >
-                  Handle
-                </button>
-              </li>
-            </ul>
-          </div>
-
-          <div className="seller-panel">
-            <div className="card-head">
-              <h3 className="card-title">Top products</h3>
-            </div>
-            <div className="seller-mini-grid">
-              {insights.topProducts.map((item) => (
-                <button
-                  key={item._id}
-                  type="button"
-                  className="mini-card mini-card-action"
-                  onClick={() => openProductDetail(item._id)}
-                >
-                  <img src={getProductImage(item)} alt={item.name} />
-                  <div>
-                    <p className="mini-title">{item.name}</p>
-                    <p className="mini-sub">
-                      {money(item.price)} • {Number(item.stock || 0)} in stock •{" "}
-                      {insights.soldByProductId[item._id] || 0} sold
-                    </p>
+              <div className="stat-grid seller-dashboard-stat-grid">
+                {insights.stats.map((item) => (
+                  <div key={item.label} className="stat-card seller-dashboard-stat-card">
+                    <p className="stat-label">{item.label}</p>
+                    <p className="stat-value">{item.value}</p>
+                    <p className="stat-delta">{item.delta}</p>
                   </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="seller-panel seller-dashboard-panel">
+              <div className="card-head seller-dashboard-head">
+                <div>
+                  <h3 className="card-title">Orders in progress</h3>
+                  <p className="seller-dashboard-panel-subtitle">
+                    Keep the latest customer orders moving without opening the full order page.
+                  </p>
+                </div>
+                <button className="btn ghost" type="button" onClick={() => goToOrders()}>
+                  View all
                 </button>
-              ))}
-              {!loading && insights.topProducts.length === 0 && (
-                <p className="field-hint">No products yet. Add your first listing.</p>
-              )}
+              </div>
+              <div className="seller-dashboard-order-list">
+                {insights.inProgressOrders.slice(0, 4).map((order) => (
+                  <article key={order._id} className="seller-dashboard-order-card">
+                    <div className="seller-dashboard-order-main">
+                      <p className="seller-dashboard-order-code">
+                        #{order._id?.slice(-8)?.toUpperCase() || "ORDER"}
+                      </p>
+                      <strong>{order.customer?.name || "Customer"}</strong>
+                      <span>{order.product?.name || "Product"}</span>
+                    </div>
+                    <div className="seller-dashboard-order-side">
+                      <span className={`status-pill ${orderStatusClass(order.status)}`}>
+                        {formatStatusLabel(order.status)}
+                      </span>
+                      <strong>{money(order.total)}</strong>
+                      <button
+                        className="btn ghost"
+                        type="button"
+                        onClick={() => goToOrders(order.status)}
+                      >
+                        Open
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {!loading && insights.inProgressOrders.length === 0 && (
+                  <p className="field-hint">No in-progress orders right now.</p>
+                )}
+              </div>
             </div>
           </div>
+
+          <aside className="seller-dashboard-rail">
+            <div className="seller-panel seller-dashboard-panel">
+              <div className="card-head seller-dashboard-head">
+                <div>
+                  <h3 className="card-title">Action items</h3>
+                  <p className="seller-dashboard-panel-subtitle">
+                    High-signal tasks that affect fulfilment and store health.
+                  </p>
+                </div>
+              </div>
+              <div className="seller-dashboard-action-list">
+                {actionItems.map((item) => (
+                  <div key={item.label} className="seller-dashboard-action-item">
+                    <span className="seller-dashboard-action-count">{item.value}</span>
+                    <div className="seller-dashboard-action-copy">
+                      <strong>{item.label}</strong>
+                      <p>{item.note}</p>
+                    </div>
+                    <button className="btn ghost" type="button" onClick={item.onClick}>
+                      {item.cta}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="seller-panel seller-dashboard-panel">
+              <div className="card-head seller-dashboard-head">
+                <div>
+                  <h3 className="card-title">Store snapshot</h3>
+                  <p className="seller-dashboard-panel-subtitle">
+                    The current profile details customers see with your store.
+                  </p>
+                </div>
+              </div>
+              <div className="seller-dashboard-pulse-list">
+                <div className="seller-dashboard-pulse-item">
+                  <span>Store name</span>
+                  <strong>{storeName}</strong>
+                </div>
+                <div className="seller-dashboard-pulse-item">
+                  <span>Status</span>
+                  <strong>{sellerStatusLabel}</strong>
+                </div>
+                <div className="seller-dashboard-pulse-item">
+                  <span>Location</span>
+                  <strong>{sellerLocation}</strong>
+                </div>
+                <div className="seller-dashboard-pulse-item">
+                  <span>Support</span>
+                  <strong>{sellerSupportLabel}</strong>
+                </div>
+              </div>
+              <div className="seller-dashboard-pulse-actions">
+                <button className="btn ghost" type="button" onClick={() => openMyStore(false)}>
+                  View store
+                </button>
+                <button className="btn ghost" type="button" onClick={() => openMyStore(true)}>
+                  Edit profile
+                </button>
+              </div>
+            </div>
+
+            <div className="seller-panel seller-dashboard-panel">
+              <div className="card-head seller-dashboard-head">
+                <div>
+                  <h3 className="card-title">Top products</h3>
+                  <p className="seller-dashboard-panel-subtitle">
+                    Best-performing listings by sold quantity and stock movement.
+                  </p>
+                </div>
+              </div>
+              <div className="seller-dashboard-product-list">
+                {insights.topProducts.map((item, index) => (
+                  <button
+                    key={item._id}
+                    type="button"
+                    className="seller-dashboard-product-card"
+                    onClick={() => openProductDetail(item._id)}
+                  >
+                    <img src={getProductImage(item)} alt={item.name} />
+                    <div className="seller-dashboard-product-copy">
+                      <p className="seller-dashboard-product-rank">
+                        #{index + 1} performer
+                      </p>
+                      <p className="mini-title">{item.name}</p>
+                      <p className="mini-sub">
+                        {money(item.price)} • {Number(item.stock || 0)} in stock
+                      </p>
+                    </div>
+                    <span className="seller-dashboard-product-sales">
+                      {insights.soldByProductId[item._id] || 0} sold
+                    </span>
+                  </button>
+                ))}
+                {!loading && insights.topProducts.length === 0 && (
+                  <p className="field-hint">No products yet. Add your first listing.</p>
+                )}
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
     </div>

@@ -486,6 +486,7 @@ export default function Checkout() {
               )}
             </section>
           )}
+
         </div>
       </div>
     </div>

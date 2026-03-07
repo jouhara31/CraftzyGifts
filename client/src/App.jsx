@@ -33,6 +33,7 @@ import AdminAnalytics from "./pages/adminAnalytics";
 import AdminSettings from "./pages/adminSettings";
 import AdminAccount from "./pages/adminAccount";
 import Footer from "./components/footer";
+import SellerRoute from "./components/SellerRoute";
 
 function App() {
   const { pathname } = useLocation();
@@ -67,12 +68,54 @@ function App() {
         <Route path="/shipping-policy" element={<ShippingPolicy />} />
         <Route path="/register" element={<Register />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/seller/dashboard" element={<SellerDashboard />} />
-        <Route path="/seller/products" element={<SellerProducts />} />
-        <Route path="/seller/listed-items" element={<SellerListedItems />} />
-        <Route path="/seller/orders" element={<SellerOrders />} />
-        <Route path="/seller/payments" element={<SellerPayments />} />
-        <Route path="/seller/settings" element={<SellerSettings />} />
+        <Route
+          path="/seller/dashboard"
+          element={
+            <SellerRoute>
+              <SellerDashboard />
+            </SellerRoute>
+          }
+        />
+        <Route
+          path="/seller/products"
+          element={
+            <SellerRoute>
+              <SellerProducts />
+            </SellerRoute>
+          }
+        />
+        <Route
+          path="/seller/listed-items"
+          element={
+            <SellerRoute>
+              <SellerListedItems />
+            </SellerRoute>
+          }
+        />
+        <Route
+          path="/seller/orders"
+          element={
+            <SellerRoute>
+              <SellerOrders />
+            </SellerRoute>
+          }
+        />
+        <Route
+          path="/seller/payments"
+          element={
+            <SellerRoute>
+              <SellerPayments />
+            </SellerRoute>
+          }
+        />
+        <Route
+          path="/seller/settings"
+          element={
+            <SellerRoute>
+              <SellerSettings />
+            </SellerRoute>
+          }
+        />
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
         <Route path="/admin/sellers" element={<AdminSellers />} />
         <Route path="/admin/products" element={<AdminProducts />} />

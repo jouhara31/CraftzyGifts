@@ -4,8 +4,24 @@ import Header from "../components/Header";
 import { addToCart } from "../utils/cart";
 import { getWishlist, toggleWishlist } from "../utils/wishlist";
 import { getProductImage } from "../utils/productMedia";
+import { getCachedProductDetail, loadProductDetail } from "../utils/productDetailCache";
+import {
+  loadSellerStore as loadCachedSellerStore,
+  prefetchSellerStore,
+} from "../utils/sellerStoreCache";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const SELLER_STORE_SUMMARY_OPTIONS = {
+  includeProducts: false,
+  includeFeedbacks: false,
+  includeProductRatings: false,
+};
+const SELLER_STORE_PREFETCH_OPTIONS = {
+  limit: 60,
+  includeProducts: true,
+  includeFeedbacks: false,
+  includeProductRatings: true,
+};
 
 const parsePrice = (value) => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -14,6 +30,31 @@ const parsePrice = (value) => {
 };
 
 const formatPrice = (value) => Number(value || 0).toLocaleString("en-IN");
+const toStarText = (value) => {
+  const safe = Math.min(5, Math.max(0, Math.round(Number(value) || 0)));
+  return "★".repeat(safe).padEnd(5, "☆");
+};
+const formatReviewDate = (value) => {
+  if (!value) return "Date unavailable";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date unavailable";
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+const normalizeReviewImages = (value = []) =>
+  Array.from(
+    new Set(
+      (Array.isArray(value) ? value : [])
+        .map((entry) => String(entry || "").trim())
+        .filter(
+          (entry) =>
+            /^https?:\/\//i.test(entry) || /^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(entry)
+        )
+    )
+  ).slice(0, 4);
 
 const readStoredUserRole = () => {
   try {
@@ -109,28 +150,34 @@ export default function ProductDetail() {
 
   useEffect(() => {
     let ignore = false;
+    const cachedProduct = getCachedProductDetail(id);
+    const hasCachedProduct = Boolean(cachedProduct);
+
+    if (hasCachedProduct) {
+      setProduct(cachedProduct);
+      setActiveImageIndex(0);
+      setGiftNote("");
+      setLoadError("");
+      setLoading(false);
+    }
 
     const load = async () => {
-      setLoading(true);
+      if (!hasCachedProduct) {
+        setLoading(true);
+      }
       setLoadError("");
       try {
-        const res = await fetch(`${API_URL}/api/products/${id}`);
-        if (!res.ok) {
-          throw new Error(
-            res.status === 404
-              ? "Product not found."
-              : "Unable to load product right now."
-          );
-        }
-        const data = await res.json();
+        const data = await loadProductDetail(id, { includeFeedback: true, feedbackLimit: 6 });
         if (ignore) return;
         setProduct(data);
         setActiveImageIndex(0);
         setGiftNote("");
       } catch (error) {
         if (ignore) return;
-        setProduct(null);
-        setLoadError(error?.message || "Unable to load product right now.");
+        if (!hasCachedProduct) {
+          setProduct(null);
+          setLoadError(error?.message || "Unable to load product right now.");
+        }
       } finally {
         if (!ignore) setLoading(false);
       }
@@ -148,7 +195,12 @@ export default function ProductDetail() {
 
     const loadCatalog = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/products`);
+        const params = new URLSearchParams({
+          page: "1",
+          limit: "24",
+          sort: "newest",
+        });
+        const res = await fetch(`${API_URL}/api/products?${params.toString()}`);
         if (!res.ok) return;
         const data = await res.json();
         if (ignore) return;
@@ -254,6 +306,29 @@ export default function ProductDetail() {
       : product?.seller || {};
   const sellerDisplayName = sellerProfile?.storeName || sellerProfile?.name || sellerName || "Seller";
   const sellerAbout = String(sellerProfile?.about || "").trim();
+  const sellerDisplayRating = Number(
+    sellerStoreData?.stats?.displayRating || sellerStoreData?.stats?.avgRating || 0
+  );
+  const sellerRatingCount = Number(
+    sellerStoreData?.stats?.verifiedFeedbacks || sellerStoreData?.stats?.totalFeedbacks || 0
+  );
+  const productReviewStats =
+    product?.reviewStats && typeof product.reviewStats === "object"
+      ? product.reviewStats
+      : {};
+  const productReviewDisplayRating = Number(
+    productReviewStats?.displayRating || productReviewStats?.avgRating || 0
+  );
+  const productReviewCount = Number(
+    productReviewStats?.verifiedFeedbacks || productReviewStats?.totalFeedbacks || 0
+  );
+  const productRatingBreakdown =
+    productReviewStats?.ratingBreakdown && typeof productReviewStats.ratingBreakdown === "object"
+      ? productReviewStats.ratingBreakdown
+      : {};
+  const productFeedbackRows = Array.isArray(product?.feedbacks)
+    ? product.feedbacks.slice(0, 6)
+    : [];
   const sellerProfileImageRaw = String(sellerProfile?.profileImage || "").trim();
   const sellerProfileImage =
     sellerProfileImageRaw &&
@@ -358,7 +433,7 @@ export default function ProductDetail() {
   useEffect(() => {
     let ignore = false;
 
-    const loadSellerStore = async () => {
+    const hydrateSellerStore = async () => {
       if (!sellerId) {
         if (!ignore) {
           setSellerStoreData({ seller: null, products: [], stats: null });
@@ -367,11 +442,11 @@ export default function ProductDetail() {
       }
 
       try {
-        const res = await fetch(`${API_URL}/api/products/seller/${sellerId}/public?limit=16`);
-        if (!res.ok) {
-          throw new Error("Unable to load seller store.");
-        }
-        const data = await res.json();
+        const token = localStorage.getItem("token");
+        const data = await loadCachedSellerStore(sellerId, {
+          ...SELLER_STORE_SUMMARY_OPTIONS,
+          token,
+        });
         if (ignore) return;
         setSellerStoreData({
           seller: data?.seller || null,
@@ -384,11 +459,19 @@ export default function ProductDetail() {
       }
     };
 
-    loadSellerStore();
+    hydrateSellerStore();
     return () => {
       ignore = true;
     };
   }, [sellerId]);
+
+  const prefetchSellerStorePage = () => {
+    if (!sellerId) return;
+    prefetchSellerStore(sellerId, {
+      ...SELLER_STORE_PREFETCH_OPTIONS,
+      token: localStorage.getItem("token"),
+    });
+  };
 
   const recommendations = useMemo(() => {
     const activeProductId = String(product?._id || "").trim();
@@ -467,22 +550,23 @@ export default function ProductDetail() {
   }
 
   const buildCurrentCheckoutItem = () => {
-    const selectedOptions = {};
+    const preferenceNotes = [];
     if (hasCustomizationSelection && selectedOccasion) {
-      selectedOptions.occasion = selectedOccasion;
+      preferenceNotes.push(`Occasion: ${selectedOccasion}`);
     }
     if (hasCustomizationSelection && selectedPackagingStyle?.title) {
-      selectedOptions.packaging = selectedPackagingStyle.title;
+      preferenceNotes.push(`Packaging: ${selectedPackagingStyle.title}`);
     }
+    const customizationPreferenceNote = preferenceNotes.join(" | ");
 
     const totalCustomizationCharge = effectiveCustomizationCharge;
 
     const customizationPayload = hasCustomizationSelection
       ? {
-          ...(Object.keys(selectedOptions).length > 0
-            ? { selectedOptions }
-            : {}),
           ...(normalizedGiftNote ? { wishCardText: normalizedGiftNote } : {}),
+          ...(customizationPreferenceNote
+            ? { specialNote: customizationPreferenceNote }
+            : {}),
           ...(totalCustomizationCharge > 0
             ? { makingCharge: totalCustomizationCharge }
             : {}),
@@ -576,6 +660,13 @@ export default function ProductDetail() {
                   </div>
                   <div className="pdp-rating-row">
                     <span className="pdp-rating-copy">Sold by {sellerDisplayName}</span>
+                    {sellerRatingCount > 0 ? (
+                      <span className="pdp-rating-copy">
+                        {sellerDisplayRating.toFixed(1)} ★ ({sellerRatingCount} ratings)
+                      </span>
+                    ) : (
+                      <span className="pdp-rating-copy">No ratings yet</span>
+                    )}
                     <span className="pdp-rating-copy">
                       {isCustomizationEnabled ? "Customizable" : "Ready-made"}
                     </span>
@@ -787,6 +878,9 @@ export default function ProductDetail() {
                     className="pdp-inline-seller-link"
                     type="button"
                     onClick={() => navigate(`/store/${sellerId}`)}
+                    onMouseEnter={prefetchSellerStorePage}
+                    onFocus={prefetchSellerStorePage}
+                    onTouchStart={prefetchSellerStorePage}
                     disabled={!sellerId}
                   >
                     <span aria-hidden="true">
@@ -907,6 +1001,92 @@ export default function ProductDetail() {
               {notice}
             </p>
           )}
+
+          <div className="pdp-divider" />
+
+          <section className="pdp-product-review-block" aria-label="Customer reviews">
+            <div className="card-head">
+              <p className="card-title">Customer reviews</p>
+              <span className="chip">{productReviewCount} ratings</span>
+            </div>
+            {productReviewCount > 0 ? (
+              <>
+                <p className="pdp-product-review-rating">
+                  <span
+                    className="rating-stars"
+                    role="img"
+                    aria-label={`${productReviewDisplayRating.toFixed(1)} out of 5`}
+                  >
+                    {toStarText(productReviewDisplayRating)}
+                  </span>
+                  <strong>{productReviewDisplayRating.toFixed(1)}/5</strong>
+                  <span>{productReviewCount} verified ratings</span>
+                </p>
+                <div className="pdp-product-review-breakdown">
+                  {[5, 4, 3, 2, 1].map((star) => {
+                    const row =
+                      productRatingBreakdown?.[star] ||
+                      productRatingBreakdown?.[String(star)] ||
+                      {};
+                    const count = Number(typeof row === "number" ? row : row?.count || 0);
+                    const share = Number(typeof row === "number" ? 0 : row?.share || 0);
+                    return (
+                      <p key={`pdp-rating-${star}`}>
+                        <strong>{star}★:</strong> {count}{" "}
+                        {Number.isFinite(share) && share > 0 ? `(${share.toFixed(1)}%)` : ""}
+                      </p>
+                    );
+                  })}
+                </div>
+                {productFeedbackRows.length > 0 ? (
+                  <div className="pdp-product-review-list">
+                    {productFeedbackRows.map((entry, index) => {
+                      const reviewImages = normalizeReviewImages(entry?.images);
+                      return (
+                        <article
+                          key={entry?.id || `${entry?.customerName || "customer"}-${index}`}
+                          className="pdp-product-review-item"
+                        >
+                          <p className="pdp-product-review-head">
+                            <strong>{entry?.customerName || "Customer"}</strong>
+                            <span
+                              className="rating-stars"
+                              role="img"
+                              aria-label={`${Number(entry?.rating || 0)} out of 5`}
+                            >
+                              {toStarText(entry?.rating)}
+                            </span>
+                          </p>
+                          <p className="field-hint">
+                            Verified purchase • {formatReviewDate(entry?.createdAt)}
+                          </p>
+                          {entry?.comment ? (
+                            <p>{entry.comment}</p>
+                          ) : (
+                            <p className="field-hint">No written review.</p>
+                          )}
+                          {reviewImages.length > 0 ? (
+                            <div className="pdp-product-review-images">
+                              {reviewImages.map((image, imageIndex) => (
+                                <img
+                                  key={`${entry?.id || index}-review-image-${imageIndex}`}
+                                  src={image}
+                                  alt={`Customer review image ${imageIndex + 1}`}
+                                  loading="lazy"
+                                />
+                              ))}
+                            </div>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <p className="field-hint">No reviews for this product yet.</p>
+            )}
+          </section>
 
           </aside>
         </div>

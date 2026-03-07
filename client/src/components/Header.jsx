@@ -4,6 +4,11 @@ import logoPng from "../assets/logo.png";
 import logoCartPng from "../assets/logo-cart.png";
 import { getCart } from "../utils/cart";
 import { getWishlist } from "../utils/wishlist";
+import {
+  DEFAULT_CATEGORY_TREE,
+  buildCategoryPath,
+  loadCategoryTree,
+} from "../utils/categoryMaster";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
@@ -31,6 +36,21 @@ const readStoredUser = () => {
     return parsed;
   } catch {
     return null;
+  }
+};
+
+const readUserIdFromToken = () => {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) return "";
+    const payload = token.split(".")?.[1];
+    if (!payload) return "";
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const decoded = JSON.parse(atob(padded));
+    return String(decoded?.id || "").trim();
+  } catch {
+    return "";
   }
 };
 
@@ -74,142 +94,69 @@ const readCounts = (currentUser) => {
   };
 };
 
-const CUSTOMER_CATEGORY_TREE = [
-  { label: "Valentine's Day", category: "Valentine's Day", subcategories: [] },
-  {
-    label: "Birthday",
-    category: "Birthday",
-    subcategories: [
-      "For Him",
-      "For Her",
-      "For Boys",
-      "For Girls",
-      "For Husband",
-      "For Wife",
-      "For Boyfriend",
-      "For Girlfriend",
-      "For Brother",
-      "For Sister",
-      "For Dad",
-      "For Mom",
-      "For Friends",
-    ],
-  },
-  {
-    label: "Anniversary",
-    category: "Anniversary",
-    subcategories: [
-      "For Couples",
-      "For Husband",
-      "For Wife",
-      "For Boyfriend",
-      "For Girlfriend",
-      "For Parents",
-      "For Friends",
-    ],
-  },
-  {
-    label: "Wedding",
-    category: "Wedding",
-    subcategories: [
-      "Couples",
-      "Groom",
-      "Bride",
-      "Bride to be Gifts",
-      "Groom to be",
-      "Bridesmaid Gifts",
-      "For Friends",
-    ],
-  },
-  {
-    label: "Engagement",
-    category: "Engagement",
-    subcategories: ["For Couples", "For Bride to be", "For Groom to be"],
-  },
-  { label: "Festivals", category: "Festivals", subcategories: [] },
-  {
-    label: "Special Days",
-    category: "Special Days",
-    subcategories: [
-      "Valentine's Day Gifts",
-      "Friendship Day",
-      "Mother's Day",
-      "Doctors Day Gifts",
-      "Father's Day Gifts",
-      "Women's Day",
-      "New Year Gifts",
-      "Holiday",
-      "Men's Day",
-      "Year Ending",
-      "Children's Day",
-    ],
-  },
-  {
-    label: "Other Occasions",
-    category: "Other Occasions",
-    subcategories: [
-      "Congratulations",
-      "Housewarming",
-      "Home Visit",
-      "New Born",
-      "Retirement",
-      "Dad to Be",
-      "Mom to Be",
-      "Token of Love",
-      "Apology Gifts",
-      "Party",
-    ],
-  },
-  {
-    label: "Thank You",
-    category: "Thank You",
-    subcategories: ["Thank You Advocate", "Thank You Doctor", "Token of Love"],
-  },
-  {
-    label: "Gourmet Gifts",
-    category: "Gourmet Gifts",
-    subcategories: ["Yummy Hamper", "Snacks Hamper", "Coffee Hamper"],
-  },
-  {
-    label: "Corporate Gifts",
-    category: "Corporate",
-    subcategories: [
-      "Vacuum Mug Gift Set",
-      "Powerbank Gift Set",
-      "Pendrive Gift Set",
-      "Pen Gift Set",
-      "Mug Gift Set",
-      "Mouse Gift Set",
-      "Keychain Gift Set",
-      "Diary Gift Set",
-      "Bottle Gift Set",
-      "Belt Gift Set",
-      "Appreciation",
-      "Promotion",
-      "Kerala",
-    ],
-  },
-  { label: "Return Gifts", category: "Return gifts", subcategories: [] },
-  {
-    label: "Kerala Specials",
-    category: "Kerala Specials",
-    subcategories: [
-      "Handicrafts",
-      "Kerala Hampers",
-      "Vishu Kani Items",
-      "Thiru Udayada",
-      "Spices",
-      "Snacks",
-    ],
-  },
-  { label: "Gift Items", category: "Gift Items", subcategories: [] },
-];
-
-const buildCategoryPath = ({ category, query } = {}) => {
-  const params = new URLSearchParams();
-  if (category) params.set("category", category);
-  if (query) params.set("q", query);
-  return `/products?${params.toString()}`;
+const HeaderMenuIcon = ({ kind }) => {
+  if (kind === "back") {
+    return (
+      <svg className="header-inline-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m10 6-6 6 6 6" />
+        <path d="M5 12h15" />
+      </svg>
+    );
+  }
+  if (kind === "login") {
+    return (
+      <svg className="header-inline-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M13 4h6v16h-6" />
+        <path d="M3 12h11" />
+        <path d="m10 9 3 3-3 3" />
+      </svg>
+    );
+  }
+  if (kind === "logout") {
+    return (
+      <svg className="header-inline-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M11 4H5v16h6" />
+        <path d="M21 12H10" />
+        <path d="m13 9-3 3 3 3" />
+      </svg>
+    );
+  }
+  if (kind === "home") {
+    return (
+      <svg className="header-inline-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m4 11 8-7 8 7" />
+        <path d="M6.5 10.5V20h11v-9.5" />
+      </svg>
+    );
+  }
+  if (kind === "profile") {
+    return (
+      <svg className="header-inline-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="8" r="3.2" />
+        <path d="M5.5 19a6.5 6.5 0 0 1 13 0" />
+      </svg>
+    );
+  }
+  if (kind === "seller") {
+    return (
+      <svg className="header-inline-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 10h16" />
+        <path d="M6 10v8h12v-8" />
+        <path d="m6 10 1.8-4h8.4l1.8 4" />
+      </svg>
+    );
+  }
+  if (kind === "register") {
+    return (
+      <svg className="header-inline-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="9" cy="8" r="3" />
+        <path d="M3.5 18a5.5 5.5 0 0 1 11 0" />
+        <path d="M18 8v6" />
+        <path d="M15 11h6" />
+      </svg>
+    );
+  }
+  return null;
 };
 
 export default function Header({ variant, onFilterClick, isFilterActive = false }) {
@@ -217,8 +164,9 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const [accountOpen, setAccountOpen] = useState(false);
   const [allCategoriesOpen, setAllCategoriesOpen] = useState(false);
   const [canScrollCategoryRight, setCanScrollCategoryRight] = useState(false);
+  const [customerCategoryTree, setCustomerCategoryTree] = useState(DEFAULT_CATEGORY_TREE);
   const [activeMenuCategory, setActiveMenuCategory] = useState(
-    CUSTOMER_CATEGORY_TREE[0]?.label || ""
+    DEFAULT_CATEGORY_TREE[0]?.label || ""
   );
   const [counts, setCounts] = useState(() => readCounts(readStoredUser()));
   const [searchText, setSearchText] = useState(() => {
@@ -242,6 +190,10 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const brandLogo = isCartRoute ? logoCartPng : logoPng;
   const brandLabel = isCartRoute ? "Your Cart" : "Craftzy Gifts";
   const brandSubtext = isCartRoute ? "Review your items before checkout" : "";
+  const categoryTree =
+    Array.isArray(customerCategoryTree) && customerCategoryTree.length > 0
+      ? customerCategoryTree
+      : DEFAULT_CATEGORY_TREE;
 
   useEffect(() => {
     const syncUser = () => {
@@ -296,7 +248,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     return () => {
       active = false;
     };
-  }, [user?.email, user?.profileImage]);
+  }, [user]);
 
   useEffect(() => {
     const syncCounts = () => setCounts(readCounts(readStoredUser()));
@@ -309,6 +261,27 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       window.removeEventListener("user:updated", syncCounts);
     };
   }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const hydrateCategoryTree = async () => {
+      const nextTree = await loadCategoryTree();
+      if (!ignore && Array.isArray(nextTree) && nextTree.length > 0) {
+        setCustomerCategoryTree(nextTree);
+      }
+    };
+
+    hydrateCategoryTree();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (categoryTree.some((item) => item.label === activeMenuCategory)) return;
+    setActiveMenuCategory(categoryTree[0]?.label || "");
+  }, [categoryTree, activeMenuCategory]);
 
   useEffect(() => {
     if (!accountOpen) return undefined;
@@ -392,6 +365,8 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const sellerAvatarSrc =
     user?.profileImage || user?.avatar || user?.photo || user?.image || user?.imageUrl || "";
   const sellerAvatarInitial = sellerNameLabel.slice(0, 1).toUpperCase() || "S";
+  const sellerId = String(user?.id || user?._id || readUserIdFromToken()).trim();
+  const sellerStorePath = sellerId ? `/store/${sellerId}` : "/seller/dashboard";
   const sellerPendingOrders = Math.max(Number(user?.sellerPendingOrders || 0), 0);
   const scrollCategoryLinks = (direction = 1) => {
     const node = categoryLinksRef.current;
@@ -407,13 +382,13 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     setAllCategoriesOpen((prev) => !prev);
   };
 
-  const customerNavItems = CUSTOMER_CATEGORY_TREE.map((item) => ({
+  const customerNavItems = categoryTree.map((item) => ({
     label: item.label,
     path: buildCategoryPath({ category: item.category }),
   }));
   const activeCategoryGroup =
-    CUSTOMER_CATEGORY_TREE.find((item) => item.label === activeMenuCategory) ||
-    CUSTOMER_CATEGORY_TREE[0];
+    categoryTree.find((item) => item.label === activeMenuCategory) ||
+    categoryTree[0];
 
   useEffect(() => {
     setAllCategoriesOpen(false);
@@ -475,23 +450,27 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           </span>
         </Link>
         <nav className="auth-header-nav" aria-label="Auth actions">
-          <Link className="auth-header-link" to="/">
+          <Link className="auth-header-link with-icon" to="/">
+            <HeaderMenuIcon kind="back" />
             Back to Home
           </Link>
           {isRegisterRoute ? (
             <>
-              <Link className="auth-header-link" to="/login">
+              <Link className="auth-header-link with-icon" to="/login">
+                <HeaderMenuIcon kind="login" />
                 Login
               </Link>
               <Link
-                className={`auth-header-link ${sellerIntent ? "active" : ""}`}
+                className={`auth-header-link with-icon ${sellerIntent ? "active" : ""}`}
                 to="/register?seller=1"
               >
+                <HeaderMenuIcon kind="seller" />
                 Become a Seller
               </Link>
             </>
           ) : (
-            <Link className="auth-header-link" to="/register">
+            <Link className="auth-header-link with-icon" to="/register">
+              <HeaderMenuIcon kind="register" />
               Create Account
             </Link>
           )}
@@ -593,29 +572,25 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                     {user ? (
                       <>
                         <button
-                          className="dropdown-item"
+                          className="dropdown-item with-icon"
                           type="button"
                           onClick={() => handleProtectedNav("/")}
                         >
+                          <HeaderMenuIcon kind="home" />
                           Home
                         </button>
-                        <button
-                          className="dropdown-item"
-                          type="button"
-                          onClick={() => handleProtectedNav("/profile")}
-                        >
-                          My Profile
-                        </button>
-                        <button className="dropdown-item danger" type="button" onClick={handleLogout}>
+                        <button className="dropdown-item with-icon danger" type="button" onClick={handleLogout}>
+                          <HeaderMenuIcon kind="logout" />
                           Logout
                         </button>
                       </>
                     ) : (
                       <button
-                        className="dropdown-item"
+                        className="dropdown-item with-icon"
                         type="button"
                         onClick={() => handleProtectedNav("/login")}
                       >
+                        <HeaderMenuIcon kind="login" />
                         Login
                       </button>
                     )}
@@ -631,6 +606,14 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
             to="/seller/dashboard"
           >
             Overview
+          </Link>
+          <Link
+            className={`nav-link ${
+              sellerActive("/seller/store") || location.pathname.startsWith("/store/") ? "active" : ""
+            }`}
+            to={sellerStorePath}
+          >
+            My Store
           </Link>
           <Link
             className={`nav-link ${sellerActive("/seller/products") ? "active" : ""}`}
@@ -655,18 +638,6 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
             to="/seller/payments"
           >
             Payments
-          </Link>
-          <Link
-            className={`nav-link ${sellerActive("/seller/settings") ? "active" : ""}`}
-            to="/seller/settings"
-          >
-            Settings
-          </Link>
-          <Link
-            className={`nav-link ${sellerActive("/profile") ? "active" : ""}`}
-            to="/profile"
-          >
-            My Profile
           </Link>
         </nav>
       </header>
@@ -717,24 +688,26 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           </Link>
         </nav>
 
-        <div className="header-right">
-          <form className="search wide" onSubmit={handleCatalogSearch}>
-            <input
+          <div className="header-right">
+            <form className="search wide" onSubmit={handleCatalogSearch}>
+              <input
               className="search-input"
               type="search"
               placeholder="Search products..."
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
             />
-          </form>
-          <div className="seller-toolbar">
+            </form>
+            <div className="seller-toolbar">
             <button className="btn ghost" type="button" onClick={() => navigate("/profile")}>
+              <HeaderMenuIcon kind="profile" />
               Profile
             </button>
             <button className="btn ghost" type="button" onClick={handleLogout}>
+              <HeaderMenuIcon kind="logout" />
               Logout
             </button>
-          </div>
+            </div>
         </div>
       </header>
     );
@@ -811,17 +784,19 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           <div className="header-actions-row">
             {showGuestAuthButtons ? (
               <div className="header-guest-auth">
-                <Link className="header-auth-link" to="/register?seller=1">
+                <Link className="header-auth-link with-icon" to="/register?seller=1">
+                  <HeaderMenuIcon kind="seller" />
                   Become a Seller
                 </Link>
-                <Link className="header-auth-link" to="/login">
+                <Link className="header-auth-link with-icon" to="/login">
+                  <HeaderMenuIcon kind="login" />
                   Login
                 </Link>
               </div>
             ) : (
               <div className="account-menu" ref={accountRef}>
                 <button
-                  className={`header-auth-link ${user ? "account-trigger" : ""}`}
+                  className={`header-auth-link ${user ? "account-trigger" : "with-icon"}`}
                   type="button"
                   aria-expanded={accountOpen}
                   onClick={() => {
@@ -848,7 +823,10 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                       <span>{authLabel}</span>
                     </>
                   ) : (
-                    authLabel
+                    <>
+                      <HeaderMenuIcon kind="login" />
+                      {authLabel}
+                    </>
                   )}
                 </button>
                 {accountOpen && (
@@ -856,29 +834,33 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                     {user ? (
                       <>
                         <button
-                          className="dropdown-item"
+                          className="dropdown-item with-icon"
                           type="button"
                           onClick={() => handleProtectedNav("/")}
                         >
+                          <HeaderMenuIcon kind="home" />
                           Home
                         </button>
                         <button
-                          className="dropdown-item"
+                          className="dropdown-item with-icon"
                           type="button"
                           onClick={() => handleProtectedNav("/profile")}
                         >
+                          <HeaderMenuIcon kind="profile" />
                           My Profile
                         </button>
-                        <button className="dropdown-item" type="button" onClick={handleLogout}>
+                        <button className="dropdown-item with-icon" type="button" onClick={handleLogout}>
+                          <HeaderMenuIcon kind="logout" />
                           Logout
                         </button>
                       </>
                     ) : (
                       <button
-                        className="dropdown-item"
+                        className="dropdown-item with-icon"
                         type="button"
                         onClick={() => handleProtectedNav("/login")}
                       >
+                        <HeaderMenuIcon kind="login" />
                         Login
                       </button>
                     )}
@@ -949,7 +931,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                   aria-label="All product categories"
                 >
                   <div className="header-categories-main" role="listbox">
-                    {CUSTOMER_CATEGORY_TREE.map((item) => (
+                    {categoryTree.map((item) => (
                       <button
                         key={item.label}
                         type="button"
@@ -1004,7 +986,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                             className="header-sub-link"
                             to={buildCategoryPath({
                               category: activeCategoryGroup.category,
-                              query: item,
+                              subcategory: item,
                             })}
                             onClick={() => setAllCategoriesOpen(false)}
                           >

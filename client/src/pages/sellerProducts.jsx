@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
+import {
+  DEFAULT_CATEGORY_TREE,
+  clearCategoryTreeCache,
+  findCategoryGroup,
+  loadCategoryTree,
+  normalizeCategoryKey,
+} from "../utils/categoryMaster";
 import { getProductImage } from "../utils/productMedia";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
@@ -14,7 +21,6 @@ const LEGACY_OPTION_LABELS = {
   perfumes: "Perfumes",
   cards: "Cards",
 };
-
 const roundMoney = (value) => Math.round(Number(value || 0) * 100) / 100;
 
 const createId = (prefix) =>
@@ -22,27 +28,115 @@ const createId = (prefix) =>
     .toString(36)
     .slice(-5)}`;
 
-const normalizeCatalogForForm = (catalog = []) =>
-  (Array.isArray(catalog) ? catalog : [])
-    .map((category, categoryIndex) => {
-      const items = (Array.isArray(category?.items) ? category.items : [])
-        .map((item, itemIndex) => ({
-          id: String(item?.id || createId(`item_${categoryIndex}_${itemIndex}`)),
-          name: String(item?.name || ""),
-          price: String(Number(item?.price || 0)),
-          stock: String(Number(item?.stock || 0)),
-          image: String(item?.image || ""),
-          active: item?.active !== false,
-        }))
-        .filter((item) => item.name.trim());
+const CUSTOM_CATEGORY_OPTION = "__custom_category__";
+const CUSTOM_SUBCATEGORY_OPTION = "__custom_subcategory__";
+const normalizeText = (value = "") => String(value || "").trim();
 
-      return {
-        id: String(category?.id || createId(`cat_${categoryIndex}`)),
-        name: String(category?.name || ""),
-        items,
-      };
-    })
-    .filter((category) => category.name.trim() || category.items.length > 0);
+const resolveCategorySelectValue = (formState, categoryTree) => {
+  if (formState.categoryMode === "custom") return CUSTOM_CATEGORY_OPTION;
+  const match = findCategoryGroup(categoryTree, formState.category);
+  return match ? match.category : formState.category ? CUSTOM_CATEGORY_OPTION : "";
+};
+
+const resolveSubcategorySelectValue = (formState, categoryTree) => {
+  if (formState.subcategoryMode === "custom") return CUSTOM_SUBCATEGORY_OPTION;
+  const activeGroup = findCategoryGroup(categoryTree, formState.category);
+  const match =
+    activeGroup?.subcategories?.find(
+      (item) => normalizeCategoryKey(item) === normalizeCategoryKey(formState.subcategory)
+    ) || "";
+  return match || (formState.subcategory ? CUSTOM_SUBCATEGORY_OPTION : "");
+};
+
+function CategoryFieldsEditor({
+  idPrefix,
+  formState,
+  categoryTree,
+  onCategorySelect,
+  onCategoryInput,
+  onSubcategorySelect,
+  onSubcategoryInput,
+}) {
+  const activeCategoryGroup = findCategoryGroup(categoryTree, formState.category);
+  const availableSubcategories = Array.isArray(activeCategoryGroup?.subcategories)
+    ? activeCategoryGroup.subcategories
+    : [];
+  const showCustomCategoryInput =
+    formState.categoryMode === "custom" ||
+    (normalizeText(formState.category) && !activeCategoryGroup);
+  const showCustomSubcategoryInput =
+    formState.subcategoryMode === "custom" ||
+    (normalizeText(formState.subcategory) &&
+      !availableSubcategories.some(
+        (item) => normalizeCategoryKey(item) === normalizeCategoryKey(formState.subcategory)
+      ));
+
+  return (
+    <>
+      <div className="field-row">
+        <div className="field">
+          <label htmlFor={`${idPrefix}CategorySelect`}>Category</label>
+          <select
+            id={`${idPrefix}CategorySelect`}
+            value={resolveCategorySelectValue(formState, categoryTree)}
+            onChange={onCategorySelect}
+          >
+            <option value="">Select category</option>
+            {categoryTree.map((group) => (
+              <option key={group.id || group.category} value={group.category}>
+                {group.label || group.category}
+              </option>
+            ))}
+            <option value={CUSTOM_CATEGORY_OPTION}>Add new category</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor={`${idPrefix}SubcategorySelect`}>Subcategory 1</label>
+          <select
+            id={`${idPrefix}SubcategorySelect`}
+            value={resolveSubcategorySelectValue(formState, categoryTree)}
+            onChange={onSubcategorySelect}
+            disabled={!normalizeText(formState.category)}
+          >
+            <option value="">No subcategory</option>
+            {availableSubcategories.map((item) => (
+              <option key={`${idPrefix}-${item}`} value={item}>
+                {item}
+              </option>
+            ))}
+            <option value={CUSTOM_SUBCATEGORY_OPTION}>Add new subcategory</option>
+          </select>
+        </div>
+      </div>
+
+      {showCustomCategoryInput ? (
+        <div className="field">
+          <label htmlFor={`${idPrefix}CategoryCustom`}>New category</label>
+          <input
+            id={`${idPrefix}CategoryCustom`}
+            type="text"
+            value={formState.category}
+            placeholder="Type a unique category"
+            onChange={onCategoryInput}
+          />
+        </div>
+      ) : null}
+
+      {showCustomSubcategoryInput ? (
+        <div className="field">
+          <label htmlFor={`${idPrefix}SubcategoryCustom`}>New subcategory 1</label>
+          <input
+            id={`${idPrefix}SubcategoryCustom`}
+            type="text"
+            value={formState.subcategory}
+            placeholder="Type a unique subcategory"
+            onChange={onSubcategoryInput}
+          />
+        </div>
+      ) : null}
+    </>
+  );
+}
 
 const mapLegacyOptionsToCatalog = (options = {}) =>
   Object.entries(LEGACY_OPTION_LABELS)
@@ -67,169 +161,6 @@ const mapLegacyOptionsToCatalog = (options = {}) =>
       };
     })
     .filter(Boolean);
-
-const toPayloadCatalog = (catalog = []) =>
-  (Array.isArray(catalog) ? catalog : [])
-    .map((category, categoryIndex) => {
-      const name = String(category?.name || "").trim();
-      if (!name) return null;
-
-      const items = (Array.isArray(category?.items) ? category.items : [])
-        .map((item, itemIndex) => {
-          const itemName = String(item?.name || "").trim();
-          if (!itemName) return null;
-
-          const price = Number(item?.price);
-          const stock = Number(item?.stock);
-
-          return {
-            id: String(item?.id || createId(`item_${categoryIndex}_${itemIndex}`)),
-            name: itemName,
-            price: Number.isFinite(price) && price >= 0 ? price : 0,
-            stock: Number.isFinite(stock) && stock >= 0 ? Math.trunc(stock) : 0,
-            image: String(item?.image || "").trim(),
-            active: item?.active !== false,
-          };
-        })
-        .filter(Boolean);
-
-      if (items.length === 0) return null;
-
-      return {
-        id: String(category?.id || createId(`cat_${categoryIndex}`)),
-        name,
-        items,
-      };
-    })
-    .filter(Boolean);
-
-function CustomizationCatalogEditor({
-  idPrefix,
-  catalog,
-  onCategoryAdd,
-  onCategoryRemove,
-  onCategoryNameChange,
-  onItemAdd,
-  onItemRemove,
-  onItemChange,
-}) {
-  return (
-    <div className="field">
-      <label>Customization categories and items</label>
-      <p className="field-hint">
-        Add only items available in your shop. Customers can choose any of these.
-      </p>
-
-      {(catalog || []).length === 0 && (
-        <p className="field-hint">No categories added yet.</p>
-      )}
-
-      {(catalog || []).map((category, categoryIndex) => (
-        <div key={category.id} className="seller-panel">
-          <div className="field-row">
-            <div className="field">
-              <label htmlFor={`${idPrefix}Category${category.id}`}>Category name</label>
-              <input
-                id={`${idPrefix}Category${category.id}`}
-                type="text"
-                value={category.name}
-                placeholder="Eg: Chocolates, Flowers, Frames"
-                onChange={(event) =>
-                  onCategoryNameChange(category.id, event.target.value)
-                }
-              />
-            </div>
-          </div>
-
-          {(category.items || []).map((item, itemIndex) => (
-            <div key={item.id} className="field-row">
-              <div className="field">
-                <label htmlFor={`${idPrefix}ItemName${item.id}`}>Item name</label>
-                <input
-                  id={`${idPrefix}ItemName${item.id}`}
-                  type="text"
-                  value={item.name}
-                  placeholder={`Item ${itemIndex + 1}`}
-                  onChange={(event) =>
-                    onItemChange(category.id, item.id, "name", event.target.value)
-                  }
-                />
-              </div>
-              <div className="field">
-                <label htmlFor={`${idPrefix}ItemPrice${item.id}`}>Extra charge</label>
-                <input
-                  id={`${idPrefix}ItemPrice${item.id}`}
-                  type="number"
-                  min="0"
-                  value={item.price}
-                  onChange={(event) =>
-                    onItemChange(category.id, item.id, "price", event.target.value)
-                  }
-                />
-              </div>
-              <div className="field">
-                <label htmlFor={`${idPrefix}ItemStock${item.id}`}>Stock</label>
-                <input
-                  id={`${idPrefix}ItemStock${item.id}`}
-                  type="number"
-                  min="0"
-                  value={item.stock}
-                  onChange={(event) =>
-                    onItemChange(category.id, item.id, "stock", event.target.value)
-                  }
-                />
-              </div>
-              <div className="field">
-                <label htmlFor={`${idPrefix}ItemActive${item.id}`}>Available</label>
-                <input
-                  id={`${idPrefix}ItemActive${item.id}`}
-                  type="checkbox"
-                  checked={Boolean(item.active)}
-                  onChange={(event) =>
-                    onItemChange(category.id, item.id, "active", event.target.checked)
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>&nbsp;</label>
-                <button
-                  className="btn ghost"
-                  type="button"
-                  onClick={() => onItemRemove(category.id, item.id)}
-                >
-                  Remove item
-                </button>
-              </div>
-            </div>
-          ))}
-
-          <div className="seller-toolbar">
-            <button
-              className="btn ghost"
-              type="button"
-              onClick={() => onItemAdd(category.id)}
-            >
-              Add item
-            </button>
-            <button
-              className="btn ghost"
-              type="button"
-              onClick={() => onCategoryRemove(category.id)}
-            >
-              Remove category
-            </button>
-          </div>
-        </div>
-      ))}
-
-      <div className="seller-toolbar">
-        <button className="btn ghost" type="button" onClick={onCategoryAdd}>
-          Add category
-        </button>
-      </div>
-    </div>
-  );
-}
 
 const normalizeTextAreaLines = (value = "", maxItems = 20) =>
   Array.from(
@@ -358,6 +289,9 @@ const buildInitialProductForm = () => ({
   name: "",
   description: "",
   category: "",
+  subcategory: "",
+  categoryMode: "select",
+  subcategoryMode: "select",
   price: "",
   mrp: "",
   stock: "0",
@@ -373,6 +307,7 @@ const buildInitialProductForm = () => ({
   imageName: "",
   status: "active",
   customizationCatalog: [],
+  hiddenCustomizationCatalog: [],
 });
 
 const buildProductPayload = (formState) => {
@@ -388,11 +323,18 @@ const buildProductPayload = (formState) => {
     : deliveryMinDays;
   const deliveryMaxDays =
     deliveryMinDays > 0 ? Math.max(deliveryMaxBase, deliveryMinDays) : deliveryMaxBase;
+  const preservedCustomizationCatalog = formState.isCustomizable
+    ? (Array.isArray(formState.hiddenCustomizationCatalog)
+        ? formState.hiddenCustomizationCatalog
+        : []
+      ).filter(Boolean)
+    : [];
 
   return {
     name: formState.name.trim(),
     description: formState.description.trim(),
     category: formState.category.trim(),
+    subcategory: formState.subcategory.trim(),
     price,
     mrp:
       Number.isFinite(parsedMrp) && parsedMrp > 0 ? parsedMrp : 0,
@@ -410,13 +352,14 @@ const buildProductPayload = (formState) => {
     status: formState.status === "inactive" ? "inactive" : "active",
     images: formState.imageData ? [formState.imageData] : [],
     customizationCatalog: formState.isCustomizable
-      ? toPayloadCatalog(formState.customizationCatalog)
+      ? preservedCustomizationCatalog
       : [],
   };
 };
 
 const validatePayload = (payload) => {
   if (!payload.name) return "Product name is required.";
+  if (!payload.category) return "Category is required.";
   if (!Number.isFinite(payload.price) || payload.price <= 0) {
     return "Price must be greater than zero.";
   }
@@ -541,29 +484,37 @@ const getModerationReason = (product) => {
   return "";
 };
 
-const mapProductToForm = (product = {}) => ({
-  name: product.name || "",
-  description: product.description || "",
-  category: product.category || "",
-  price: String(Number(product.price || 0)),
-  mrp: String(Number(product.mrp || 0)),
-  stock: String(Number(product.stock || 0)),
-  deliveryMinDays: String(Number(product.deliveryMinDays || 0)),
-  deliveryMaxDays: String(Number(product.deliveryMaxDays || 0)),
-  occasionsText: joinListForField(product.occasions),
-  includedItemsText: joinListForField(product.includedItems),
-  highlightsText: joinListForField(product.highlights),
-  packagingStyles: normalizePackagingStylesForForm(product.packagingStyles),
-  isCustomizable: Boolean(product.isCustomizable),
-  makingCharge: String(Number(product.makingCharge || 0)),
-  imageData: Array.isArray(product.images) && product.images[0] ? product.images[0] : "",
-  imageName: "",
-  status: product.status === "inactive" ? "inactive" : "active",
-  customizationCatalog:
+const mapProductToForm = (product = {}) => {
+  const preservedCustomizationCatalog =
     Array.isArray(product.customizationCatalog) && product.customizationCatalog.length > 0
-      ? normalizeCatalogForForm(product.customizationCatalog)
-      : mapLegacyOptionsToCatalog(product.customizationOptions),
-});
+      ? product.customizationCatalog
+      : mapLegacyOptionsToCatalog(product.customizationOptions);
+
+  return {
+    name: product.name || "",
+    description: product.description || "",
+    category: product.category || "",
+    subcategory: product.subcategory || "",
+    categoryMode: "select",
+    subcategoryMode: "select",
+    price: String(Number(product.price || 0)),
+    mrp: String(Number(product.mrp || 0)),
+    stock: String(Number(product.stock || 0)),
+    deliveryMinDays: String(Number(product.deliveryMinDays || 0)),
+    deliveryMaxDays: String(Number(product.deliveryMaxDays || 0)),
+    occasionsText: joinListForField(product.occasions),
+    includedItemsText: joinListForField(product.includedItems),
+    highlightsText: joinListForField(product.highlights),
+    packagingStyles: normalizePackagingStylesForForm(product.packagingStyles),
+    isCustomizable: Boolean(product.isCustomizable),
+    makingCharge: String(Number(product.makingCharge || 0)),
+    imageData: Array.isArray(product.images) && product.images[0] ? product.images[0] : "",
+    imageName: "",
+    status: product.status === "inactive" ? "inactive" : "active",
+    customizationCatalog: [],
+    hiddenCustomizationCatalog: preservedCustomizationCatalog,
+  };
+};
 
 export default function SellerProducts() {
   const [searchParams] = useSearchParams();
@@ -582,6 +533,7 @@ export default function SellerProducts() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editingId, setEditingId] = useState("");
   const [expandedModerationId, setExpandedModerationId] = useState("");
+  const [categoryTree, setCategoryTree] = useState(DEFAULT_CATEGORY_TREE);
   const [form, setForm] = useState(buildInitialProductForm);
   const [editForm, setEditForm] = useState(buildInitialProductForm);
   const imageInputRef = useRef(null);
@@ -590,10 +542,21 @@ export default function SellerProducts() {
   const editNameInputRef = useRef(null);
   const navigate = useNavigate();
 
+  const refreshCategoryTree = useCallback(async (force = false) => {
+    const nextTree = await loadCategoryTree({ force });
+    if (Array.isArray(nextTree) && nextTree.length > 0) {
+      setCategoryTree(nextTree);
+    }
+  }, []);
+
   useEffect(() => {
     if (searchParams.get("new") === "1") setShowCreateForm(true);
     if (searchParams.get("lowStock") === "1") setLowStockOnly(true);
   }, [searchParams]);
+
+  useEffect(() => {
+    refreshCategoryTree();
+  }, [refreshCategoryTree]);
 
   useEffect(() => {
     if (!editingId) return;
@@ -636,7 +599,9 @@ export default function SellerProducts() {
 
     if (text) {
       filtered = filtered.filter((item) =>
-        `${item.name || ""} ${item.category || ""}`.toLowerCase().includes(text)
+        `${item.name || ""} ${item.category || ""} ${item.subcategory || ""}`
+          .toLowerCase()
+          .includes(text)
       );
     }
 
@@ -722,6 +687,8 @@ export default function SellerProducts() {
       }
       setProducts((prev) => [data, ...prev]);
       setForm(buildInitialProductForm());
+      clearCategoryTreeCache();
+      await refreshCategoryTree(true);
       if (imageInputRef.current) {
         imageInputRef.current.value = "";
       }
@@ -746,7 +713,6 @@ export default function SellerProducts() {
           ...prev,
           isCustomizable: false,
           makingCharge: "0",
-          customizationCatalog: [],
         };
       }
       return { ...prev, [field]: value };
@@ -762,91 +728,89 @@ export default function SellerProducts() {
           ...prev,
           isCustomizable: false,
           makingCharge: "0",
-          customizationCatalog: [],
         };
       }
       return { ...prev, [field]: value };
     });
   };
 
-  const updateCatalog = (setter, updater) => {
+  const handleCategorySelect = (setter) => (event) => {
+    const selectedValue = String(event.target.value || "");
+    setter((prev) => {
+      if (selectedValue === CUSTOM_CATEGORY_OPTION) {
+        return {
+          ...prev,
+          categoryMode: "custom",
+          category:
+            prev.categoryMode === "custom" ? prev.category : "",
+          subcategory:
+            prev.subcategoryMode === "custom" ? prev.subcategory : "",
+          subcategoryMode: prev.subcategoryMode === "custom" ? "custom" : "select",
+        };
+      }
+
+      if (!selectedValue) {
+        return {
+          ...prev,
+          category: "",
+          categoryMode: "select",
+          subcategory: "",
+          subcategoryMode: "select",
+        };
+      }
+
+      const activeGroup = findCategoryGroup(categoryTree, selectedValue);
+      const matchedSubcategory =
+        activeGroup?.subcategories?.find(
+          (item) => normalizeCategoryKey(item) === normalizeCategoryKey(prev.subcategory)
+        ) || "";
+
+      return {
+        ...prev,
+        category: activeGroup?.category || selectedValue,
+        categoryMode: "select",
+        subcategory: matchedSubcategory,
+        subcategoryMode: matchedSubcategory ? "select" : "select",
+      };
+    });
+  };
+
+  const handleCategoryInput = (setter) => (event) => {
+    const value = event.target.value;
     setter((prev) => ({
       ...prev,
-      customizationCatalog: updater(prev.customizationCatalog || []),
+      category: value,
+      categoryMode: "custom",
     }));
   };
 
-  const addCategory = (setter) => {
-    updateCatalog(setter, (catalog) => [
-      ...catalog,
-      {
-        id: createId("cat"),
-        name: "",
-        items: [],
-      },
-    ]);
-  };
-
-  const removeCategory = (setter, categoryId) => {
-    updateCatalog(setter, (catalog) =>
-      catalog.filter((category) => category.id !== categoryId)
-    );
-  };
-
-  const changeCategoryName = (setter, categoryId, name) => {
-    updateCatalog(setter, (catalog) =>
-      catalog.map((category) =>
-        category.id === categoryId ? { ...category, name } : category
-      )
-    );
-  };
-
-  const addItem = (setter, categoryId) => {
-    updateCatalog(setter, (catalog) =>
-      catalog.map((category) => {
-        if (category.id !== categoryId) return category;
+  const handleSubcategorySelect = (setter) => (event) => {
+    const selectedValue = String(event.target.value || "");
+    setter((prev) => {
+      if (selectedValue === CUSTOM_SUBCATEGORY_OPTION) {
         return {
-          ...category,
-          items: [
-            ...(category.items || []),
-            {
-              id: createId(`item_${categoryId}`),
-              name: "",
-              price: "0",
-              stock: "0",
-              image: "",
-              active: true,
-            },
-          ],
+          ...prev,
+          subcategoryMode: "custom",
+          subcategory:
+            prev.subcategoryMode === "custom" ? prev.subcategory : "",
         };
-      })
-    );
+      }
+
+      return {
+        ...prev,
+        subcategory: selectedValue,
+        subcategoryMode: "select",
+      };
+    });
   };
 
-  const removeItem = (setter, categoryId, itemId) => {
-    updateCatalog(setter, (catalog) =>
-      catalog.map((category) => {
-        if (category.id !== categoryId) return category;
-        return {
-          ...category,
-          items: (category.items || []).filter((item) => item.id !== itemId),
-        };
-      })
-    );
-  };
-
-  const changeItem = (setter, categoryId, itemId, field, value) => {
-    updateCatalog(setter, (catalog) =>
-      catalog.map((category) => {
-        if (category.id !== categoryId) return category;
-        return {
-          ...category,
-          items: (category.items || []).map((item) =>
-            item.id === itemId ? { ...item, [field]: value } : item
-          ),
-        };
-      })
-    );
+  const handleSubcategoryInput = (setter) => (event) => {
+    const value = event.target.value;
+    setter((prev) => ({
+      ...prev,
+      subcategory: value,
+      subcategoryMode: "custom",
+    }));
   };
 
   const updatePackagingStyles = (setter, updater) => {
@@ -991,6 +955,8 @@ export default function SellerProducts() {
     );
     setSavingEdit(false);
     if (updated) {
+      clearCategoryTreeCache();
+      await refreshCategoryTree(true);
       cancelEdit();
     }
   };
@@ -1039,26 +1005,25 @@ export default function SellerProducts() {
           <div className="card-head">
             <h3 className="card-title">Add new product</h3>
           </div>
-          <div className="field-row">
-            <div className="field">
-              <label htmlFor="newProductName">Product name</label>
-              <input
-                id="newProductName"
-                type="text"
-                value={form.name}
-                onChange={handleFormChange("name")}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="newProductCategory">Category</label>
-              <input
-                id="newProductCategory"
-                type="text"
-                value={form.category}
-                onChange={handleFormChange("category")}
-              />
-            </div>
+          <div className="field">
+            <label htmlFor="newProductName">Product name</label>
+            <input
+              id="newProductName"
+              type="text"
+              value={form.name}
+              onChange={handleFormChange("name")}
+            />
           </div>
+
+          <CategoryFieldsEditor
+            idPrefix="newProduct"
+            formState={form}
+            categoryTree={categoryTree}
+            onCategorySelect={handleCategorySelect(setForm)}
+            onCategoryInput={handleCategoryInput(setForm)}
+            onSubcategorySelect={handleSubcategorySelect(setForm)}
+            onSubcategoryInput={handleSubcategoryInput(setForm)}
+          />
 
           <div className="field">
             <label htmlFor="newProductDescription">Description</label>
@@ -1236,25 +1201,6 @@ export default function SellerProducts() {
             </div>
           </div>
 
-          {form.isCustomizable && (
-            <CustomizationCatalogEditor
-              idPrefix="newProduct"
-              catalog={form.customizationCatalog}
-              onCategoryAdd={() => addCategory(setForm)}
-              onCategoryRemove={(categoryId) => removeCategory(setForm, categoryId)}
-              onCategoryNameChange={(categoryId, name) =>
-                changeCategoryName(setForm, categoryId, name)
-              }
-              onItemAdd={(categoryId) => addItem(setForm, categoryId)}
-              onItemRemove={(categoryId, itemId) =>
-                removeItem(setForm, categoryId, itemId)
-              }
-              onItemChange={(categoryId, itemId, field, value) =>
-                changeItem(setForm, categoryId, itemId, field, value)
-              }
-            />
-          )}
-
           <div className="seller-toolbar">
             <button className="btn primary" type="button" onClick={createProduct} disabled={creating}>
               {creating ? "Adding..." : "Create product"}
@@ -1283,27 +1229,26 @@ export default function SellerProducts() {
             <h3 className="card-title">Edit product</h3>
             <span className="chip">ID: {editingId.slice(-8).toUpperCase()}</span>
           </div>
-          <div className="field-row">
-            <div className="field">
-              <label htmlFor="editProductName">Product name</label>
-              <input
-                id="editProductName"
-                ref={editNameInputRef}
-                type="text"
-                value={editForm.name}
-                onChange={handleEditFormChange("name")}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="editProductCategory">Category</label>
-              <input
-                id="editProductCategory"
-                type="text"
-                value={editForm.category}
-                onChange={handleEditFormChange("category")}
-              />
-            </div>
+          <div className="field">
+            <label htmlFor="editProductName">Product name</label>
+            <input
+              id="editProductName"
+              ref={editNameInputRef}
+              type="text"
+              value={editForm.name}
+              onChange={handleEditFormChange("name")}
+            />
           </div>
+
+          <CategoryFieldsEditor
+            idPrefix="editProduct"
+            formState={editForm}
+            categoryTree={categoryTree}
+            onCategorySelect={handleCategorySelect(setEditForm)}
+            onCategoryInput={handleCategoryInput(setEditForm)}
+            onSubcategorySelect={handleSubcategorySelect(setEditForm)}
+            onSubcategoryInput={handleSubcategoryInput(setEditForm)}
+          />
 
           <div className="field">
             <label htmlFor="editProductDescription">Description</label>
@@ -1489,27 +1434,6 @@ export default function SellerProducts() {
             </div>
           </div>
 
-          {editForm.isCustomizable && (
-            <CustomizationCatalogEditor
-              idPrefix="editProduct"
-              catalog={editForm.customizationCatalog}
-              onCategoryAdd={() => addCategory(setEditForm)}
-              onCategoryRemove={(categoryId) =>
-                removeCategory(setEditForm, categoryId)
-              }
-              onCategoryNameChange={(categoryId, name) =>
-                changeCategoryName(setEditForm, categoryId, name)
-              }
-              onItemAdd={(categoryId) => addItem(setEditForm, categoryId)}
-              onItemRemove={(categoryId, itemId) =>
-                removeItem(setEditForm, categoryId, itemId)
-              }
-              onItemChange={(categoryId, itemId, field, value) =>
-                changeItem(setEditForm, categoryId, itemId, field, value)
-              }
-            />
-          )}
-
           <div className="seller-toolbar">
             <button
               className="btn primary"
@@ -1557,6 +1481,7 @@ export default function SellerProducts() {
               </div>
               <div className="product-meta">
                 <span>{item.category || "General"}</span>
+                {item.subcategory ? <span>{item.subcategory}</span> : null}
                 <span>{Number(item.stock || 0)} in stock</span>
               </div>
               <div className="product-flags">

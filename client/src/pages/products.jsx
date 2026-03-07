@@ -3,6 +3,12 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
 import { addToCart } from "../utils/cart";
 import { getWishlist, toggleWishlist } from "../utils/wishlist";
+import {
+  DEFAULT_CATEGORY_TREE,
+  findCategoryGroup,
+  loadCategoryTree,
+  normalizeCategoryKey,
+} from "../utils/categoryMaster";
 import { getProductImage } from "../utils/productMedia";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
@@ -10,127 +16,6 @@ const PAGE_SIZE = 16;
 const PRICE_FILTER_MIN = 0;
 const PRICE_FILTER_MAX = 40000;
 const PRICE_FILTER_STEP = 500;
-const CATEGORY_FILTER_TREE = [
-  { category: "Valentine's Day", subcategories: [] },
-  {
-    category: "Birthday",
-    subcategories: [
-      "For Him",
-      "For Her",
-      "For Boys",
-      "For Girls",
-      "For Husband",
-      "For Wife",
-      "For Boyfriend",
-      "For Girlfriend",
-      "For Brother",
-      "For Sister",
-      "For Dad",
-      "For Mom",
-      "For Friends",
-    ],
-  },
-  {
-    category: "Anniversary",
-    subcategories: [
-      "For Couples",
-      "For Husband",
-      "For Wife",
-      "For Boyfriend",
-      "For Girlfriend",
-      "For Parents",
-      "For Friends",
-    ],
-  },
-  {
-    category: "Wedding",
-    subcategories: [
-      "Couples",
-      "Groom",
-      "Bride",
-      "Bride to be Gifts",
-      "Groom to be",
-      "Bridesmaid Gifts",
-      "For Friends",
-    ],
-  },
-  {
-    category: "Engagement",
-    subcategories: ["For Couples", "For Bride to be", "For Groom to be"],
-  },
-  { category: "Festivals", subcategories: [] },
-  {
-    category: "Special Days",
-    subcategories: [
-      "Valentine's Day Gifts",
-      "Friendship Day",
-      "Mother's Day",
-      "Doctors Day Gifts",
-      "Father's Day Gifts",
-      "Women's Day",
-      "New Year Gifts",
-      "Holiday",
-      "Men's Day",
-      "Year Ending",
-      "Children's Day",
-    ],
-  },
-  {
-    category: "Other Occasions",
-    subcategories: [
-      "Congratulations",
-      "Housewarming",
-      "Home Visit",
-      "New Born",
-      "Retirement",
-      "Dad to Be",
-      "Mom to Be",
-      "Token of Love",
-      "Apology Gifts",
-      "Party",
-    ],
-  },
-  {
-    category: "Thank You",
-    subcategories: ["Thank You Advocate", "Thank You Doctor", "Token of Love"],
-  },
-  {
-    category: "Gourmet Gifts",
-    subcategories: ["Yummy Hamper", "Snacks Hamper", "Coffee Hamper"],
-  },
-  {
-    category: "Corporate",
-    subcategories: [
-      "Vacuum Mug Gift Set",
-      "Powerbank Gift Set",
-      "Pendrive Gift Set",
-      "Pen Gift Set",
-      "Mug Gift Set",
-      "Mouse Gift Set",
-      "Keychain Gift Set",
-      "Diary Gift Set",
-      "Bottle Gift Set",
-      "Belt Gift Set",
-      "Appreciation",
-      "Promotion",
-      "Kerala",
-    ],
-  },
-  { category: "Return gifts", subcategories: [] },
-  {
-    category: "Kerala Specials",
-    subcategories: [
-      "Handicrafts",
-      "Kerala Hampers",
-      "Vishu Kani Items",
-      "Thiru Udayada",
-      "Spices",
-      "Snacks",
-    ],
-  },
-  { category: "Gift Items", subcategories: [] },
-];
-
 const parseOptionalNumber = (value) => {
   if (value === null || value === undefined) return null;
   const text = String(value).trim();
@@ -147,25 +32,39 @@ const clampPriceFilterValue = (value) => {
 
 const filterAndSortProducts = (
   source,
-  { query, category, customOnly, minPrice, maxPrice, sort }
+  { query, category, subcategory, customOnly, minPrice, maxPrice, sort }
 ) => {
   const normalizedQuery = query.trim().toLowerCase();
   const min = parseOptionalNumber(minPrice);
   const max = parseOptionalNumber(maxPrice);
+  const normalizedSubcategory = String(subcategory || "").trim().toLowerCase();
 
   let filtered = source.filter((item) => {
     const text = `${item?.name || ""} ${item?.category || ""} ${
-      item?.description || ""
-    }`.toLowerCase();
+      item?.subcategory || ""
+    } ${item?.description || ""}`
+      .toLowerCase();
+    const itemSubcategory = String(item?.subcategory || "").trim().toLowerCase();
     const queryMatch = !normalizedQuery || text.includes(normalizedQuery);
     const categoryMatch =
       category === "All" ||
       (item?.category || "").toLowerCase() === category.toLowerCase();
+    const subcategoryMatch =
+      !normalizedSubcategory ||
+      itemSubcategory === normalizedSubcategory ||
+      text.includes(normalizedSubcategory);
     const customMatch = !customOnly || Boolean(item?.isCustomizable);
     const price = Number(item?.price || 0);
     const minMatch = min === null || price >= min;
     const maxMatch = max === null || price <= max;
-    return queryMatch && categoryMatch && customMatch && minMatch && maxMatch;
+    return (
+      queryMatch &&
+      categoryMatch &&
+      subcategoryMatch &&
+      customMatch &&
+      minMatch &&
+      maxMatch
+    );
   });
 
   if (sort === "price_asc") {
@@ -218,6 +117,41 @@ const normalizeProductsResponse = (data) => {
 };
 
 const formatPrice = (value) => Number(value || 0).toLocaleString("en-IN");
+const toStarText = (value) => {
+  const safe = Math.min(5, Math.max(0, Math.round(Number(value) || 0)));
+  return "★".repeat(safe).padEnd(5, "☆");
+};
+const getRatingRows = (ratingBreakdown, totalFeedbacks = 0, verifiedFeedbacks = 0) => {
+  const safeBreakdown =
+    ratingBreakdown && typeof ratingBreakdown === "object" ? ratingBreakdown : {};
+  const rows = [5, 4, 3, 2, 1].map((star) => {
+    const row = safeBreakdown?.[star] || safeBreakdown?.[String(star)] || {};
+    const count = Number(typeof row === "number" ? row : row?.count || 0);
+    const share = Number(typeof row === "number" ? 0 : row?.share || 0);
+    return {
+      star,
+      count: Number.isFinite(count) ? Math.max(0, count) : 0,
+      share,
+    };
+  });
+  const countedTotal = rows.reduce((sum, row) => sum + row.count, 0);
+  const denominator = Math.max(verifiedFeedbacks, totalFeedbacks, countedTotal);
+  return {
+    ratingRows: rows.map((row) => {
+      const normalizedShare =
+        Number.isFinite(row.share) && row.share > 0
+          ? row.share
+          : denominator > 0
+            ? (row.count / denominator) * 100
+            : 0;
+      return {
+        ...row,
+        share: Math.min(100, Math.max(0, normalizedShare)),
+      };
+    }),
+    totalRatingVotes: Math.max(verifiedFeedbacks, totalFeedbacks, countedTotal),
+  };
+};
 const parsePrice = (value) => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   const parsed = Number(String(value ?? "").replace(/[^\d.]/g, ""));
@@ -271,17 +205,31 @@ export default function Products() {
   const [wishlistAnimatingId, setWishlistAnimatingId] = useState("");
   const [wishlistIds, setWishlistIds] = useState(() => getWishlistIdSet());
   const [userRole, setUserRole] = useState(() => readStoredUserRole());
+  const [activeRatingProductId, setActiveRatingProductId] = useState("");
+  const [categoryTree, setCategoryTree] = useState(DEFAULT_CATEGORY_TREE);
   const [searchParams, setSearchParams] = useSearchParams();
-  const query = searchParams.get("q") || searchParams.get("search") || "";
   const category = searchParams.get("category") || "All";
+  const categoryOptions =
+    Array.isArray(categoryTree) && categoryTree.length > 0
+      ? categoryTree
+      : DEFAULT_CATEGORY_TREE;
+  const rawSubcategory = searchParams.get("subcategory") || "";
+  const rawQuery = searchParams.get("q") || "";
+  const selectedCategoryConfig =
+    findCategoryGroup(categoryOptions, category) || categoryOptions[0];
+  const derivedLegacySubcategory =
+    category !== "All"
+      ? selectedCategoryConfig?.subcategories?.find(
+          (item) => normalizeCategoryKey(item) === normalizeCategoryKey(rawQuery)
+        ) || ""
+      : "";
+  const subcategory = rawSubcategory || derivedLegacySubcategory;
+  const query = subcategory ? searchParams.get("search") || "" : rawQuery || searchParams.get("search") || "";
+  const activeSubcategoryKey = normalizeCategoryKey(subcategory);
   const sort = searchParams.get("sort") || "newest";
   const customOnly = searchParams.get("custom") === "1";
   const minPrice = searchParams.get("minPrice") || "";
   const maxPrice = searchParams.get("maxPrice") || "";
-  const selectedCategoryConfig =
-    CATEGORY_FILTER_TREE.find(
-      (item) => item.category.toLowerCase() === category.toLowerCase()
-    ) || CATEGORY_FILTER_TREE[0];
   const page = Math.max(Number(searchParams.get("page")) || 1, 1);
   const [priceSliderValue, setPriceSliderValue] = useState(() =>
     clampPriceFilterValue(maxPrice || PRICE_FILTER_MAX)
@@ -289,7 +237,7 @@ export default function Products() {
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [activeMenuCategory, setActiveMenuCategory] = useState(
-    () => (category !== "All" ? category : CATEGORY_FILTER_TREE[0]?.category || "")
+    () => (category !== "All" ? category : categoryOptions[0]?.category || "")
   );
   const categoryMenuRef = useRef(null);
   const navigate = useNavigate();
@@ -298,20 +246,13 @@ export default function Products() {
     [page, catalog.pages]
   );
   const activeMenuCategoryGroup =
-    CATEGORY_FILTER_TREE.find((item) => item.category === activeMenuCategory) ||
+    findCategoryGroup(categoryOptions, activeMenuCategory) ||
     selectedCategoryConfig;
-  const normalizedQuery = String(query).trim().toLowerCase();
-  const selectedSubcategoryLabel =
-    category !== "All"
-      ? selectedCategoryConfig.subcategories.find(
-          (item) => item.toLowerCase() === normalizedQuery
-        ) || ""
-      : "";
   const categoryToggleLabel =
     category === "All"
       ? "All categories"
-      : selectedSubcategoryLabel
-      ? `${category} - ${selectedSubcategoryLabel}`
+      : subcategory
+      ? `${category} - ${subcategory}`
       : category;
   const isSellerAccount = userRole === "seller";
 
@@ -333,14 +274,34 @@ export default function Products() {
   }, []);
 
   useEffect(() => {
+    let ignore = false;
+
+    const hydrateCategoryTree = async () => {
+      const nextTree = await loadCategoryTree();
+      if (!ignore && Array.isArray(nextTree) && nextTree.length > 0) {
+        setCategoryTree(nextTree);
+      }
+    };
+
+    hydrateCategoryTree();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
     setPriceSliderValue(clampPriceFilterValue(maxPrice || PRICE_FILTER_MAX));
   }, [maxPrice]);
 
   useEffect(() => {
     if (category !== "All") {
       setActiveMenuCategory(category);
+      return;
     }
-  }, [category]);
+    if (!categoryOptions.some((item) => item.category === activeMenuCategory)) {
+      setActiveMenuCategory(categoryOptions[0]?.category || "");
+    }
+  }, [category, categoryOptions, activeMenuCategory]);
 
   useEffect(() => {
     if (!categoryMenuOpen) return undefined;
@@ -362,6 +323,32 @@ export default function Products() {
       document.removeEventListener("keydown", handleEscape);
     };
   }, [categoryMenuOpen]);
+
+  useEffect(() => {
+    if (!activeRatingProductId) return undefined;
+    const handleOutsideClick = (event) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-catalog-rating-anchor='true']")
+      ) {
+        return;
+      }
+      setActiveRatingProductId("");
+    };
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        setActiveRatingProductId("");
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("touchstart", handleOutsideClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("touchstart", handleOutsideClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [activeRatingProductId]);
 
   const updateParams = (updates, resetPage = true) => {
     const next = new URLSearchParams(searchParams);
@@ -389,6 +376,7 @@ export default function Products() {
     setCategoryMenuOpen(false);
     updateParams({
       category: nextCategory === "All" ? null : nextCategory,
+      subcategory: null,
       q: null,
       search: null,
     });
@@ -398,7 +386,8 @@ export default function Products() {
     setCategoryMenuOpen(false);
     updateParams({
       category: activeMenuCategoryGroup.category,
-      q: nextSubcategory || null,
+      subcategory: nextSubcategory || null,
+      q: null,
       search: null,
     });
   };
@@ -469,6 +458,7 @@ export default function Products() {
         const params = new URLSearchParams();
         if (query) params.set("search", query);
         if (category !== "All") params.set("category", category);
+        if (subcategory) params.set("subcategory", subcategory);
         if (customOnly) params.set("customizable", "true");
         if (minPrice) params.set("minPrice", minPrice);
         if (maxPrice) params.set("maxPrice", maxPrice);
@@ -488,6 +478,7 @@ export default function Products() {
             filterAndSortProducts(normalized.items, {
               query,
               category,
+              subcategory,
               customOnly,
               minPrice,
               maxPrice,
@@ -520,7 +511,7 @@ export default function Products() {
     return () => {
       ignore = true;
     };
-  }, [query, category, customOnly, minPrice, maxPrice, sort, page]);
+  }, [query, category, subcategory, customOnly, minPrice, maxPrice, sort, page]);
 
   useEffect(() => {
     if (catalog.pages > 0 && page > catalog.pages) {
@@ -591,7 +582,7 @@ export default function Products() {
                 {categoryMenuOpen && (
                   <div className="catalog-categories-grid expanded catalog-categories-menu" role="dialog">
                     <div className="catalog-categories-main">
-                      {CATEGORY_FILTER_TREE.map((item) => {
+                      {categoryOptions.map((item) => {
                         const isActive = activeMenuCategoryGroup.category === item.category;
                         return (
                           <button
@@ -625,7 +616,8 @@ export default function Products() {
                       <div className="catalog-categories-sub-list">
                         {activeMenuCategoryGroup.subcategories.length > 0 ? (
                           activeMenuCategoryGroup.subcategories.map((item) => {
-                            const isActive = normalizedQuery === item.toLowerCase();
+                            const isActive =
+                              activeSubcategoryKey === normalizeCategoryKey(item);
                             return (
                               <button
                                 key={`${activeMenuCategoryGroup.category}-${item}`}
@@ -804,6 +796,22 @@ export default function Products() {
               {catalog.items.map((item) => {
                 const sellerName =
                   item?.seller?.storeName || item?.seller?.name || "Craftzy seller";
+                const reviewStats =
+                  item?.reviewStats && typeof item.reviewStats === "object"
+                    ? item.reviewStats
+                    : null;
+                const displayRating = Number(
+                  reviewStats?.displayRating || reviewStats?.avgRating || 0
+                );
+                const totalFeedbacks = Number(reviewStats?.totalFeedbacks || 0);
+                const verifiedFeedbacks = Number(
+                  reviewStats?.verifiedFeedbacks || totalFeedbacks || 0
+                );
+                const { ratingRows, totalRatingVotes } = getRatingRows(
+                  reviewStats?.ratingBreakdown,
+                  totalFeedbacks,
+                  verifiedFeedbacks
+                );
                 const livePrice = parsePrice(item?.price);
                 const mrp = parsePrice(item?.mrp);
                 const hasDiscount = mrp > livePrice;
@@ -818,6 +826,8 @@ export default function Products() {
                 const isCartAnimating = cartAnimatingId === itemId;
                 const isAdded = addedItemId === itemId;
                 const disablePurchase = isOutOfStock || isSellerAccount;
+                const isRatingOpen = activeRatingProductId === itemId;
+                const ratingPopoverId = `catalog-rating-popover-${itemId}`;
 
                 return (
                   <article key={item._id} className="product-card catalog-product-card">
@@ -853,6 +863,83 @@ export default function Products() {
                         <Link to={`/products/${item._id}`}>{item.name}</Link>
                       </h3>
                       <p className="catalog-product-seller">by {sellerName}</p>
+                      {totalRatingVotes > 0 ? (
+                        <div className="catalog-rating-anchor" data-catalog-rating-anchor="true">
+                          <button
+                            className="catalog-rating-trigger"
+                            type="button"
+                            onClick={() =>
+                              setActiveRatingProductId((prev) =>
+                                prev === itemId ? "" : itemId
+                              )
+                            }
+                            aria-expanded={isRatingOpen}
+                            aria-controls={ratingPopoverId}
+                          >
+                            <span className="catalog-rating-pill">
+                              <span>{displayRating.toFixed(1)}</span>
+                              <span className="catalog-rating-star">{toStarText(displayRating)}</span>
+                            </span>
+                            <span className="catalog-rating-count">({totalRatingVotes})</span>
+                            <svg
+                              className={`catalog-rating-caret ${isRatingOpen ? "open" : ""}`}
+                              viewBox="0 0 24 24"
+                              aria-hidden="true"
+                            >
+                              <path d="m7 10 5 5 5-5" />
+                            </svg>
+                          </button>
+                          {isRatingOpen ? (
+                            <div
+                              id={ratingPopoverId}
+                              className="catalog-rating-popover"
+                              role="dialog"
+                              aria-label={`Rating breakdown for ${item?.name || "this product"}`}
+                            >
+                              <div className="catalog-rating-popover-head">
+                                <strong>{displayRating.toFixed(1)} out of 5</strong>
+                                <button
+                                  type="button"
+                                  className="catalog-rating-popover-close"
+                                  aria-label="Close rating breakdown"
+                                  onClick={() => setActiveRatingProductId("")}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                              <p className="catalog-rating-popover-count">
+                                {totalRatingVotes} global ratings
+                              </p>
+                              <div className="catalog-rating-popover-breakdown">
+                                {ratingRows.map((row) => (
+                                  <div
+                                    key={`${itemId}-rating-${row.star}`}
+                                    className="catalog-rating-popover-row"
+                                  >
+                                    <span>{row.star} star</span>
+                                    <div className="catalog-rating-popover-track" aria-hidden="true">
+                                      <span
+                                        className="catalog-rating-popover-fill"
+                                        style={{ width: `${row.share}%` }}
+                                      />
+                                    </div>
+                                    <span>{Math.round(row.share)}%</span>
+                                  </div>
+                                ))}
+                              </div>
+                              <Link
+                                className="catalog-rating-popover-link"
+                                to={`/products/${item._id}`}
+                                onClick={() => setActiveRatingProductId("")}
+                              >
+                                See customer reviews
+                              </Link>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <p className="catalog-rating-empty">No ratings yet</p>
+                      )}
 
                       <div className="catalog-price-row">
                         <strong className="catalog-price-live">

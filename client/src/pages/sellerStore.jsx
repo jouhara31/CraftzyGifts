@@ -2,12 +2,65 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
 import { getProductImage } from "../utils/productMedia";
+import { prefetchProductDetail } from "../utils/productDetailCache";
+import { clearSellerStoreCache, loadSellerStore } from "../utils/sellerStoreCache";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
-const STORE_TABS = ["Seller Products", "Feedbacks", "Policy", "Description", "Extra Info"];
+const STORE_TABS = ["All Products", "Feedbacks", "Policy", "Description", "Extra Info"];
+const EMPTY_RATING_BREAKDOWN = {};
+const STORE_CORE_LOAD_OPTIONS = {
+  limit: 60,
+  includeProducts: true,
+  includeFeedbacks: false,
+  includeProductRatings: true,
+};
+const STORE_FEEDBACK_LOAD_OPTIONS = {
+  includeProducts: false,
+  includeFeedbacks: true,
+  includeProductRatings: false,
+  feedbackLimit: 8,
+};
 
 const formatPrice = (value) => Number(value || 0).toLocaleString("en-IN");
+const toStarText = (value) => {
+  const safe = Math.min(5, Math.max(0, Math.round(Number(value) || 0)));
+  return "★".repeat(safe).padEnd(5, "☆");
+};
+const getRatingRows = (ratingBreakdown, totalFeedbacks = 0, verifiedFeedbacks = 0) => {
+  const safeBreakdown =
+    ratingBreakdown && typeof ratingBreakdown === "object"
+      ? ratingBreakdown
+      : EMPTY_RATING_BREAKDOWN;
+  const rows = [5, 4, 3, 2, 1].map((star) => {
+    const row = safeBreakdown?.[star] || safeBreakdown?.[String(star)] || {};
+    const count = Number(typeof row === "number" ? row : row?.count || 0);
+    const share = Number(typeof row === "number" ? 0 : row?.share || 0);
+    return {
+      star,
+      count: Number.isFinite(count) ? Math.max(0, count) : 0,
+      share,
+    };
+  });
+  const countedTotal = rows.reduce((sum, row) => sum + row.count, 0);
+  const denominator = Math.max(verifiedFeedbacks, totalFeedbacks, countedTotal);
+  const ratingRows = rows.map((row) => {
+    const normalizedShare =
+      Number.isFinite(row.share) && row.share > 0
+        ? row.share
+        : denominator > 0
+          ? (row.count / denominator) * 100
+          : 0;
+    return {
+      ...row,
+      share: Math.min(100, Math.max(0, normalizedShare)),
+    };
+  });
+  return {
+    ratingRows,
+    totalRatingVotes: Math.max(verifiedFeedbacks, totalFeedbacks, countedTotal),
+  };
+};
 
 const formatDate = (value) => {
   if (!value) return "Not available";
@@ -103,6 +156,7 @@ const resolveImageSource = (value) => {
 
 const buildDraftFromSeller = (seller = {}) => ({
   storeName: String(seller?.storeName || seller?.name || "").trim(),
+  ownerName: String(seller?.name || seller?.storeName || "").trim(),
   about: String(seller?.about || "").trim(),
   supportEmail: String(seller?.supportEmail || "").trim(),
   phone: String(seller?.phone || "").trim(),
@@ -115,15 +169,87 @@ const buildDraftFromSeller = (seller = {}) => ({
   pickupWindow: String(seller?.pickupAddress?.pickupWindow || "10-6").trim() || "10-6",
 });
 
+const StoreActionIcon = ({ name }) => {
+  if (name === "back") {
+    return (
+      <svg className="seller-store-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m10 6-6 6 6 6" />
+        <path d="M5 12h15" />
+      </svg>
+    );
+  }
+  if (name === "edit") {
+    return (
+      <svg className="seller-store-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 16.5V20h3.5l9.6-9.6-3.5-3.5L4 16.5z" />
+        <path d="M12.9 7.5l3.5 3.5" />\\\\\\\\\\\\
+      </svg>
+    );
+  }
+  if (name === "close") {
+    return (
+      <svg className="seller-store-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m6 6 12 12" />
+        <path d="M18 6 6 18" />
+      </svg>
+    );
+  }
+  if (name === "save") {
+    return (
+      <svg className="seller-store-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 4h12l2 2v14H5z" />
+        <path d="M8 4v5h7V4" />
+        <path d="M8 14h8" />
+      </svg>
+    );
+  }
+  if (name === "call") {
+    return (
+      <svg className="seller-store-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7.8 3.8 5.6 6a2 2 0 0 0-.4 2.2A20.5 20.5 0 0 0 15.8 18.8a2 2 0 0 0 2.2-.4l2.2-2.2a2 2 0 0 0-.2-3l-2.4-1.8a2 2 0 0 0-2.5.1l-1.1.9a14.7 14.7 0 0 1-2.9-2.9l.9-1.1a2 2 0 0 0 .1-2.5L10.8 4a2 2 0 0 0-3-.2z" />
+      </svg>
+    );
+  }
+  if (name === "email") {
+    return (
+      <svg className="seller-store-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
+        <path d="m4.5 7 7.5 6 7.5-6" />
+      </svg>
+    );
+  }
+  if (name === "view") {
+    return (
+      <svg className="seller-store-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M2.5 12s3.6-6 9.5-6 9.5 6 9.5 6-3.6 6-9.5 6-9.5-6-9.5-6z" />
+        <circle cx="12" cy="12" r="2.6" />
+      </svg>
+    );
+  }
+  if (name === "more") {
+    return (
+      <svg className="seller-store-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 5v14" />
+        <path d="M5 12h14" />
+      </svg>
+    );
+  }
+  return null;
+};
+
 export default function SellerStore() {
   const { sellerId } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const coverInputRef = useRef(null);
   const avatarInputRef = useRef(null);
+  const ratingPopoverRef = useRef(null);
+  const feedbackListRef = useRef(null);
   const autoEditAppliedRef = useRef(false);
+  const feedbackLoadAttemptedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState(STORE_TABS[0]);
   const [searchText, setSearchText] = useState("");
   const [sortBy, setSortBy] = useState("latest");
   const [showCount, setShowCount] = useState(12);
@@ -132,20 +258,33 @@ export default function SellerStore() {
   const [saving, setSaving] = useState(false);
   const [editNotice, setEditNotice] = useState("");
   const [editError, setEditError] = useState("");
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [isRatingPopoverOpen, setIsRatingPopoverOpen] = useState(false);
+  const [activeProductRatingId, setActiveProductRatingId] = useState("");
   const [draft, setDraft] = useState(buildDraftFromSeller({}));
   const [storeData, setStoreData] = useState({
     seller: null,
     products: [],
+    feedbacks: [],
     stats: null,
   });
 
   useEffect(() => {
     let ignore = false;
+    const storedViewer = readStoredUser();
+    setViewer(storedViewer);
 
     const loadViewer = async () => {
       const token = localStorage.getItem("token");
-      if (!token) {
-        setViewer(readStoredUser());
+      const storedViewerId = String(
+        storedViewer?.id || storedViewer?._id || readUserIdFromToken()
+      ).trim();
+      const shouldRefreshViewer =
+        Boolean(token) &&
+        Boolean(storedViewerId) &&
+        storedViewerId === String(sellerId || "").trim();
+
+      if (!shouldRefreshViewer) {
         return;
       }
 
@@ -178,7 +317,7 @@ export default function SellerStore() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [sellerId]);
 
   useEffect(() => {
     let ignore = false;
@@ -186,32 +325,32 @@ export default function SellerStore() {
     const loadStore = async () => {
       setLoading(true);
       setError("");
+      setFeedbackLoading(false);
+      feedbackLoadAttemptedRef.current = false;
       try {
         const token = localStorage.getItem("token");
-        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-        const res = await fetch(`${API_URL}/api/products/seller/${sellerId}/public?limit=60`, {
-          headers,
+        const data = await loadSellerStore(sellerId, {
+          ...STORE_CORE_LOAD_OPTIONS,
+          token,
         });
-        if (!res.ok) {
-          throw new Error(
-            res.status === 404 ? "Seller store not found." : "Unable to load seller store."
-          );
-        }
-        const data = await res.json();
         if (ignore) return;
         const seller = data?.seller || null;
+        const feedbacks = Array.isArray(data?.feedbacks) ? data.feedbacks : [];
+        feedbackLoadAttemptedRef.current = feedbacks.length > 0;
         setStoreData({
           seller,
           products: Array.isArray(data?.products) ? data.products : [],
+          feedbacks,
           stats: data?.stats || null,
         });
         setDraft(buildDraftFromSeller(seller || {}));
+        setActiveTab(STORE_TABS[0]);
         setSearchText("");
         setSortBy("latest");
         setShowCount(12);
       } catch (loadErr) {
         if (ignore) return;
-        setStoreData({ seller: null, products: [], stats: null });
+        setStoreData({ seller: null, products: [], feedbacks: [], stats: null });
         setError(loadErr?.message || "Unable to load seller store.");
       } finally {
         if (!ignore) setLoading(false);
@@ -230,11 +369,15 @@ export default function SellerStore() {
     };
   }, [sellerId]);
 
-  const seller = storeData?.seller || {};
+  const seller = useMemo(() => storeData?.seller || {}, [storeData?.seller]);
   const sellerDraftSeed = useMemo(() => buildDraftFromSeller(seller), [seller]);
   const products = useMemo(
     () => (Array.isArray(storeData?.products) ? storeData.products : []),
     [storeData?.products]
+  );
+  const feedbacks = useMemo(
+    () => (Array.isArray(storeData?.feedbacks) ? storeData.feedbacks : []),
+    [storeData?.feedbacks]
   );
   const viewerId = String(viewer?.id || viewer?._id || readUserIdFromToken()).trim();
   const isOwnerSeller =
@@ -263,6 +406,7 @@ export default function SellerStore() {
   }, [isOwnerSeller, editRequested, sellerDraftSeed]);
 
   const sellerName = String(seller?.storeName || seller?.name || "Seller Store").trim();
+  const sellerShopName = String(seller?.storeName || "").trim() || "Seller Store";
   const sellerOwnerName = String(seller?.name || seller?.storeName || "Seller").trim();
   const sellerAbout =
     String(seller?.about || "").trim() ||
@@ -276,6 +420,18 @@ export default function SellerStore() {
   const pickupAddressText =
     getPickupAddressText(seller?.pickupAddress) || "Pickup address will be shared by seller";
   const listedProducts = Number(storeData?.stats?.totalProducts || products.length || 0);
+  const totalFeedbacks = Number(storeData?.stats?.totalFeedbacks || feedbacks.length || 0);
+  const avgRating = Number(storeData?.stats?.avgRating || 0);
+  const displayRating = Number(storeData?.stats?.displayRating || avgRating || 0);
+  const verifiedFeedbacks = Number(storeData?.stats?.verifiedFeedbacks || totalFeedbacks || 0);
+  const ratingBreakdown =
+    storeData?.stats?.ratingBreakdown && typeof storeData.stats.ratingBreakdown === "object"
+      ? storeData.stats.ratingBreakdown
+      : EMPTY_RATING_BREAKDOWN;
+  const { ratingRows, totalRatingVotes } = useMemo(
+    () => getRatingRows(ratingBreakdown, totalFeedbacks, verifiedFeedbacks),
+    [ratingBreakdown, totalFeedbacks, verifiedFeedbacks]
+  );
   const categoryCount = useMemo(
     () =>
       new Set(
@@ -325,6 +481,54 @@ export default function SellerStore() {
 
   const visibleProducts = filteredProducts.slice(0, showCount);
   const canShowMore = filteredProducts.length > showCount;
+  const selectedTab = STORE_TABS.includes(activeTab) ? activeTab : STORE_TABS[0];
+  const isProductsTab = selectedTab === STORE_TABS[0];
+  const isFeedbackTab = selectedTab === STORE_TABS[1];
+  const backCatalogPath = isOwnerSeller ? "/seller/products" : "/products";
+  const backCatalogLabel = isOwnerSeller ? "Back to seller panel" : "Back to products";
+
+  useEffect(() => {
+    let ignore = false;
+
+    if (!sellerId || !isFeedbackTab || feedbackLoadAttemptedRef.current || feedbacks.length > 0) {
+      return () => {
+        ignore = true;
+      };
+    }
+    if (totalFeedbacks === 0) {
+      return () => {
+        ignore = true;
+      };
+    }
+
+    feedbackLoadAttemptedRef.current = true;
+    setFeedbackLoading(true);
+
+    const loadStoreFeedbacks = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const data = await loadSellerStore(sellerId, {
+          ...STORE_FEEDBACK_LOAD_OPTIONS,
+          token,
+        });
+        if (ignore) return;
+        setStoreData((prev) => ({
+          ...prev,
+          feedbacks: Array.isArray(data?.feedbacks) ? data.feedbacks : prev.feedbacks,
+          stats: data?.stats || prev.stats,
+        }));
+      } catch {
+        if (ignore) return;
+      } finally {
+        if (!ignore) setFeedbackLoading(false);
+      }
+    };
+
+    loadStoreFeedbacks();
+    return () => {
+      ignore = true;
+    };
+  }, [sellerId, isFeedbackTab, feedbacks.length, totalFeedbacks]);
 
   const beginEditMode = () => {
     setDraft(buildDraftFromSeller(seller));
@@ -368,8 +572,13 @@ export default function SellerStore() {
     setEditNotice("");
 
     const storeName = String(draft.storeName || "").trim();
+    const ownerName = String(draft.ownerName || "").trim();
     if (!storeName) {
       setEditError("Store name is required.");
+      return;
+    }
+    if (!ownerName) {
+      setEditError("Owner name is required.");
       return;
     }
 
@@ -382,7 +591,7 @@ export default function SellerStore() {
     setSaving(true);
     try {
       const payload = {
-        name: storeName,
+        name: ownerName,
         storeName,
         about: String(draft.about || "").trim(),
         supportEmail: String(draft.supportEmail || "").trim(),
@@ -432,51 +641,14 @@ export default function SellerStore() {
         pickupAddress: data.pickupAddress || {},
         createdAt: data.createdAt,
       };
-      try {
-        const refreshRes = await fetch(`${API_URL}/api/products/seller/${sellerId}/public?limit=60`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (refreshRes.ok) {
-          const refreshData = await refreshRes.json();
-          if (refreshData?.seller) {
-            refreshedSeller = {
-              ...refreshData.seller,
-              profileImage:
-                submittedProfileImage ||
-                refreshData?.seller?.profileImage ||
-                data.profileImage ||
-                "",
-              storeCoverImage:
-                submittedCoverImage ||
-                refreshData?.seller?.storeCoverImage ||
-                data.storeCoverImage ||
-                "",
-            };
-          }
-          setStoreData((prev) => ({
-            ...prev,
-            seller: refreshedSeller,
-            products: Array.isArray(refreshData?.products) ? refreshData.products : prev.products,
-            stats: refreshData?.stats || prev.stats,
-          }));
-        } else {
-          setStoreData((prev) => ({
-            ...prev,
-            seller: {
-              ...(prev?.seller || {}),
-              ...refreshedSeller,
-            },
-          }));
-        }
-      } catch {
-        setStoreData((prev) => ({
-          ...prev,
-          seller: {
-            ...(prev?.seller || {}),
-            ...refreshedSeller,
-          },
-        }));
-      }
+      clearSellerStoreCache(sellerId);
+      setStoreData((prev) => ({
+        ...prev,
+        seller: {
+          ...(prev?.seller || {}),
+          ...refreshedSeller,
+        },
+      }));
       setViewer((prev) => ({
         ...prev,
         ...data,
@@ -517,30 +689,100 @@ export default function SellerStore() {
     }
   };
 
+  useEffect(() => {
+    if (!isFeedbackTab) {
+      setIsRatingPopoverOpen(false);
+    }
+  }, [isFeedbackTab]);
+
+  useEffect(() => {
+    if (!isProductsTab) {
+      setActiveProductRatingId("");
+    }
+  }, [isProductsTab]);
+
+  useEffect(() => {
+    if (!isRatingPopoverOpen) return;
+    const handlePointerDown = (event) => {
+      if (!ratingPopoverRef.current) return;
+      if (event.target instanceof Node && !ratingPopoverRef.current.contains(event.target)) {
+        setIsRatingPopoverOpen(false);
+      }
+    };
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        setIsRatingPopoverOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isRatingPopoverOpen]);
+
+  useEffect(() => {
+    if (!activeProductRatingId) return;
+    const handlePointerDown = (event) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-product-rating-anchor='true']")
+      ) {
+        return;
+      }
+      setActiveProductRatingId("");
+    };
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        setActiveProductRatingId("");
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [activeProductRatingId]);
+
+  const handleSeeCustomerReviews = () => {
+    setIsRatingPopoverOpen(false);
+    feedbackListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
     <div className="page seller-store-page">
-      <Header />
+      <Header variant={isOwnerSeller ? "seller" : undefined} />
       <div className="seller-store-shell">
         <div className="seller-store-headline">
           <div>
             <h2>{sellerName}</h2>
-            <p>Storefront by seller with live products and profile details.</p>
+            <p>Storefront with live products and profile details.</p>
           </div>
           <div className="seller-store-headline-actions">
-            <Link className="btn ghost" to="/products">
-              Back to products
+            <Link className="btn ghost" to={backCatalogPath}>
+              <StoreActionIcon name="back" />
+              {backCatalogLabel}
             </Link>
             {isOwnerSeller && !editMode ? (
               <button className="btn primary" type="button" onClick={beginEditMode}>
+                <StoreActionIcon name="edit" />
                 Edit store
               </button>
             ) : null}
             {isOwnerSeller && editMode ? (
               <>
                 <button className="btn ghost" type="button" onClick={cancelEditMode} disabled={saving}>
+                  <StoreActionIcon name="close" />
                   Cancel
                 </button>
                 <button className="btn primary" type="button" onClick={saveStoreEdits} disabled={saving}>
+                  <StoreActionIcon name="save" />
                   {saving ? "Saving..." : "Save"}
                 </button>
               </>
@@ -640,7 +882,7 @@ export default function SellerStore() {
                       </div>
                     ) : (
                       <div className="seller-store-brand-copy">
-                        <h3>{sellerName}</h3>
+                        <h3>{sellerShopName}</h3>
                         <p>{sellerAbout}</p>
                       </div>
                     )}
@@ -656,20 +898,19 @@ export default function SellerStore() {
                       <strong>{joinedText}</strong>
                     </div>
                     <div className="seller-store-kpi">
-                      <span>Total Product</span>
+                      <span>All Products</span>
                       <strong>{listedProducts}</strong>
                     </div>
-                    {sellerEmail ? (
-                      <a className="seller-store-follow-btn" href={`mailto:${sellerEmail}`}>
-                        Contact
-                      </a>
-                    ) : (
-                      <span className="seller-store-follow-btn muted">Seller</span>
-                    )}
                   </div>
 
                   {isOwnerSeller && editMode ? (
                     <div className="seller-store-inline-form">
+                      <input
+                        type="text"
+                        value={draft.ownerName}
+                        onChange={handleDraft("ownerName")}
+                        placeholder="Owner name"
+                      />
                       <input
                         type="email"
                         value={draft.supportEmail}
@@ -690,6 +931,11 @@ export default function SellerStore() {
                         onChange={handleDraft("pincode")}
                         placeholder="Pincode"
                       />
+                      <select value={draft.pickupWindow} onChange={handleDraft("pickupWindow")}>
+                        <option value="9-5">Pickup window: 09:00 - 17:00</option>
+                        <option value="10-6">Pickup window: 10:00 - 18:00</option>
+                        <option value="11-7">Pickup window: 11:00 - 19:00</option>
+                      </select>
                       <textarea
                         value={draft.pickupLine1}
                         onChange={handleDraft("pickupLine1")}
@@ -706,7 +952,7 @@ export default function SellerStore() {
                 <div className="seller-store-owner-photo" aria-hidden="true">
                   {sellerProfileImage ? <img src={sellerProfileImage} alt="" /> : sellerInitial}
                 </div>
-                <p className="seller-store-owner-name">{sellerOwnerName}</p>
+                <p className="seller-store-owner-name">{sellerName}</p>
                 <div className="seller-store-owner-contacts">
                   {sellerPhone ? <span>{sellerPhone}</span> : null}
                   {sellerEmail ? <span>{sellerEmail}</span> : null}
@@ -714,11 +960,13 @@ export default function SellerStore() {
                 <div className="seller-store-owner-actions">
                   {phoneHref ? (
                     <a className="btn ghost" href={phoneHref}>
+                      <StoreActionIcon name="call" />
                       Call
                     </a>
                   ) : null}
                   {sellerEmail ? (
                     <a className="btn ghost" href={`mailto:${sellerEmail}`}>
+                      <StoreActionIcon name="email" />
                       Email
                     </a>
                   ) : null}
@@ -729,107 +977,491 @@ export default function SellerStore() {
             <section className="seller-store-market">
               <div className="seller-store-market-head">
                 <div className="seller-store-tabs" role="tablist" aria-label="Store sections">
-                  {STORE_TABS.map((tab, index) => (
+                  {STORE_TABS.map((tab) => (
                     <button
                       key={tab}
-                      className={`seller-store-tab ${index === 0 ? "active" : ""}`}
+                      className={`seller-store-tab ${tab === selectedTab ? "active" : ""}`}
                       type="button"
-                      disabled={index !== 0}
+                      aria-pressed={tab === selectedTab}
+                      onClick={() => setActiveTab(tab)}
                     >
                       {tab}
                     </button>
                   ))}
                 </div>
-                <div className="seller-store-controls">
-                  <div className="seller-store-search">
-                    <input
-                      type="search"
-                      placeholder="Search products..."
-                      value={searchText}
-                      onChange={(event) => setSearchText(event.target.value)}
-                    />
+                {isProductsTab ? (
+                  <div className="seller-store-controls">
+                    <div className="seller-store-search">
+                      <input
+                        type="search"
+                        placeholder="Search products..."
+                        value={searchText}
+                        onChange={(event) => setSearchText(event.target.value)}
+                      />
+                    </div>
+                    <select
+                      value={sortBy}
+                      onChange={(event) => setSortBy(event.target.value)}
+                      aria-label="Sort products"
+                    >
+                      <option value="latest">Sort by latest</option>
+                      <option value="price_low">Price: Low to high</option>
+                      <option value="price_high">Price: High to low</option>
+                      <option value="stock">Stock: High to low</option>
+                      <option value="name">Name: A to Z</option>
+                    </select>
+                    <select
+                      value={showCount}
+                      onChange={(event) => setShowCount(Number(event.target.value) || 12)}
+                      aria-label="Show item count"
+                    >
+                      <option value={8}>Show 8</option>
+                      <option value={12}>Show 12</option>
+                      <option value={16}>Show 16</option>
+                      <option value={24}>Show 24</option>
+                    </select>
                   </div>
-                  <select
-                    value={sortBy}
-                    onChange={(event) => setSortBy(event.target.value)}
-                    aria-label="Sort products"
-                  >
-                    <option value="latest">Sort by latest</option>
-                    <option value="price_low">Price: Low to high</option>
-                    <option value="price_high">Price: High to low</option>
-                    <option value="stock">Stock: High to low</option>
-                    <option value="name">Name: A to Z</option>
-                  </select>
-                  <select
-                    value={showCount}
-                    onChange={(event) => setShowCount(Number(event.target.value) || 12)}
-                    aria-label="Show item count"
-                  >
-                    <option value={8}>Show 8</option>
-                    <option value={12}>Show 12</option>
-                    <option value={16}>Show 16</option>
-                    <option value={24}>Show 24</option>
-                  </select>
-                </div>
+                ) : null}
               </div>
 
-              {filteredProducts.length === 0 ? (
-                <p className="field-hint">No products match this search.</p>
-              ) : (
-                <>
-                  <div className="seller-store-grid">
-                    {visibleProducts.map((item) => {
-                      const livePrice = Number(item?.price || 0);
-                      const mrp = Number(item?.mrp || 0);
-                      const hasDiscount = mrp > livePrice;
-                      const discountPercent = hasDiscount
-                        ? Math.round(((mrp - livePrice) / mrp) * 100)
-                        : 0;
-                      const stock = Number(item?.stock || 0);
+              {isProductsTab ? (
+                filteredProducts.length === 0 ? (
+                  <p className="field-hint">No products match this search.</p>
+                ) : (
+                  <>
+                    <div className="seller-store-grid">
+                      {visibleProducts.map((item, index) => {
+                        const livePrice = Number(item?.price || 0);
+                        const mrp = Number(item?.mrp || 0);
+                        const hasDiscount = mrp > livePrice;
+                        const discountPercent = hasDiscount
+                          ? Math.round(((mrp - livePrice) / mrp) * 100)
+                          : 0;
+                        const stock = Number(item?.stock || 0);
+                        const productId = String(item?._id || "").trim();
+                        const productReviewStats =
+                          item?.reviewStats && typeof item.reviewStats === "object"
+                            ? item.reviewStats
+                            : null;
+                        const productDisplayRating = Number(
+                          productReviewStats?.displayRating || productReviewStats?.avgRating || 0
+                        );
+                        const productTotalFeedbacks = Number(
+                          productReviewStats?.totalFeedbacks || 0
+                        );
+                        const productVerifiedFeedbacks = Number(
+                          productReviewStats?.verifiedFeedbacks || productTotalFeedbacks || 0
+                        );
+                        const { ratingRows: productRatingRows, totalRatingVotes: productRatingVotes } =
+                          getRatingRows(
+                            productReviewStats?.ratingBreakdown,
+                            productTotalFeedbacks,
+                            productVerifiedFeedbacks
+                          );
+                        const isProductRatingOpen =
+                          Boolean(productId) && activeProductRatingId === productId;
+                        const productRatingPopoverId = `seller-store-product-rating-${
+                          productId || index
+                        }`;
+                        const productUrl = `/products/${item._id}`;
+                        const prefetchCurrentProduct = () => {
+                          if (!productId) return;
+                          prefetchProductDetail(productId, {
+                            includeFeedback: true,
+                            feedbackLimit: 6,
+                          });
+                        };
 
-                      return (
-                        <article key={item._id} className="seller-store-product">
-                          <img src={getProductImage(item)} alt={item.name} loading="lazy" />
-                          <div className="seller-store-product-body">
-                            <h4>{item.name}</h4>
-                            <p>{item.category || "Gift hamper"}</p>
-                            <div className="seller-store-product-row">
-                              <div className="seller-store-product-pricing">
-                                <strong>₹{formatPrice(livePrice)}</strong>
-                                {hasDiscount ? (
-                                  <>
-                                    <span className="seller-store-product-mrp">₹{formatPrice(mrp)}</span>
-                                    <span className="seller-store-product-discount">-{discountPercent}%</span>
-                                  </>
-                                ) : null}
+                        return (
+                          <article
+                            key={item._id}
+                            className="seller-store-product"
+                            onMouseEnter={prefetchCurrentProduct}
+                          >
+                            <Link
+                              className="seller-store-product-image-link"
+                              to={productUrl}
+                              aria-label={`Open ${item.name}`}
+                              onMouseEnter={prefetchCurrentProduct}
+                              onFocus={prefetchCurrentProduct}
+                              onTouchStart={prefetchCurrentProduct}
+                            >
+                              <img src={getProductImage(item)} alt={item.name} loading="lazy" />
+                            </Link>
+                            <div className="seller-store-product-body">
+                              <h4>
+                                <Link
+                                  className="seller-store-product-title-link"
+                                  to={productUrl}
+                                  onMouseEnter={prefetchCurrentProduct}
+                                  onFocus={prefetchCurrentProduct}
+                                  onTouchStart={prefetchCurrentProduct}
+                                >
+                                  {item.name}
+                                </Link>
+                              </h4>
+                              <p>{item.category || "Gift hamper"}</p>
+                              {productRatingVotes > 0 ? (
+                                <div
+                                  className="seller-store-product-rating-anchor"
+                                  data-product-rating-anchor="true"
+                                >
+                                  <button
+                                    className="seller-store-product-rating-trigger"
+                                    type="button"
+                                    onClick={() =>
+                                      setActiveProductRatingId((prev) =>
+                                        prev === productId ? "" : productId
+                                      )
+                                    }
+                                    aria-expanded={isProductRatingOpen}
+                                    aria-controls={productRatingPopoverId}
+                                  >
+                                    <span className="seller-store-product-rating-value">
+                                      {productDisplayRating.toFixed(1)}
+                                    </span>
+                                    <span
+                                      className="rating-stars"
+                                      role="img"
+                                      aria-label={`${productDisplayRating.toFixed(1)} out of 5`}
+                                    >
+                                      {toStarText(productDisplayRating)}
+                                    </span>
+                                    <svg
+                                      className={`seller-store-product-rating-caret ${
+                                        isProductRatingOpen ? "open" : ""
+                                      }`}
+                                      viewBox="0 0 24 24"
+                                      aria-hidden="true"
+                                    >
+                                      <path d="m7 10 5 5 5-5" />
+                                    </svg>
+                                    <span className="seller-store-product-rating-count">
+                                      ({productRatingVotes})
+                                    </span>
+                                  </button>
+                                  {isProductRatingOpen ? (
+                                    <div
+                                      id={productRatingPopoverId}
+                                      className="seller-store-product-rating-popover"
+                                      role="dialog"
+                                      aria-label={`Rating breakdown for ${
+                                        item?.name || "this product"
+                                      }`}
+                                    >
+                                      <div className="seller-store-product-rating-popover-head">
+                                        <strong>{productDisplayRating.toFixed(1)} out of 5</strong>
+                                        <button
+                                          type="button"
+                                          className="seller-store-product-rating-popover-close"
+                                          aria-label="Close rating breakdown"
+                                          onClick={() => setActiveProductRatingId("")}
+                                        >
+                                          ×
+                                        </button>
+                                      </div>
+                                      <p className="seller-store-product-rating-popover-count">
+                                        {productRatingVotes} global ratings
+                                      </p>
+                                      <div className="seller-store-product-rating-breakdown">
+                                        {productRatingRows.map((row) => (
+                                          <div
+                                            key={`${productId || index}-rating-${row.star}`}
+                                            className="seller-store-product-rating-breakdown-row"
+                                          >
+                                            <span>{row.star} star</span>
+                                            <div
+                                              className="seller-store-product-rating-breakdown-track"
+                                              aria-hidden="true"
+                                            >
+                                              <span
+                                                className="seller-store-product-rating-breakdown-fill"
+                                                style={{ width: `${row.share}%` }}
+                                              />
+                                            </div>
+                                            <span>{Math.round(row.share)}%</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                      <Link
+                                        className="seller-store-product-rating-link"
+                                        to={productUrl}
+                                        onMouseEnter={prefetchCurrentProduct}
+                                        onFocus={prefetchCurrentProduct}
+                                        onTouchStart={prefetchCurrentProduct}
+                                        onClick={() => setActiveProductRatingId("")}
+                                      >
+                                        See customer reviews
+                                      </Link>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : (
+                                <p className="seller-store-product-rating-empty">No ratings yet</p>
+                              )}
+                              <div className="seller-store-product-row">
+                                <div className="seller-store-product-pricing">
+                                  <strong>₹{formatPrice(livePrice)}</strong>
+                                  {hasDiscount ? (
+                                    <>
+                                      <span className="seller-store-product-mrp">₹{formatPrice(mrp)}</span>
+                                      <span className="seller-store-product-discount">-{discountPercent}%</span>
+                                    </>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <div className="seller-store-product-foot">
+                                <span className={`status-pill ${stock > 0 ? "available" : "locked"}`}>
+                                  {stock > 0 ? `${stock} in stock` : "Out of stock"}
+                                </span>
+                                <Link
+                                  className="btn ghost seller-store-link"
+                                  to={productUrl}
+                                  onMouseEnter={prefetchCurrentProduct}
+                                  onFocus={prefetchCurrentProduct}
+                                  onTouchStart={prefetchCurrentProduct}
+                                >
+                                  <StoreActionIcon name="view" />
+                                  View
+                                </Link>
                               </div>
                             </div>
-                            <div className="seller-store-product-foot">
-                              <span className={`status-pill ${stock > 0 ? "available" : "locked"}`}>
-                                {stock > 0 ? `${stock} in stock` : "Out of stock"}
-                              </span>
-                              <Link className="btn ghost seller-store-link" to={`/products/${item._id}`}>
-                                View
-                              </Link>
-                            </div>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-
-                  {canShowMore && (
-                    <div className="seller-store-more-row">
-                      <button
-                        className="btn ghost"
-                        type="button"
-                        onClick={() => setShowCount((prev) => prev + 8)}
-                      >
-                        Show more products
-                      </button>
+                          </article>
+                        );
+                      })}
                     </div>
-                  )}
+
+                    {canShowMore && (
+                      <div className="seller-store-more-row">
+                        <button
+                          className="btn ghost"
+                          type="button"
+                          onClick={() => setShowCount((prev) => prev + 8)}
+                        >
+                          <StoreActionIcon name="more" />
+                          Show more products
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )
+              ) : selectedTab === STORE_TABS[1] ? (
+                <>
+                  <div className="seller-store-tab-copy seller-store-feedback-summary">
+                    {totalFeedbacks > 0 ? (
+                      <>
+                        <div className="seller-store-rating-popover-anchor" ref={ratingPopoverRef}>
+                          <p className="seller-store-feedback-rating-line">
+                            <strong>Customer rating:</strong>
+                            <button
+                              className="seller-store-rating-trigger"
+                              type="button"
+                              onClick={() => setIsRatingPopoverOpen((prev) => !prev)}
+                              aria-expanded={isRatingPopoverOpen}
+                              aria-controls="seller-store-rating-popover"
+                            >
+                              <span className="seller-store-rating-value">
+                                {displayRating.toFixed(1)}
+                              </span>
+                              <span
+                                className="rating-stars"
+                                role="img"
+                                aria-label={`${displayRating.toFixed(1)} out of 5`}
+                              >
+                                {toStarText(displayRating)}
+                              </span>
+                              <svg
+                                className={`seller-store-rating-caret ${
+                                  isRatingPopoverOpen ? "open" : ""
+                                }`}
+                                viewBox="0 0 24 24"
+                                aria-hidden="true"
+                              >
+                                <path d="m7 10 5 5 5-5" />
+                              </svg>
+                              <span className="seller-store-rating-count">({totalRatingVotes})</span>
+                            </button>
+                          </p>
+                          {isRatingPopoverOpen ? (
+                            <div
+                              id="seller-store-rating-popover"
+                              className="seller-store-rating-popover"
+                              role="dialog"
+                              aria-label="Rating breakdown"
+                            >
+                              <div className="seller-store-rating-popover-head">
+                                <div className="seller-store-rating-popover-title">
+                                  <span
+                                    className="rating-stars"
+                                    role="img"
+                                    aria-label={`${displayRating.toFixed(1)} out of 5`}
+                                  >
+                                    {toStarText(displayRating)}
+                                  </span>
+                                  <strong>{displayRating.toFixed(1)} out of 5</strong>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="seller-store-rating-popover-close"
+                                  aria-label="Close rating breakdown"
+                                  onClick={() => setIsRatingPopoverOpen(false)}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                              <p className="seller-store-rating-popover-count">
+                                {totalRatingVotes} global ratings
+                              </p>
+                              <div className="seller-store-rating-breakdown">
+                                {ratingRows.map((row) => (
+                                  <div
+                                    key={`seller-breakdown-${row.star}`}
+                                    className="seller-store-rating-breakdown-row"
+                                  >
+                                    <span className="seller-store-rating-breakdown-label">
+                                      {row.star} star
+                                    </span>
+                                    <div
+                                      className="seller-store-rating-breakdown-track"
+                                      aria-hidden="true"
+                                    >
+                                      <span
+                                        className="seller-store-rating-breakdown-fill"
+                                        style={{ width: `${row.share}%` }}
+                                      />
+                                    </div>
+                                    <span className="seller-store-rating-breakdown-percent">
+                                      {Math.round(row.share)}%
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                              {feedbacks.length > 0 ? (
+                                <button
+                                  type="button"
+                                  className="seller-store-rating-popover-link"
+                                  onClick={handleSeeCustomerReviews}
+                                >
+                                  See customer reviews
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                        <p className="seller-store-feedback-subcopy">
+                          {displayRating.toFixed(1)}/5 from {verifiedFeedbacks} verified ratings
+                        </p>
+                      </>
+                    ) : (
+                      <p>No customer feedback yet.</p>
+                    )}
+                  </div>
+                  {feedbackLoading && feedbacks.length === 0 ? (
+                    <p className="field-hint">Loading customer reviews...</p>
+                  ) : null}
+                  {feedbacks.length > 0 ? (
+                    <div className="seller-store-feedback-list" ref={feedbackListRef}>
+                      {feedbacks.map((item, index) => {
+                        const feedbackProductId = String(item?.productId || "").trim();
+                        const canOpenProduct = Boolean(feedbackProductId);
+                        const openProduct = () => {
+                          if (!canOpenProduct) return;
+                          navigate(`/products/${feedbackProductId}`);
+                        };
+                        return (
+                          <article
+                            key={
+                              item?.id ||
+                              `${item?.customerName || "customer"}-${item?.createdAt || index}`
+                            }
+                            className={`seller-store-feedback-item ${
+                              canOpenProduct ? "is-clickable" : ""
+                            }`}
+                            role={canOpenProduct ? "button" : undefined}
+                            tabIndex={canOpenProduct ? 0 : undefined}
+                            onClick={canOpenProduct ? openProduct : undefined}
+                            onKeyDown={
+                              canOpenProduct
+                                ? (event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      openProduct();
+                                    }
+                                  }
+                                : undefined
+                            }
+                            aria-label={
+                              canOpenProduct
+                                ? `Open product ${item?.productName || "Gift hamper"}`
+                                : undefined
+                            }
+                          >
+                            <div className="seller-store-feedback-head">
+                              <p>{item?.customerName || "Customer"}</p>
+                              <span
+                                className="rating-stars"
+                              role="img"
+                              aria-label={`${Number(item?.rating || 0)} out of 5`}
+                            >
+                              {toStarText(item?.rating)}
+                            </span>
+                          </div>
+                          <p className="seller-store-feedback-product">
+                            {item?.productName || "Gift hamper"}
+                            {canOpenProduct ? " • Click to view product" : ""}
+                          </p>
+                          {item?.verifiedPurchase ? (
+                            <p className="field-hint">Verified purchase</p>
+                          ) : null}
+                          {item?.comment ? (
+                            <p className="seller-store-feedback-comment">{item.comment}</p>
+                          ) : (
+                            <p className="field-hint">Customer did not add a written review.</p>
+                          )}
+                            <p className="field-hint">
+                              {item?.createdAt ? formatDate(item.createdAt) : "Date unavailable"}
+                            </p>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </>
+              ) : selectedTab === STORE_TABS[2] ? (
+                <div className="seller-store-tab-copy">
+                  <p>
+                    <strong>Pickup address:</strong> {pickupAddressText}
+                  </p>
+                  <p>
+                    <strong>Pickup window:</strong> {String(seller?.pickupAddress?.pickupWindow || "10-6")}
+                  </p>
+                  <p>
+                    <strong>Support:</strong> {sellerPhone || "Phone not shared"} |{" "}
+                    {sellerEmail || "Email not shared"}
+                  </p>
+                </div>
+              ) : selectedTab === STORE_TABS[3] ? (
+                <div className="seller-store-tab-copy">
+                  <p>{sellerAbout}</p>
+                </div>
+              ) : (
+                <div className="seller-store-tab-copy">
+                  <p>
+                    <strong>Store name:</strong> {sellerName}
+                  </p>
+                  <p>
+                    <strong>All Products:</strong> {listedProducts}
+                  </p>
+                  <p>
+                    <strong>Categories:</strong> {categoryCount}
+                  </p>
+                  <p>
+                    <strong>Joined:</strong> {joinedText}
+                  </p>
+                  <p>
+                    <strong>Location:</strong> {locationText}
+                  </p>
+                </div>
               )}
             </section>
 
@@ -838,7 +1470,7 @@ export default function SellerStore() {
                 <h4>Store Insights</h4>
                 <div className="seller-store-insight-grid">
                   <p>
-                    <span>Products listed</span>
+                    <span>All Products</span>
                     <strong>{listedProducts}</strong>
                   </p>
                   <p>

@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import Header from "../components/Header";
+import {
+  DEFAULT_CATEGORY_TREE,
+  buildCategoryPath,
+  loadCategoryTree,
+} from "../utils/categoryMaster";
 import { getCategoryImage, getProductImage } from "../utils/productMedia";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
@@ -10,6 +15,7 @@ export default function Home() {
   const [activeSlide, setActiveSlide] = useState(0);
   const [carouselPaused, setCarouselPaused] = useState(false);
   const [featuredProducts, setFeaturedProducts] = useState([]);
+  const [categoryTree, setCategoryTree] = useState(DEFAULT_CATEGORY_TREE);
   const location = useLocation();
 
   useEffect(() => {
@@ -47,6 +53,22 @@ export default function Home() {
     loadFeatured();
   }, []);
 
+  useEffect(() => {
+    let ignore = false;
+
+    const hydrateCategoryTree = async () => {
+      const nextTree = await loadCategoryTree();
+      if (!ignore && Array.isArray(nextTree) && nextTree.length > 0) {
+        setCategoryTree(nextTree);
+      }
+    };
+
+    hydrateCategoryTree();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
   const features = [
     {
       title: "Curated Craft Collections",
@@ -68,38 +90,15 @@ export default function Home() {
     },
   ];
 
-  const occasions = [
-    {
-      name: "Birthdays",
-      image: getCategoryImage("Birthday"),
-      category: "Birthday",
-    },
-    {
-      name: "Anniversaries",
-      image: getCategoryImage("Anniversary"),
-      category: "Anniversary",
-    },
-    {
-      name: "Weddings",
-      image: getCategoryImage("Wedding"),
-      category: "Wedding",
-    },
-    {
-      name: "Festivals",
-      image: getCategoryImage("Festivals"),
-      category: "Festivals",
-    },
-    {
-      name: "Thank You",
-      image: getCategoryImage("Thank You"),
-      category: "Return gifts",
-    },
-    {
-      name: "Just Because",
-      image: getCategoryImage("Just Because"),
-      category: "Corporate",
-    },
-  ];
+  const occasionCards =
+    (Array.isArray(categoryTree) && categoryTree.length > 0
+      ? categoryTree
+      : DEFAULT_CATEGORY_TREE
+    ).map((group) => ({
+      name: group.label || group.category,
+      image: getCategoryImage(group.label || group.category),
+      category: group.category,
+    }));
 
   const formatPrice = (value) => {
     if (typeof value === "number") return value.toLocaleString("en-IN");
@@ -272,11 +271,11 @@ export default function Home() {
           </div>
         </div>
         <div className="occasion-grid">
-          {occasions.map((item) => (
+          {occasionCards.map((item) => (
             <Link
-              key={item.name}
+              key={item.category}
               className="occasion-card"
-              to={`/products?category=${encodeURIComponent(item.category)}`}
+              to={buildCategoryPath({ category: item.category })}
               aria-label={`Shop ${item.name} gifts`}
             >
               <img

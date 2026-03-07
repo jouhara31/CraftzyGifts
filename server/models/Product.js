@@ -8,6 +8,7 @@ const productSchema = new mongoose.Schema(
     mrp: { type: Number, default: 0, min: 0 },
     stock: { type: Number, default: 25, min: 0 },
     category: { type: String },
+    subcategory: { type: String },
     occasions: [{ type: String }],
     deliveryMinDays: { type: Number, default: 0, min: 0 },
     deliveryMaxDays: { type: Number, default: 0, min: 0 },
@@ -65,5 +66,8 @@ const productSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+productSchema.index({ seller: 1, createdAt: -1 });
+productSchema.index({ seller: 1, status: 1, moderationStatus: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Product", productSchema);

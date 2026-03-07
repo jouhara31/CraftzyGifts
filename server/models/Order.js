@@ -35,6 +35,13 @@ const orderSchema = new mongoose.Schema(
     paidAt: { type: Date },
     refundedAt: { type: Date },
     returnReason: { type: String },
+    review: {
+      rating: { type: Number, min: 1, max: 5 },
+      comment: { type: String, maxlength: 600 },
+      images: [{ type: String }],
+      createdAt: { type: Date },
+      updatedAt: { type: Date },
+    },
     inventoryAdjusted: { type: Boolean, default: false },
     inventoryRestocked: { type: Boolean, default: false },
     webhookEvents: [
@@ -91,5 +98,8 @@ const orderSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+orderSchema.index({ seller: 1, "review.rating": 1, "review.updatedAt": -1, createdAt: -1 });
+orderSchema.index({ product: 1, "review.rating": 1 });
 
 module.exports = mongoose.model("Order", orderSchema);

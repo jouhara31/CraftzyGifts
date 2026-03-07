@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const {
   getProducts,
+  getCategoryMaster,
   getProductById,
   getSellerProducts,
   getPublicSellerStore,
@@ -13,6 +14,7 @@ const {
 const { auth, optionalAuth, requireRole, requireApprovedSeller } = require("../middleware/auth");
 
 router.get("/", getProducts);
+router.get("/categories", getCategoryMaster);
 router.get("/seller/me", auth, requireRole("seller"), requireApprovedSeller, getSellerProducts);
 router.get("/seller/:sellerId/public", optionalAuth, getPublicSellerStore);
 router.get(

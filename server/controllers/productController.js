@@ -1,10 +1,18 @@
 const Product = require("../models/Product");
 const User = require("../models/User");
+const Order = require("../models/Order");
 const { ensureCustomizationMaster } = require("../utils/customizationMaster");
+const { ensureCategoryMaster, syncCategoryMaster } = require("../utils/categoryMaster");
 
 const MAX_SELLING_PRICE = 200000;
 const MAX_MRP = 500000;
 const MAX_SURCHARGE = 50000;
+const RATING_PRIOR_COUNT = 8;
+const GLOBAL_RATING_CACHE_TTL_MS = 5 * 60 * 1000;
+let globalRatingSummaryCache = {
+  expiresAt: 0,
+  value: null,
+};
 
 const escapeRegex = (value = "") =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -23,15 +31,127 @@ const parseStock = (value, fallback = 0) => {
 
 const parseBoolean = (value, fallback = false) => {
   if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
   if (typeof value === "string") {
     const text = value.trim().toLowerCase();
-    if (text === "true") return true;
-    if (text === "false") return false;
+    if (text === "true" || text === "1" || text === "yes") return true;
+    if (text === "false" || text === "0" || text === "no") return false;
   }
   return fallback;
 };
 
+const getGlobalRatingSummary = async () => {
+  const now = Date.now();
+  if (globalRatingSummaryCache.value && globalRatingSummaryCache.expiresAt > now) {
+    return globalRatingSummaryCache.value;
+  }
+
+  const rows = await Order.aggregate([
+    {
+      $match: {
+        "review.rating": { $gte: 1, $lte: 5 },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        avgRating: { $avg: "$review.rating" },
+      },
+    },
+  ]);
+
+  const summary = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+  globalRatingSummaryCache = {
+    value: summary,
+    expiresAt: now + GLOBAL_RATING_CACHE_TTL_MS,
+  };
+  return summary;
+};
+
 const roundMoney = (value) => Math.round(Number(value || 0) * 100) / 100;
+const roundRating = (value) => {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return Math.round(numeric * 10) / 10;
+};
+const buildRatingBreakdown = (source = {}, totalFeedbacks = 0) =>
+  [5, 4, 3, 2, 1].reduce((acc, star) => {
+    const key = `rating${star}`;
+    const count = Math.max(0, Number(source?.[key] || 0));
+    const share = totalFeedbacks > 0 ? (count / totalFeedbacks) * 100 : 0;
+    acc[star] = {
+      count,
+      share: Math.round(share * 10) / 10,
+    };
+    return acc;
+  }, {});
+const buildProductReviewStats = (summary = {}) => {
+  const totalFeedbacks = Math.max(0, Number(summary?.totalFeedbacks || 0));
+  const avgRating = roundRating(Number(summary?.avgRating || 0));
+  return {
+    avgRating,
+    displayRating: avgRating,
+    totalFeedbacks,
+    verifiedFeedbacks: totalFeedbacks,
+    ratingBreakdown: buildRatingBreakdown(summary, totalFeedbacks),
+  };
+};
+const EMPTY_PRODUCT_REVIEW_STATS = buildProductReviewStats();
+const STORE_PRODUCT_CARD_SELECT = "name category subcategory price mrp stock image images createdAt";
+const withProductReviewStats = async (products = []) => {
+  const normalizedProducts = (Array.isArray(products) ? products : []).map((item) =>
+    item && typeof item.toObject === "function" ? item.toObject() : item
+  );
+  const productIds = normalizedProducts.map((item) => item?._id).filter(Boolean);
+  if (productIds.length === 0) {
+    return normalizedProducts.map((item) => ({
+      ...item,
+      reviewStats: EMPTY_PRODUCT_REVIEW_STATS,
+    }));
+  }
+
+  const summaryRows = await Order.aggregate([
+    {
+      $match: {
+        product: { $in: productIds },
+        "review.rating": { $gte: 1, $lte: 5 },
+      },
+    },
+    {
+      $group: {
+        _id: "$product",
+        avgRating: { $avg: "$review.rating" },
+        totalFeedbacks: { $sum: 1 },
+        rating5: { $sum: { $cond: [{ $eq: ["$review.rating", 5] }, 1, 0] } },
+        rating4: { $sum: { $cond: [{ $eq: ["$review.rating", 4] }, 1, 0] } },
+        rating3: { $sum: { $cond: [{ $eq: ["$review.rating", 3] }, 1, 0] } },
+        rating2: { $sum: { $cond: [{ $eq: ["$review.rating", 2] }, 1, 0] } },
+        rating1: { $sum: { $cond: [{ $eq: ["$review.rating", 1] }, 1, 0] } },
+      },
+    },
+  ]);
+
+  const statsByProduct = new Map(
+    (Array.isArray(summaryRows) ? summaryRows : [])
+      .map((row) => {
+        const productId = String(row?._id || "").trim();
+        if (!productId) return null;
+        return [productId, buildProductReviewStats(row)];
+      })
+      .filter(Boolean)
+  );
+
+  return normalizedProducts.map((item) => {
+    const productId = String(item?._id || "").trim();
+    return {
+      ...item,
+      reviewStats: statsByProduct.get(productId) || EMPTY_PRODUCT_REVIEW_STATS,
+    };
+  });
+};
 
 const parseMoneyInput = (value, fallback = 0) => {
   if (value === undefined || value === null) return fallback;
@@ -298,7 +418,8 @@ const deriveAutoModeration = async ({ candidate, sellerId, excludeProductId }) =
   const normalizedName = normalizeProductText(candidate?.name);
   const normalizedDescription = normalizeProductText(candidate?.description);
   const normalizedCategory = normalizeProductText(candidate?.category);
-  const mergedText = `${normalizedName} ${normalizedDescription} ${normalizedCategory}`.trim();
+  const normalizedSubcategory = normalizeProductText(candidate?.subcategory);
+  const mergedText = `${normalizedName} ${normalizedDescription} ${normalizedCategory} ${normalizedSubcategory}`.trim();
 
   if (BLOCKED_PRODUCT_TERMS.some((term) => mergedText.includes(term))) {
     return {
@@ -354,6 +475,7 @@ exports.getProducts = async (req, res) => {
   try {
     const {
       category,
+      subcategory,
       search,
       customizable,
       minPrice,
@@ -374,6 +496,15 @@ exports.getProducts = async (req, res) => {
       });
     }
 
+    if (subcategory) {
+      andFilters.push({
+        subcategory: {
+          $regex: `^${escapeRegex(subcategory)}$`,
+          $options: "i",
+        },
+      });
+    }
+
     if (search) {
       const normalizedSearch = escapeRegex(search.trim());
       if (normalizedSearch) {
@@ -381,6 +512,7 @@ exports.getProducts = async (req, res) => {
           $or: [
             { name: { $regex: normalizedSearch, $options: "i" } },
             { category: { $regex: normalizedSearch, $options: "i" } },
+            { subcategory: { $regex: normalizedSearch, $options: "i" } },
             { description: { $regex: normalizedSearch, $options: "i" } },
           ],
         });
@@ -416,6 +548,8 @@ exports.getProducts = async (req, res) => {
     const usePagination =
       Boolean(page) ||
       Boolean(limit) ||
+      Boolean(category) ||
+      Boolean(subcategory) ||
       Boolean(search) ||
       Boolean(minPrice) ||
       Boolean(maxPrice) ||
@@ -426,7 +560,8 @@ exports.getProducts = async (req, res) => {
       const products = await Product.find(filter)
         .populate("seller", "name storeName")
         .sort(sortConfig);
-      return res.json(products);
+      const productsWithRatings = await withProductReviewStats(products);
+      return res.json(productsWithRatings);
     }
 
     const currentPage = parsePositiveInt(page, 1);
@@ -441,15 +576,25 @@ exports.getProducts = async (req, res) => {
         .limit(perPage),
       Product.countDocuments(filter),
     ]);
+    const itemsWithRatings = await withProductReviewStats(items);
 
     const pages = Math.max(Math.ceil(total / perPage), 1);
     res.json({
-      items,
+      items: itemsWithRatings,
       total,
       page: currentPage,
       pages,
       hasNext: currentPage < pages,
     });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getCategoryMaster = async (_req, res) => {
+  try {
+    const config = await ensureCategoryMaster();
+    res.json(Array.isArray(config?.groups) ? config.groups : []);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -466,7 +611,168 @@ exports.getProductById = async (req, res) => {
       "name storeName"
     );
     if (!product) return res.status(404).json({ message: "Product not found" });
-    res.json(product);
+    const includeFeedback = parseBoolean(req.query?.includeFeedback, false);
+    if (!includeFeedback) {
+      return res.json(product);
+    }
+
+    const feedbackLimit = Math.min(parsePositiveInt(req.query?.feedbackLimit, 4), 12);
+    const productIdText = String(product?._id || "").trim();
+    const productMatchers = [
+      { product: product._id },
+      { productId: product._id },
+    ];
+    if (productIdText) {
+      productMatchers.push({ product: productIdText }, { productId: productIdText });
+    }
+    const ratingsMatch = {
+      $and: [
+        { "review.rating": { $gte: 1, $lte: 5 } },
+        { $or: productMatchers },
+      ],
+    };
+    const now = new Date();
+
+    const [feedbackRows, feedbackSummaryRows, globalSummary] = await Promise.all([
+      Order.find({
+        ...ratingsMatch,
+      })
+        .select("review createdAt customer")
+        .populate("customer", "name")
+        .sort({
+          "review.updatedAt": -1,
+          "review.createdAt": -1,
+          createdAt: -1,
+        })
+        .limit(feedbackLimit)
+        .lean(),
+      Order.aggregate([
+        {
+          $match: ratingsMatch,
+        },
+        {
+          $project: {
+            rating: "$review.rating",
+            commentText: { $ifNull: ["$review.comment", ""] },
+            reviewDate: {
+              $ifNull: ["$review.updatedAt", { $ifNull: ["$review.createdAt", "$createdAt"] }],
+            },
+          },
+        },
+        {
+          $addFields: {
+            ageDays: {
+              $max: [0, { $divide: [{ $subtract: [now, "$reviewDate"] }, 1000 * 60 * 60 * 24] }],
+            },
+            commentLength: { $strLenCP: { $trim: { input: "$commentText" } } },
+          },
+        },
+        {
+          $addFields: {
+            recencyWeight: {
+              $switch: {
+                branches: [
+                  { case: { $lte: ["$ageDays", 30] }, then: 1.15 },
+                  { case: { $lte: ["$ageDays", 90] }, then: 1.0 },
+                  { case: { $lte: ["$ageDays", 180] }, then: 0.9 },
+                ],
+                default: 0.82,
+              },
+            },
+            commentWeight: {
+              $cond: [{ $gte: ["$commentLength", 24] }, 1.06, 1],
+            },
+          },
+        },
+        {
+          $addFields: {
+            reviewWeight: {
+              $multiply: ["$recencyWeight", "$commentWeight"],
+            },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            avgRating: { $avg: "$rating" },
+            totalFeedbacks: { $sum: 1 },
+            weightedCount: { $sum: "$reviewWeight" },
+            weightedRatingSum: { $sum: { $multiply: ["$rating", "$reviewWeight"] } },
+            rating5: { $sum: { $cond: [{ $eq: ["$rating", 5] }, 1, 0] } },
+            rating4: { $sum: { $cond: [{ $eq: ["$rating", 4] }, 1, 0] } },
+            rating3: { $sum: { $cond: [{ $eq: ["$rating", 3] }, 1, 0] } },
+            rating2: { $sum: { $cond: [{ $eq: ["$rating", 2] }, 1, 0] } },
+            rating1: { $sum: { $cond: [{ $eq: ["$rating", 1] }, 1, 0] } },
+          },
+        },
+      ]),
+      getGlobalRatingSummary(),
+    ]);
+
+    const feedbacks = (Array.isArray(feedbackRows) ? feedbackRows : [])
+      .map((entry) => ({
+        id: String(entry?._id || "").trim(),
+        productId: String(entry?.product || product?._id || "").trim(),
+        rating: Number(entry?.review?.rating || 0),
+        comment: String(entry?.review?.comment || "").trim(),
+        images: parseImageUrls(entry?.review?.images, []),
+        customerName: String(entry?.customer?.name || "Customer").trim(),
+        verifiedPurchase: true,
+        createdAt: entry?.review?.updatedAt || entry?.review?.createdAt || entry?.createdAt || null,
+      }))
+      .filter((entry) => Number.isFinite(entry.rating) && entry.rating >= 1 && entry.rating <= 5);
+
+    const summary =
+      Array.isArray(feedbackSummaryRows) && feedbackSummaryRows.length > 0
+        ? feedbackSummaryRows[0]
+        : null;
+    const rawAvgRating = Number(summary?.avgRating || 0);
+    const totalFeedbacks = Number(summary?.totalFeedbacks || feedbacks.length || 0);
+    const weightedCount = Number(summary?.weightedCount || 0);
+    const weightedRatingSum = Number(summary?.weightedRatingSum || 0);
+    const weightedAvgRating =
+      weightedCount > 0 ? weightedRatingSum / weightedCount : rawAvgRating;
+
+    const globalAvgRating = Number(globalSummary?.avgRating || 0);
+    const priorMean =
+      Number.isFinite(globalAvgRating) && globalAvgRating > 0
+        ? globalAvgRating
+        : Number.isFinite(rawAvgRating) && rawAvgRating > 0
+          ? rawAvgRating
+          : 4;
+    const bayesianDenominator = weightedCount + RATING_PRIOR_COUNT;
+    const bayesianRating =
+      bayesianDenominator > 0
+        ? (weightedAvgRating * weightedCount + priorMean * RATING_PRIOR_COUNT) /
+          bayesianDenominator
+        : priorMean;
+
+    const ratingBreakdown = [5, 4, 3, 2, 1].reduce((acc, star) => {
+      const key = `rating${star}`;
+      const count = Math.max(0, Number(summary?.[key] || 0));
+      const share = totalFeedbacks > 0 ? (count / totalFeedbacks) * 100 : 0;
+      acc[star] = {
+        count,
+        share: Math.round(share * 10) / 10,
+      };
+      return acc;
+    }, {});
+
+    const reviewStats = {
+      avgRating: roundRating(rawAvgRating),
+      weightedAvgRating: roundRating(weightedAvgRating),
+      displayRating: roundRating(bayesianRating),
+      totalFeedbacks,
+      verifiedFeedbacks: totalFeedbacks,
+      ratingBreakdown,
+    };
+
+    const payload = typeof product.toObject === "function" ? product.toObject() : product;
+    return res.json({
+      ...payload,
+      reviewStats,
+      feedbacks,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -492,6 +798,10 @@ exports.getPublicSellerStore = async (req, res) => {
 
     const requesterId = String(req.user?.id || "").trim();
     const isOwner = requesterId && requesterId === sellerId;
+    const includeProducts = parseBoolean(req.query?.includeProducts, true);
+    const includeFeedbacks = parseBoolean(req.query?.includeFeedbacks, true);
+    const includeProductRatings =
+      includeProducts && parseBoolean(req.query?.includeProductRatings, true);
     const sellerFilter = {
       _id: sellerId,
       role: "seller",
@@ -502,26 +812,166 @@ exports.getPublicSellerStore = async (req, res) => {
 
     const seller = await User.findOne(sellerFilter).select(
       "name storeName profileImage storeCoverImage about supportEmail phone pickupAddress createdAt"
-    );
+    ).lean();
     if (!seller) {
       return res.status(404).json({ message: "Seller store not found." });
     }
 
-    const perPage = Math.min(parsePositiveInt(req.query?.limit, 24), 60);
+    const perPage = includeProducts ? Math.min(parsePositiveInt(req.query?.limit, 24), 60) : 0;
     const visibility = getPublicVisibilityFilter();
     const filter = {
       seller: seller._id,
       $and: visibility.$and,
     };
+    const feedbackLimit = includeFeedbacks
+      ? Math.min(parsePositiveInt(req.query?.feedbackLimit, 8), 30)
+      : 0;
+    const ratingsMatch = {
+      seller: seller._id,
+      "review.rating": { $gte: 1, $lte: 5 },
+    };
+    const now = new Date();
 
-    const products = await Product.find(filter)
-      .populate("seller", "name storeName")
-      .sort({ createdAt: -1 })
-      .limit(perPage);
+    const [
+      products,
+      feedbackRows,
+      feedbackSummaryRows,
+      globalSummary,
+    ] = await Promise.all([
+      includeProducts
+        ? Product.find(filter)
+            .select(STORE_PRODUCT_CARD_SELECT)
+            .sort({ createdAt: -1 })
+            .limit(perPage)
+            .lean()
+        : [],
+      includeFeedbacks
+        ? Order.find({
+            ...ratingsMatch,
+          })
+            .select("review createdAt customer product")
+            .populate("customer", "name")
+            .populate("product", "name")
+            .sort({
+              "review.updatedAt": -1,
+              "review.createdAt": -1,
+              createdAt: -1,
+            })
+            .limit(feedbackLimit)
+            .lean()
+        : [],
+      Order.aggregate([
+        {
+          $match: ratingsMatch,
+        },
+        {
+          $project: {
+            rating: "$review.rating",
+            commentText: { $ifNull: ["$review.comment", ""] },
+            reviewDate: {
+              $ifNull: ["$review.updatedAt", { $ifNull: ["$review.createdAt", "$createdAt"] }],
+            },
+          },
+        },
+        {
+          $addFields: {
+            ageDays: {
+              $max: [0, { $divide: [{ $subtract: [now, "$reviewDate"] }, 1000 * 60 * 60 * 24] }],
+            },
+            commentLength: { $strLenCP: { $trim: { input: "$commentText" } } },
+          },
+        },
+        {
+          $addFields: {
+            recencyWeight: {
+              $switch: {
+                branches: [
+                  { case: { $lte: ["$ageDays", 30] }, then: 1.15 },
+                  { case: { $lte: ["$ageDays", 90] }, then: 1.0 },
+                  { case: { $lte: ["$ageDays", 180] }, then: 0.9 },
+                ],
+                default: 0.82,
+              },
+            },
+            commentWeight: {
+              $cond: [{ $gte: ["$commentLength", 24] }, 1.06, 1],
+            },
+          },
+        },
+        {
+          $addFields: {
+            reviewWeight: {
+              $multiply: ["$recencyWeight", "$commentWeight"],
+            },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            avgRating: { $avg: "$rating" },
+            totalFeedbacks: { $sum: 1 },
+            weightedCount: { $sum: "$reviewWeight" },
+            weightedRatingSum: { $sum: { $multiply: ["$rating", "$reviewWeight"] } },
+            rating5: { $sum: { $cond: [{ $eq: ["$rating", 5] }, 1, 0] } },
+            rating4: { $sum: { $cond: [{ $eq: ["$rating", 4] }, 1, 0] } },
+            rating3: { $sum: { $cond: [{ $eq: ["$rating", 3] }, 1, 0] } },
+            rating2: { $sum: { $cond: [{ $eq: ["$rating", 2] }, 1, 0] } },
+            rating1: { $sum: { $cond: [{ $eq: ["$rating", 1] }, 1, 0] } },
+          },
+        },
+      ]),
+      getGlobalRatingSummary(),
+    ]);
+    const normalizedProducts = Array.isArray(products) ? products : [];
+    const productsWithReviewStats = includeProductRatings
+      ? await withProductReviewStats(normalizedProducts)
+      : normalizedProducts;
+
+    const feedbacks = (Array.isArray(feedbackRows) ? feedbackRows : [])
+      .map((entry) => ({
+        id: String(entry?._id || "").trim(),
+        productId: String(entry?.product?._id || entry?.product || "").trim(),
+        rating: Number(entry?.review?.rating || 0),
+        comment: String(entry?.review?.comment || "").trim(),
+        images: parseImageUrls(entry?.review?.images, []),
+        customerName: String(entry?.customer?.name || "Customer").trim(),
+        productName: String(entry?.product?.name || "Gift hamper").trim(),
+        verifiedPurchase: true,
+        createdAt: entry?.review?.updatedAt || entry?.review?.createdAt || entry?.createdAt || null,
+      }))
+      .filter((entry) => Number.isFinite(entry.rating) && entry.rating >= 1 && entry.rating <= 5);
+
+    const summary =
+      Array.isArray(feedbackSummaryRows) && feedbackSummaryRows.length > 0
+        ? feedbackSummaryRows[0]
+        : null;
+    const rawAvgRating = Number(summary?.avgRating || 0);
+    const totalFeedbacks = Number(summary?.totalFeedbacks || feedbacks.length || 0);
+    const weightedCount = Number(summary?.weightedCount || 0);
+    const weightedRatingSum = Number(summary?.weightedRatingSum || 0);
+    const weightedAvgRating =
+      weightedCount > 0 ? weightedRatingSum / weightedCount : rawAvgRating;
+
+    const globalAvgRating = Number(globalSummary?.avgRating || 0);
+    const priorMean =
+      Number.isFinite(globalAvgRating) && globalAvgRating > 0
+        ? globalAvgRating
+        : Number.isFinite(rawAvgRating) && rawAvgRating > 0
+          ? rawAvgRating
+          : 4;
+    const bayesianDenominator = weightedCount + RATING_PRIOR_COUNT;
+    const bayesianRating =
+      bayesianDenominator > 0
+        ? (weightedAvgRating * weightedCount + priorMean * RATING_PRIOR_COUNT) /
+          bayesianDenominator
+        : priorMean;
+
+    const ratingBreakdown = buildRatingBreakdown(summary, totalFeedbacks);
+    const verifiedFeedbacks = totalFeedbacks;
 
     const categories = Array.from(
       new Set(
-        products
+        productsWithReviewStats
           .map((item) => String(item?.category || "").trim())
           .filter(Boolean)
       )
@@ -529,10 +979,17 @@ exports.getPublicSellerStore = async (req, res) => {
 
     res.json({
       seller,
-      products,
+      products: productsWithReviewStats,
+      feedbacks,
       stats: {
-        totalProducts: products.length,
+        totalProducts: productsWithReviewStats.length,
         categories: categories.length,
+        avgRating: roundRating(rawAvgRating),
+        weightedAvgRating: roundRating(weightedAvgRating),
+        displayRating: roundRating(bayesianRating),
+        totalFeedbacks,
+        verifiedFeedbacks,
+        ratingBreakdown,
       },
     });
   } catch (error) {
@@ -657,6 +1114,7 @@ exports.createProduct = async (req, res) => {
         name: req.body?.name,
         description: req.body?.description,
         category: req.body?.category,
+        subcategory: req.body?.subcategory,
         price,
         images,
       },
@@ -668,6 +1126,7 @@ exports.createProduct = async (req, res) => {
       name: String(req.body.name || "").trim(),
       description: String(req.body.description || "").trim(),
       category: String(req.body.category || "").trim(),
+      subcategory: String(req.body.subcategory || "").trim(),
       price,
       mrp,
       occasions,
@@ -687,6 +1146,10 @@ exports.createProduct = async (req, res) => {
       seller: req.user.id,
     });
     await product.save();
+    await syncCategoryMaster({
+      category: product.category,
+      subcategory: product.subcategory,
+    });
     res.status(201).json(product);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -718,6 +1181,9 @@ exports.updateProduct = async (req, res) => {
     }
     if (has("category")) {
       updates.category = String(updates.category || "").trim();
+    }
+    if (has("subcategory")) {
+      updates.subcategory = String(updates.subcategory || "").trim();
     }
     if (has("price")) {
       const nextPrice = parseMoneyInput(updates.price, 0);
@@ -861,7 +1327,7 @@ exports.updateProduct = async (req, res) => {
       updates.packagingStyles = [];
     }
 
-    const shouldReModerate = ["name", "description", "category", "images", "price"].some((field) =>
+    const shouldReModerate = ["name", "description", "category", "subcategory", "images", "price"].some((field) =>
       has(field)
     );
 
@@ -873,6 +1339,7 @@ exports.updateProduct = async (req, res) => {
           name: product.name,
           description: product.description,
           category: product.category,
+          subcategory: product.subcategory,
           price: product.price,
           images: product.images,
         },
@@ -884,6 +1351,10 @@ exports.updateProduct = async (req, res) => {
     }
 
     await product.save();
+    await syncCategoryMaster({
+      category: product.category,
+      subcategory: product.subcategory,
+    });
     res.json(product);
   } catch (error) {
     res.status(500).json({ message: error.message });

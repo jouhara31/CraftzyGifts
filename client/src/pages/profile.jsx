@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import { getWishlist } from "../utils/wishlist";
@@ -194,7 +194,7 @@ const buildSidebarSections = (role) => {
           { label: "Custom Hamper Items", path: "/seller/listed-items" },
           { label: "Orders", path: "/seller/orders" },
           { label: "Payments", path: "/seller/payments" },
-          { label: "Store Settings", path: "/seller/settings" },
+          { label: "Edit Store", path: "/seller/settings" },
         ],
       },
       {
@@ -376,13 +376,13 @@ export default function Profile() {
   const sidebarAvatarInitial =
     (profile?.name || profile?.storeName || "U").trim().slice(0, 1).toUpperCase() || "U";
   const showSidebarAvatarImage = Boolean(profile?.profileImage);
-  const clearSessionAndRedirect = (path = "/login") => {
+  const clearSessionAndRedirect = useCallback((path = "/login") => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
     window.dispatchEvent(new Event("user:updated"));
     navigate(path);
-  };
+  }, [navigate]);
 
   useEffect(() => {
     const load = async () => {
@@ -405,18 +405,28 @@ export default function Profile() {
           setError(data.message || "Unable to load profile.");
           return;
         }
+        const nextUserSnapshot = {
+          id: data.id,
+          name: data.name,
+          email: data.email,
+          role: data.role,
+          sellerStatus: data.sellerStatus,
+          storeName: data.storeName,
+          phone: data.phone,
+          profileImage: data.profileImage,
+        };
         if (data.role === "admin") {
-          persistUserToStorage({
-            name: data.name,
-            email: data.email,
-            role: data.role,
-            sellerStatus: data.sellerStatus,
-            storeName: data.storeName,
-            phone: data.phone,
-            profileImage: data.profileImage,
-          });
+          persistUserToStorage(nextUserSnapshot);
           navigate("/admin/account", { replace: true });
           return;
+        }
+        if (data.role === "seller") {
+          persistUserToStorage(nextUserSnapshot);
+          const sellerProfileId = String(data.id || data._id || "").trim();
+          if (sellerProfileId) {
+            navigate(`/store/${sellerProfileId}`, { replace: true });
+            return;
+          }
         }
         setProfile(data);
         setForm({
@@ -432,21 +442,13 @@ export default function Profile() {
           setOverview({ cards: [], rowsTitle: "", rows: [] });
           setOverviewError(overviewLoadError.message || "Unable to load role summary.");
         }
-        persistUserToStorage({
-          name: data.name,
-          email: data.email,
-          role: data.role,
-          sellerStatus: data.sellerStatus,
-          storeName: data.storeName,
-          phone: data.phone,
-          profileImage: data.profileImage,
-        });
+        persistUserToStorage(nextUserSnapshot);
       } catch {
         setError("Unable to load profile.");
       }
     };
     load();
-  }, [navigate]);
+  }, [clearSessionAndRedirect, navigate]);
 
   useEffect(() => {
     if (!profileImageModalOpen) return undefined;
@@ -630,6 +632,7 @@ export default function Profile() {
         setProfile(finalProfile);
         persistUserToStorage({
           ...existingUser,
+          id: finalProfile.id,
           name: finalProfile.name,
           email: finalProfile.email,
           role: finalProfile.role,
@@ -706,6 +709,7 @@ export default function Profile() {
         storeName: data.storeName || "",
       });
       persistUserToStorage({
+        id: data.id,
         name: data.name,
         email: data.email,
         role: data.role,
@@ -860,7 +864,7 @@ export default function Profile() {
                 </div>
                 <div className="seller-profile-hero-actions">
                   <Link className="btn ghost" to="/seller/settings">
-                    Edit Profile
+                    Edit Store
                   </Link>
                 </div>
               </div>

@@ -7,6 +7,7 @@ const {
   payOrder,
   paymentWebhook,
   requestReturn,
+  submitOrderReview,
   reviewReturn,
   updateOrderStatus,
 } = require("../controllers/orderController");
@@ -17,6 +18,7 @@ router.get("/my", auth, requireRole("customer", "seller"), getMyOrders);
 router.post("/payment/webhook", paymentWebhook);
 router.post("/:id/pay", auth, requireRole("customer"), payOrder);
 router.post("/:id/return", auth, requireRole("customer"), requestReturn);
+router.patch("/:id/review", auth, requireRole("customer"), submitOrderReview);
 
 router.get("/seller", auth, requireRole("seller"), requireApprovedSeller, getSellerOrders);
 router.patch(

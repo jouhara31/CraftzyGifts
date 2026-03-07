@@ -5,6 +5,7 @@ const {
   ensureCustomizationMaster,
   normalizeMasterOptions,
 } = require("../utils/customizationMaster");
+const { syncCategoryMaster } = require("../utils/categoryMaster");
 
 const SELLER_STATUS_SET = new Set(["pending", "approved", "rejected"]);
 const PRODUCT_STATUS_SET = new Set(["active", "inactive"]);
@@ -86,6 +87,9 @@ exports.updateAdminProduct = async (req, res) => {
       const category = String(updates.category || "").trim();
       product.category = category;
     }
+    if (Object.prototype.hasOwnProperty.call(updates, "subcategory")) {
+      product.subcategory = String(updates.subcategory || "").trim();
+    }
 
     if (Object.prototype.hasOwnProperty.call(updates, "status")) {
       const status = String(updates.status || "").trim().toLowerCase();
@@ -119,6 +123,10 @@ exports.updateAdminProduct = async (req, res) => {
     }
 
     await product.save();
+    await syncCategoryMaster({
+      category: product.category,
+      subcategory: product.subcategory,
+    });
     await product.populate("seller", "name email storeName sellerStatus");
     res.json(product);
   } catch (error) {

@@ -12,6 +12,10 @@ const LEGACY_CUSTOMIZATION_OPTION_KEYS = new Set([
   "frames",
   "perfumes",
   "cards",
+  "occasion",
+  "packaging",
+  "packagingstyle",
+  "packaging_style",
 ]);
 
 const SELLER_TRANSITIONS = {
@@ -20,6 +24,24 @@ const SELLER_TRANSITIONS = {
   shipped: ["delivered"],
   return_requested: ["return_rejected", "refund_initiated", "refunded"],
   refund_initiated: ["refunded"],
+};
+
+const isAcceptedImageSource = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  if (text.length > 900000) return false;
+  return /^https?:\/\//i.test(text) || /^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(text);
+};
+
+const parseReviewImageUrls = (value, fallback = []) => {
+  const source = Array.isArray(value) ? value : [];
+  const valid = source
+    .map((entry) => String(entry || "").trim())
+    .filter((entry) => isAcceptedImageSource(entry));
+  if (valid.length > 0) {
+    return Array.from(new Set(valid)).slice(0, 4);
+  }
+  return Array.isArray(fallback) ? fallback : [];
 };
 
 const hasCustomization = (customization) => {
@@ -876,6 +898,54 @@ exports.requestReturn = async (req, res) => {
     res.json(order);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.submitOrderReview = async (req, res) => {
+  try {
+    if (req.user?.role !== "customer") {
+      return res
+        .status(403)
+        .json({ message: "Only customer accounts can submit feedback." });
+    }
+
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+    if (order.customer.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    if (order.status !== "delivered") {
+      return res
+        .status(400)
+        .json({ message: "Feedback can be submitted only after delivery." });
+    }
+
+    const rating = Number.parseInt(req.body?.rating, 10);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      return res.status(400).json({ message: "Rating must be between 1 and 5." });
+    }
+
+    const comment = String(req.body?.comment || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, 400);
+    const images = parseReviewImageUrls(req.body?.images, []);
+    const now = new Date();
+
+    order.review = {
+      rating,
+      comment,
+      images,
+      createdAt: order.review?.createdAt || now,
+      updatedAt: now,
+    };
+
+    await order.save();
+    await order.populate("product");
+    await order.populate("seller", "name storeName");
+    return res.json({ message: "Feedback sent successfully.", order });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 };
 
