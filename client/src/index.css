@@ -8136,10 +8136,18 @@ button {
   word-break: break-all;
 }
 
+.seller-store-owner-support-note {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #586c72;
+  text-align: center;
+}
+
 .seller-store-owner-actions {
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 

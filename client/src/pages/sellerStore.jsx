@@ -116,13 +116,6 @@ const readAsDataUrl = (file) =>
     reader.readAsDataURL(file);
   });
 
-const toPhoneHref = (value) => {
-  const digits = String(value || "").replace(/\D/g, "");
-  if (!digits) return "";
-  if (digits.length === 10) return `tel:+91${digits}`;
-  return `tel:+${digits}`;
-};
-
 const getLocationText = (pickupAddress = {}) =>
   [pickupAddress?.city, pickupAddress?.state, pickupAddress?.pincode]
     .map((item) => String(item || "").trim())
@@ -446,12 +439,13 @@ export default function SellerStore() {
     "Handmade gifting collections with curated items and custom options.";
   const sellerInitial = sellerOwnerName.charAt(0).toUpperCase() || "S";
   const sellerEmail = String(seller?.supportEmail || "").trim();
-  const sellerPhone = String(seller?.phone || "").trim();
-  const phoneHref = toPhoneHref(sellerPhone);
   const joinedText = formatDate(seller?.createdAt);
   const locationText = getLocationText(seller?.pickupAddress) || "Location not shared";
   const pickupAddressText =
     getPickupAddressText(seller?.pickupAddress) || "Pickup address will be shared by seller";
+  const sellerSupportMessage = sellerEmail
+    ? "Have a question about this store? Send an email and our team will contact you soon."
+    : "Support email will be shared here once the store team adds it.";
   const listedProducts = Number(storeData?.stats?.totalProducts || products.length || 0);
   const totalFeedbacks = Number(storeData?.stats?.totalFeedbacks || feedbacks.length || 0);
   const avgRating = Number(storeData?.stats?.avgRating || 0);
@@ -1060,20 +1054,14 @@ export default function SellerStore() {
                 </div>
                 <p className="seller-store-owner-name">{sellerName}</p>
                 <div className="seller-store-owner-contacts">
-                  {sellerPhone ? <span>{sellerPhone}</span> : null}
                   {sellerEmail ? <span>{sellerEmail}</span> : null}
                 </div>
+                <p className="seller-store-owner-support-note">{sellerSupportMessage}</p>
                 <div className="seller-store-owner-actions">
-                  {phoneHref ? (
-                    <a className="btn ghost" href={phoneHref}>
-                      <StoreActionIcon name="call" />
-                      Call
-                    </a>
-                  ) : null}
                   {sellerEmail ? (
                     <a className="btn ghost" href={`mailto:${sellerEmail}`}>
                       <StoreActionIcon name="email" />
-                      Email
+                      Send an email
                     </a>
                   ) : null}
                 </div>
@@ -1579,8 +1567,10 @@ export default function SellerStore() {
                     <strong>Pickup window:</strong> {String(seller?.pickupAddress?.pickupWindow || "10-6")}
                   </p>
                   <p>
-                    <strong>Support:</strong> {sellerPhone || "Phone not shared"} |{" "}
-                    {sellerEmail || "Email not shared"}
+                    <strong>Support email:</strong> {sellerEmail || "Email not shared"}
+                  </p>
+                  <p>
+                    <strong>Support team:</strong> {sellerSupportMessage}
                   </p>
                 </div>
               ) : selectedTab === STORE_TABS[3] ? (
@@ -1643,8 +1633,8 @@ export default function SellerStore() {
                     <strong>{sellerEmail || "Not shared"}</strong>
                   </p>
                   <p>
-                    <span>Support phone</span>
-                    <strong>{sellerPhone || "Not shared"}</strong>
+                    <span>Support team</span>
+                    <strong>{sellerSupportMessage}</strong>
                   </p>
                   <p>
                     <span>Seller joined</span>

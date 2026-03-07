@@ -810,9 +810,13 @@ exports.getPublicSellerStore = async (req, res) => {
       sellerFilter.sellerStatus = "approved";
     }
 
-    const seller = await User.findOne(sellerFilter).select(
-      "name storeName profileImage storeCoverImage about supportEmail phone pickupAddress createdAt"
-    ).lean();
+    const seller = await User.findOne(sellerFilter)
+      .select(
+        isOwner
+          ? "name storeName profileImage storeCoverImage about supportEmail phone pickupAddress createdAt"
+          : "name storeName profileImage storeCoverImage about supportEmail pickupAddress createdAt"
+      )
+      .lean();
     if (!seller) {
       return res.status(404).json({ message: "Seller store not found." });
     }
