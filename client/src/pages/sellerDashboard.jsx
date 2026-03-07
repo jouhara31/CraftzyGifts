@@ -99,11 +99,91 @@ const formatStatusLabel = (value) =>
     .replace(/_/g, " ")
     .replace(/\b\w/g, (match) => match.toUpperCase()) || "Unknown";
 
+const truncateText = (value, max = 180) => {
+  const text = String(value || "").trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 3).trimEnd()}...`;
+};
+
+const MessageActionIcon = () => (
+  <svg
+    className="seller-dashboard-message-icon"
+    viewBox="0 0 24 24"
+    aria-hidden="true"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M10 7H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h8" />
+    <path d="m14 8 4 4-4 4" />
+    <path d="M18 12H9" />
+  </svg>
+);
+
+const NotificationTypeIcon = ({ type }) => {
+  if (type === "new_order") {
+    return (
+      <svg className="seller-dashboard-notification-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6 7h12l-1.2 7H7.2L6 7Z" />
+        <path d="M8.5 7V5.8A1.8 1.8 0 0 1 10.3 4h3.4a1.8 1.8 0 0 1 1.8 1.8V7" />
+        <path d="M9.3 10.2h5.4" />
+      </svg>
+    );
+  }
+  if (type === "customer_message") {
+    return (
+      <svg className="seller-dashboard-notification-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4.5 6.5h15a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-9l-4 3v-3h-2A1.5 1.5 0 0 1 3 16V8a1.5 1.5 0 0 1 1.5-1.5Z" />
+        <path d="m6 9 6 4 6-4" />
+      </svg>
+    );
+  }
+  if (type === "review_received") {
+    return (
+      <svg className="seller-dashboard-notification-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m12 4 2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 9.2l5-.7Z" />
+      </svg>
+    );
+  }
+  if (type === "return_request") {
+    return (
+      <svg className="seller-dashboard-notification-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 8V4H3" />
+        <path d="M3.5 8A7.5 7.5 0 0 1 18 6.2" />
+        <path d="M17 16v4h4" />
+        <path d="M20.5 16A7.5 7.5 0 0 1 6 17.8" />
+      </svg>
+    );
+  }
+  if (type === "out_of_stock" || type === "low_stock") {
+    return (
+      <svg className="seller-dashboard-notification-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3.8 3.8 18h16.4L12 3.8Z" />
+        <path d="M12 9.2v4.8" />
+        <path d="M12 17.2h.01" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="seller-dashboard-notification-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 4.5a4 4 0 0 1 4 4v2.5c0 1.5.5 2.7 1.5 3.7l.8.8H5.7l.8-.8c1-1 1.5-2.2 1.5-3.7V8.5a4 4 0 0 1 4-4Z" />
+      <path d="M10.2 18.2a2 2 0 0 0 3.6 0" />
+    </svg>
+  );
+};
+
 export default function SellerDashboard() {
   const [sellerProfile, setSellerProfile] = useState(readStoredUser);
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [contactRequests, setContactRequests] = useState([]);
+  const [contactRequestTotal, setContactRequestTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [notificationsBusy, setNotificationsBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const navigate = useNavigate();
@@ -126,18 +206,28 @@ export default function SellerDashboard() {
     setError("");
     try {
       const headers = { Authorization: `Bearer ${token}` };
-      const [profileRes, productsRes, ordersRes] = await Promise.all([
+      const [profileRes, productsRes, ordersRes, contactRes, notificationsRes] = await Promise.all([
         fetch(`${API_URL}/api/users/me`, { headers }),
         fetch(`${API_URL}/api/products/seller/me`, { headers }),
         fetch(`${API_URL}/api/orders/seller`, { headers }),
+        fetch(`${API_URL}/api/users/me/contact-requests?limit=5`, { headers }),
+        fetch(`${API_URL}/api/users/me/notifications?limit=8`, { headers }),
       ]);
-      const [profileData, productsData, ordersData] = await Promise.all([
+      const [profileData, productsData, ordersData, contactData, notificationsData] = await Promise.all([
         profileRes.json(),
         productsRes.json(),
         ordersRes.json(),
+        contactRes.json(),
+        notificationsRes.json(),
       ]);
 
-      if (profileRes.status === 401 || productsRes.status === 401 || ordersRes.status === 401) {
+      if (
+        profileRes.status === 401 ||
+        productsRes.status === 401 ||
+        ordersRes.status === 401 ||
+        contactRes.status === 401 ||
+        notificationsRes.status === 401
+      ) {
         clearSessionAndRedirect();
         return;
       }
@@ -158,6 +248,20 @@ export default function SellerDashboard() {
       setSellerProfile(profileData || {});
       setProducts(Array.isArray(productsData) ? productsData : []);
       setOrders(Array.isArray(ordersData) ? ordersData : []);
+      setContactRequests(
+        contactRes.ok && Array.isArray(contactData?.items) ? contactData.items : []
+      );
+      setContactRequestTotal(
+        contactRes.ok ? Number(contactData?.total || 0) : 0
+      );
+      setNotifications(
+        notificationsRes.ok && Array.isArray(notificationsData?.items)
+          ? notificationsData.items
+          : []
+      );
+      setNotificationUnreadCount(
+        notificationsRes.ok ? Number(notificationsData?.unreadCount || 0) : 0
+      );
 
       let existingUser = readStoredUser();
       const pendingOrders = (Array.isArray(ordersData) ? ordersData : []).filter(
@@ -178,6 +282,7 @@ export default function SellerDashboard() {
         sellerPendingOrders: pendingOrders,
       });
       window.dispatchEvent(new Event("user:updated"));
+      window.dispatchEvent(new Event("seller:notifications-updated"));
     } catch {
       setError("Unable to load seller dashboard.");
     } finally {
@@ -202,8 +307,7 @@ export default function SellerDashboard() {
       .filter(Boolean)
       .join(", ") || "Location not shared";
   const sellerJoinedLabel = fullDateLabel(sellerProfile?.createdAt);
-  const sellerSupportLabel =
-    sellerProfile?.supportEmail || sellerProfile?.phone || "Support contact not added";
+  const sellerSupportLabel = "Private seller inbox";
 
   const orderStatusClass = (status) => {
     if (["placed", "pending_payment", "return_requested"].includes(status)) return "warning";
@@ -410,6 +514,77 @@ export default function SellerDashboard() {
     navigate(`/products/${productId}`);
   };
 
+  const syncNotificationsReadState = useCallback((ids = [], unreadCountOverride = null) => {
+    const normalizedIds = Array.isArray(ids)
+      ? ids.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    if (normalizedIds.length > 0) {
+      setNotifications((prev) =>
+        prev.map((item) =>
+          normalizedIds.includes(String(item?.id || "").trim())
+            ? { ...item, isRead: true }
+            : item
+        )
+      );
+    }
+    if (Number.isFinite(unreadCountOverride)) {
+      setNotificationUnreadCount(Math.max(0, Number(unreadCountOverride || 0)));
+    }
+    window.dispatchEvent(new Event("seller:notifications-updated"));
+  }, []);
+
+  const markNotificationsRead = useCallback(
+    async ({ ids = [], all = false } = {}) => {
+      const token = localStorage.getItem("token");
+      if (!token) return null;
+
+      setNotificationsBusy(true);
+      try {
+        const res = await fetch(`${API_URL}/api/users/me/notifications/read`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ ids, all }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (res.status === 401) {
+            clearSessionAndRedirect();
+          }
+          return null;
+        }
+        syncNotificationsReadState(all ? notifications.map((item) => item.id) : ids, data?.unreadCount);
+        return data;
+      } catch {
+        return null;
+      } finally {
+        setNotificationsBusy(false);
+      }
+    },
+    [clearSessionAndRedirect, notifications, syncNotificationsReadState]
+  );
+
+  const handleNotificationOpen = useCallback(
+    async (item) => {
+      const nextLink = String(item?.link || "").trim();
+      const itemId = String(item?.id || "").trim();
+      if (itemId && item?.isRead !== true) {
+        await markNotificationsRead({ ids: [itemId] });
+      }
+      if (nextLink) {
+        navigate(nextLink);
+      }
+    },
+    [markNotificationsRead, navigate]
+  );
+
+  const handleMarkAllNotificationsRead = useCallback(async () => {
+    if (notificationUnreadCount <= 0) return;
+    await markNotificationsRead({ all: true });
+  }, [markNotificationsRead, notificationUnreadCount]);
+
   const openMyStore = async (withEdit = false) => {
     setError("");
     setNotice("");
@@ -589,6 +764,59 @@ export default function SellerDashboard() {
             <div className="seller-panel seller-dashboard-panel">
               <div className="card-head seller-dashboard-head">
                 <div>
+                  <h3 className="card-title">Notifications</h3>
+                  <p className="seller-dashboard-panel-subtitle">
+                    Orders, reviews, customer messages, and stock alerts from your store.
+                  </p>
+                </div>
+                <button
+                  className="btn ghost"
+                  type="button"
+                  onClick={handleMarkAllNotificationsRead}
+                  disabled={notificationsBusy || notificationUnreadCount <= 0}
+                >
+                  Mark all read
+                </button>
+              </div>
+              <div className="seller-dashboard-notification-list">
+                {notifications.map((item) => (
+                  <article
+                    key={item.id}
+                    className={`seller-dashboard-notification-card ${
+                      item.isRead ? "" : "is-unread"
+                    }`}
+                  >
+                    <div className="seller-dashboard-notification-icon-wrap">
+                      <NotificationTypeIcon type={item.type} />
+                    </div>
+                    <div className="seller-dashboard-notification-copy">
+                      <div className="seller-dashboard-notification-head">
+                        <strong>{item.title || "Notification"}</strong>
+                        <span>{fullDateLabel(item.createdAt)}</span>
+                      </div>
+                      <p>{item.message || "Seller activity update."}</p>
+                      <div className="seller-dashboard-notification-actions">
+                        {!item.isRead ? <span className="chip">Unread</span> : null}
+                        <button
+                          className="btn ghost"
+                          type="button"
+                          onClick={() => handleNotificationOpen(item)}
+                        >
+                          Open
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+                {!loading && notifications.length === 0 && (
+                  <p className="field-hint">No notifications yet.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="seller-panel seller-dashboard-panel">
+              <div className="card-head seller-dashboard-head">
+                <div>
                   <h3 className="card-title">Action items</h3>
                   <p className="seller-dashboard-panel-subtitle">
                     High-signal tasks that affect fulfilment and store health.
@@ -645,6 +873,41 @@ export default function SellerDashboard() {
                 <button className="btn ghost" type="button" onClick={() => openMyStore(true)}>
                   Edit profile
                 </button>
+              </div>
+            </div>
+
+            <div className="seller-panel seller-dashboard-panel">
+              <div className="card-head seller-dashboard-head">
+                <div>
+                  <h3 className="card-title">Customer messages</h3>
+                  <p className="seller-dashboard-panel-subtitle">
+                    Secure contact requests sent from your public store page.
+                  </p>
+                </div>
+                <span className="chip">{contactRequestTotal} total</span>
+              </div>
+              <div className="seller-dashboard-message-list">
+                {contactRequests.map((item) => (
+                  <article key={item.id} className="seller-dashboard-message-card">
+                    <div className="seller-dashboard-message-head">
+                      <div className="seller-dashboard-message-meta">
+                        <strong>{item.senderName || "Customer"}</strong>
+                        <span>{item.senderEmail || "Email not provided"}</span>
+                      </div>
+                      <span>{fullDateLabel(item.createdAt)}</span>
+                    </div>
+                    <p className="seller-dashboard-message-body">
+                      {truncateText(item.message, 180)}
+                    </p>
+                    <a className="btn seller-dashboard-message-reply" href={`mailto:${item.senderEmail}`}>
+                      <MessageActionIcon />
+                      Reply by email
+                    </a>
+                  </article>
+                ))}
+                {!loading && contactRequests.length === 0 && (
+                  <p className="field-hint">No customer messages yet.</p>
+                )}
               </div>
             </div>
 

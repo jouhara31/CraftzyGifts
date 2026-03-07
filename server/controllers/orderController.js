@@ -1,6 +1,10 @@
 const crypto = require("crypto");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
+const {
+  createSellerNotification,
+  maybeCreateInventoryNotifications,
+} = require("../utils/sellerNotifications");
 
 const PAYMENT_WEBHOOK_SECRET =
   process.env.PAYMENT_WEBHOOK_SECRET || "craftzy_webhook_secret";
@@ -80,6 +84,12 @@ const parseQuantity = (value) => {
   if (!Number.isInteger(parsed) || parsed < 1) return 1;
   return parsed;
 };
+
+const getOrderShortCode = (orderId) =>
+  String(orderId || "")
+    .trim()
+    .slice(-8)
+    .toUpperCase() || "ORDER";
 
 const buildStockError = (message, details = {}, status = 409) => {
   const error = new Error(message);
@@ -542,7 +552,7 @@ const applyCustomizationStockAdjustments = async (order, direction) => {
 };
 
 const deductInventory = async (order) => {
-  if (order.inventoryAdjusted) return;
+  if (order.inventoryAdjusted) return null;
   const orderQuantity = parseQuantity(order.quantity);
 
   const updated = await Product.findOneAndUpdate(
@@ -576,6 +586,11 @@ const deductInventory = async (order) => {
 
   order.inventoryAdjusted = true;
   order.inventoryRestocked = false;
+  return {
+    product: updated,
+    previousStock: Math.max(0, Number(updated?.stock || 0) + orderQuantity),
+    currentStock: Math.max(0, Number(updated?.stock || 0)),
+  };
 };
 
 const restockInventory = async (order) => {
@@ -628,6 +643,9 @@ const processPaymentWebhook = async (payload, signature) => {
     return populateOrderForCustomer(order);
   }
 
+  let stockChange = null;
+  let shouldNotifyNewOrder = false;
+
   if (event === "payment.succeeded") {
     if (order.paymentStatus !== "paid") {
       order.paymentStatus = "paid";
@@ -636,8 +654,9 @@ const processPaymentWebhook = async (payload, signature) => {
       order.paidAt = new Date();
       if (order.status === "pending_payment") {
         order.status = "placed";
+        shouldNotifyNewOrder = true;
       }
-      await deductInventory(order);
+      stockChange = await deductInventory(order);
     }
   } else if (event === "payment.failed") {
     if (order.paymentStatus !== "paid") {
@@ -659,6 +678,25 @@ const processPaymentWebhook = async (payload, signature) => {
   }
 
   await order.save();
+  if (stockChange) {
+    await maybeCreateInventoryNotifications({
+      sellerId: order.seller,
+      product: stockChange.product,
+      previousStock: stockChange.previousStock,
+      currentStock: stockChange.currentStock,
+    });
+  }
+  if (shouldNotifyNewOrder) {
+    await createSellerNotification({
+      sellerId: order.seller,
+      type: "new_order",
+      title: "New order placed",
+      message: `Order #${getOrderShortCode(order._id)} was placed for this store.`,
+      link: "/seller/orders?status=placed",
+      entityType: "order",
+      entityId: String(order._id || "").trim(),
+    });
+  }
   return populateOrderForCustomer(order);
 };
 
@@ -765,11 +803,31 @@ exports.createOrder = async (req, res) => {
       },
     });
 
+    let stockChange = null;
     if (!onlineMode) {
-      await deductInventory(order);
+      stockChange = await deductInventory(order);
     }
 
     await order.save();
+    if (stockChange) {
+      await maybeCreateInventoryNotifications({
+        sellerId: order.seller,
+        product: stockChange.product,
+        previousStock: stockChange.previousStock,
+        currentStock: stockChange.currentStock,
+      });
+    }
+    if (!onlineMode) {
+      await createSellerNotification({
+        sellerId: order.seller,
+        type: "new_order",
+        title: "New order placed",
+        message: `Order #${getOrderShortCode(order._id)} was placed for this store.`,
+        link: "/seller/orders?status=placed",
+        entityType: "order",
+        entityId: String(order._id || "").trim(),
+      });
+    }
     await order.populate("product");
     res.status(201).json(order);
   } catch (error) {
@@ -895,6 +953,15 @@ exports.requestReturn = async (req, res) => {
     order.returnReason = reason.trim() || "No reason provided";
     await order.save();
     await order.populate("product");
+    await createSellerNotification({
+      sellerId: order.seller,
+      type: "return_request",
+      title: "Return or refund request",
+      message: `A return request was raised for ${order.product?.name || "an order"}.`,
+      link: "/seller/orders?status=return_requested",
+      entityType: "order",
+      entityId: String(order._id || "").trim(),
+    });
     res.json(order);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -943,6 +1010,15 @@ exports.submitOrderReview = async (req, res) => {
     await order.save();
     await order.populate("product");
     await order.populate("seller", "name storeName");
+    await createSellerNotification({
+      sellerId: order.seller?._id || order.seller,
+      type: "review_received",
+      title: "New review received",
+      message: `A ${rating}-star review was added for ${order.product?.name || "your listing"}.`,
+      link: `/store/${String(order.seller?._id || order.seller || "").trim()}?tab=feedbacks`,
+      entityType: "order",
+      entityId: String(order._id || "").trim(),
+    });
     return res.json({ message: "Feedback sent successfully.", order });
   } catch (error) {
     return res.status(500).json({ message: error.message });

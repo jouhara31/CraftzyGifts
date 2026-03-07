@@ -455,7 +455,7 @@ export default function Checkout() {
                   {String(
                     sellerPanel?.seller?.supportEmail ||
                       sellerPanel?.seller?.phone ||
-                      "Contact available in store profile"
+                      "Secure contact form available in store profile"
                   ).trim()}
                 </span>
               </div>

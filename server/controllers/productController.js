@@ -3,6 +3,7 @@ const User = require("../models/User");
 const Order = require("../models/Order");
 const { ensureCustomizationMaster } = require("../utils/customizationMaster");
 const { ensureCategoryMaster, syncCategoryMaster } = require("../utils/categoryMaster");
+const { maybeCreateInventoryNotifications } = require("../utils/sellerNotifications");
 
 const MAX_SELLING_PRICE = 200000;
 const MAX_MRP = 500000;
@@ -814,7 +815,7 @@ exports.getPublicSellerStore = async (req, res) => {
       .select(
         isOwner
           ? "name storeName profileImage storeCoverImage about supportEmail phone pickupAddress createdAt"
-          : "name storeName profileImage storeCoverImage about supportEmail pickupAddress createdAt"
+          : "name storeName profileImage storeCoverImage about pickupAddress createdAt"
       )
       .lean();
     if (!seller) {
@@ -1335,6 +1336,7 @@ exports.updateProduct = async (req, res) => {
       has(field)
     );
 
+    const previousStock = Math.max(0, Number(product.stock || 0));
     Object.assign(product, updates);
 
     if (shouldReModerate) {
@@ -1355,6 +1357,14 @@ exports.updateProduct = async (req, res) => {
     }
 
     await product.save();
+    if (Object.prototype.hasOwnProperty.call(updates, "stock")) {
+      await maybeCreateInventoryNotifications({
+        sellerId: product.seller,
+        product,
+        previousStock,
+        currentStock: Math.max(0, Number(product.stock || 0)),
+      });
+    }
     await syncCategoryMaster({
       category: product.category,
       subcategory: product.subcategory,

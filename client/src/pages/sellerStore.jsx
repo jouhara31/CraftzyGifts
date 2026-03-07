@@ -193,6 +193,30 @@ const buildDraftFromSeller = (seller = {}) => ({
   pickupWindow: String(seller?.pickupAddress?.pickupWindow || "10-6").trim() || "10-6",
 });
 
+const buildSellerContactForm = (viewer = {}) => ({
+  name: String(viewer?.name || "").trim(),
+  email: String(viewer?.email || "").trim(),
+  message: "",
+});
+
+const resolveRequestedStoreTab = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return STORE_TABS[0];
+  if (["feedback", "feedbacks", "review", "reviews"].includes(normalized)) {
+    return STORE_TABS[1];
+  }
+  if (["policy", "policies"].includes(normalized)) {
+    return STORE_TABS[2];
+  }
+  if (["description", "about"].includes(normalized)) {
+    return STORE_TABS[3];
+  }
+  if (["extra", "extra-info", "extrainfo"].includes(normalized)) {
+    return STORE_TABS[4];
+  }
+  return STORE_TABS[0];
+};
+
 const StoreActionIcon = ({ name }) => {
   if (name === "back") {
     return (
@@ -206,7 +230,7 @@ const StoreActionIcon = ({ name }) => {
     return (
       <svg className="seller-store-action-icon" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4 16.5V20h3.5l9.6-9.6-3.5-3.5L4 16.5z" />
-        <path d="M12.9 7.5l3.5 3.5" />\\\\\\\\\\\\
+        <path d="M12.9 7.5l3.5 3.5" />
       </svg>
     );
   }
@@ -287,6 +311,13 @@ export default function SellerStore() {
   const [isRatingPopoverOpen, setIsRatingPopoverOpen] = useState(false);
   const [activeProductRatingId, setActiveProductRatingId] = useState("");
   const [activeFeedbackViewer, setActiveFeedbackViewer] = useState(null);
+  const [contactForm, setContactForm] = useState(() =>
+    buildSellerContactForm(readStoredUser())
+  );
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contactSubmitting, setContactSubmitting] = useState(false);
+  const [contactError, setContactError] = useState("");
+  const [contactNotice, setContactNotice] = useState("");
   const [draft, setDraft] = useState(buildDraftFromSeller({}));
   const [storeData, setStoreData] = useState({
     seller: null,
@@ -370,7 +401,7 @@ export default function SellerStore() {
           stats: data?.stats || null,
         });
         setDraft(buildDraftFromSeller(seller || {}));
-        setActiveTab(STORE_TABS[0]);
+        setActiveTab(requestedTab);
         setSearchText("");
         setSortBy("latest");
         setShowCount(12);
@@ -393,7 +424,7 @@ export default function SellerStore() {
     return () => {
       ignore = true;
     };
-  }, [sellerId]);
+  }, [sellerId, requestedTab]);
 
   const seller = useMemo(() => storeData?.seller || {}, [storeData?.seller]);
   const sellerDraftSeed = useMemo(() => buildDraftFromSeller(seller), [seller]);
@@ -411,6 +442,7 @@ export default function SellerStore() {
     viewerId &&
     String(sellerId || "").trim() === viewerId;
   const editRequested = searchParams.get("edit") === "1";
+  const requestedTab = resolveRequestedStoreTab(searchParams.get("tab"));
 
   useEffect(() => {
     if (!isOwnerSeller) {
@@ -431,6 +463,10 @@ export default function SellerStore() {
     }
   }, [isOwnerSeller, editRequested, sellerDraftSeed]);
 
+  useEffect(() => {
+    setActiveTab(requestedTab);
+  }, [requestedTab]);
+
   const sellerName = String(seller?.storeName || seller?.name || "Seller Store").trim();
   const sellerShopName = String(seller?.storeName || "").trim() || "Seller Store";
   const sellerOwnerName = String(seller?.name || seller?.storeName || "Seller").trim();
@@ -439,13 +475,19 @@ export default function SellerStore() {
     "Handmade gifting collections with curated items and custom options.";
   const sellerInitial = sellerOwnerName.charAt(0).toUpperCase() || "S";
   const sellerEmail = String(seller?.supportEmail || "").trim();
+  const supportEmailConfigured = Boolean(sellerEmail);
   const joinedText = formatDate(seller?.createdAt);
   const locationText = getLocationText(seller?.pickupAddress) || "Location not shared";
   const pickupAddressText =
     getPickupAddressText(seller?.pickupAddress) || "Pickup address will be shared by seller";
-  const sellerSupportMessage = sellerEmail
-    ? "Have a question about this store? Send an email and our team will contact you soon."
-    : "Support email will be shared here once the store team adds it.";
+  const sellerSupportChannelLabel = isOwnerSeller
+    ? supportEmailConfigured
+      ? "Private inbox active"
+      : "Private inbox ready"
+    : "Private seller inbox";
+  const sellerSupportMessage = isOwnerSeller
+    ? "Customer messages stay private and arrive in your seller dashboard."
+    : "Send a secure message and our team will contact you soon.";
   const listedProducts = Number(storeData?.stats?.totalProducts || products.length || 0);
   const totalFeedbacks = Number(storeData?.stats?.totalFeedbacks || feedbacks.length || 0);
   const avgRating = Number(storeData?.stats?.avgRating || 0);
@@ -735,6 +777,26 @@ export default function SellerStore() {
   }, [isFeedbackTab]);
 
   useEffect(() => {
+    setContactForm((prev) => ({
+      name: prev.name || String(viewer?.name || "").trim(),
+      email: prev.email || String(viewer?.email || "").trim(),
+      message: prev.message,
+    }));
+  }, [viewer?.name, viewer?.email]);
+
+  useEffect(() => {
+    if (!sellerId) return;
+    setContactOpen(false);
+    setContactError("");
+    setContactNotice("");
+    setContactForm((prev) => ({
+      name: String(viewer?.name || prev.name || "").trim(),
+      email: String(viewer?.email || prev.email || "").trim(),
+      message: "",
+    }));
+  }, [sellerId, viewer?.name, viewer?.email]);
+
+  useEffect(() => {
     if (!isRatingPopoverOpen) return;
     const handlePointerDown = (event) => {
       if (!ratingPopoverRef.current) return;
@@ -813,6 +875,50 @@ export default function SellerStore() {
   const handleSeeCustomerReviews = () => {
     setIsRatingPopoverOpen(false);
     feedbackListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const handleContactField = (field) => (event) => {
+    setContactForm((prev) => ({
+      ...prev,
+      [field]: event.target.value,
+    }));
+  };
+  const submitContactRequest = async (event) => {
+    event.preventDefault();
+    if (!sellerId || isOwnerSeller) return;
+
+    setContactError("");
+    setContactNotice("");
+    setContactSubmitting(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_URL}/api/users/sellers/${sellerId}/contact`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          name: contactForm.name,
+          email: contactForm.email,
+          message: contactForm.message,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setContactError(data?.message || "Unable to send your message right now.");
+        return;
+      }
+      setContactNotice(data?.message || "Message sent to the store team.");
+      setContactOpen(false);
+      setContactForm((prev) => ({
+        ...prev,
+        message: "",
+      }));
+    } catch {
+      setContactError("Unable to send your message right now.");
+    } finally {
+      setContactSubmitting(false);
+    }
   };
 
   const activeFeedbackImages = Array.isArray(activeFeedbackViewer?.images)
@@ -1048,20 +1154,122 @@ export default function SellerStore() {
               </article>
 
               <aside className="seller-store-owner-card">
-                <p className="seller-store-owner-title">{sellerOwnerName}</p>
-                <p className="seller-store-owner-name">{sellerName}</p>
+                <span className="seller-store-owner-kicker">
+                  {isOwnerSeller ? "Customer inbox" : "Store team"}
+                </span>
+                <p className="seller-store-owner-title">
+                  {isOwnerSeller ? "Private contact channel" : sellerName}
+                </p>
+                <p className="seller-store-owner-name">
+                  {isOwnerSeller
+                    ? "Questions from shoppers reach you in the dashboard."
+                    : `Managed by ${sellerOwnerName}`}
+                </p>
                 <div className="seller-store-owner-contacts">
-                  {sellerEmail ? <span>{sellerEmail}</span> : null}
+                  <span>{sellerSupportChannelLabel}</span>
                 </div>
                 <p className="seller-store-owner-support-note">{sellerSupportMessage}</p>
-                <div className="seller-store-owner-actions">
-                  {sellerEmail ? (
-                    <a className="btn ghost" href={`mailto:${sellerEmail}`}>
+                {contactNotice ? (
+                  <p className="seller-store-owner-success" role="status" aria-live="polite">
+                    {contactNotice}
+                  </p>
+                ) : null}
+                {contactError ? (
+                  <p className="seller-store-owner-error" role="alert">
+                    {contactError}
+                  </p>
+                ) : null}
+                {isOwnerSeller ? (
+                  <div className="seller-store-owner-actions">
+                    <button
+                      className="btn seller-store-owner-email-btn"
+                      type="button"
+                      onClick={() => navigate("/seller/dashboard")}
+                    >
+                      <StoreActionIcon name="view" />
+                      Open inbox
+                    </button>
+                  </div>
+                ) : contactOpen ? (
+                  <form className="seller-store-contact-form" onSubmit={submitContactRequest}>
+                    <label className="seller-store-contact-field">
+                      <span>Name</span>
+                      <input
+                        type="text"
+                        value={contactForm.name}
+                        onChange={handleContactField("name")}
+                        placeholder="Your name"
+                        minLength={2}
+                        maxLength={80}
+                        required
+                      />
+                    </label>
+                    <label className="seller-store-contact-field">
+                      <span>Email</span>
+                      <input
+                        type="email"
+                        value={contactForm.email}
+                        onChange={handleContactField("email")}
+                        placeholder="you@example.com"
+                        maxLength={160}
+                        required
+                      />
+                    </label>
+                    <label className="seller-store-contact-field seller-store-contact-field-full">
+                      <span>Message</span>
+                      <textarea
+                        value={contactForm.message}
+                        onChange={handleContactField("message")}
+                        placeholder="Tell the store team what you need help with."
+                        rows={4}
+                        minLength={10}
+                        maxLength={1200}
+                        required
+                      />
+                    </label>
+                    <p className="seller-store-contact-disclaimer">
+                      Your message stays inside the seller&apos;s private dashboard.
+                    </p>
+                    <div className="seller-store-owner-actions seller-store-contact-actions">
+                      <button
+                        className="btn seller-store-owner-email-btn"
+                        type="submit"
+                        disabled={contactSubmitting}
+                      >
+                        <StoreActionIcon name="email" />
+                        {contactSubmitting ? "Sending..." : "Send message"}
+                      </button>
+                      <button
+                        className="btn ghost seller-store-owner-cancel-btn"
+                        type="button"
+                        onClick={() => {
+                          setContactOpen(false);
+                          setContactError("");
+                          setContactNotice("");
+                        }}
+                        disabled={contactSubmitting}
+                      >
+                        <StoreActionIcon name="close" />
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="seller-store-owner-actions">
+                    <button
+                      className="btn seller-store-owner-email-btn"
+                      type="button"
+                      onClick={() => {
+                        setContactOpen(true);
+                        setContactError("");
+                        setContactNotice("");
+                      }}
+                    >
                       <StoreActionIcon name="email" />
-                      Send an email
-                    </a>
-                  ) : null}
-                </div>
+                      Send a message
+                    </button>
+                  </div>
+                )}
               </aside>
             </section>
 
@@ -1564,7 +1772,7 @@ export default function SellerStore() {
                     <strong>Pickup window:</strong> {String(seller?.pickupAddress?.pickupWindow || "10-6")}
                   </p>
                   <p>
-                    <strong>Support email:</strong> {sellerEmail || "Email not shared"}
+                    <strong>Contact channel:</strong> {sellerSupportChannelLabel}
                   </p>
                   <p>
                     <strong>Support team:</strong> {sellerSupportMessage}
@@ -1626,8 +1834,8 @@ export default function SellerStore() {
                     <strong>{pickupAddressText}</strong>
                   </p>
                   <p>
-                    <span>Support email</span>
-                    <strong>{sellerEmail || "Not shared"}</strong>
+                    <span>Contact channel</span>
+                    <strong>{sellerSupportChannelLabel}</strong>
                   </p>
                   <p>
                     <span>Support team</span>

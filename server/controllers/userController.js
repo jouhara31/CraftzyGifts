@@ -1,4 +1,18 @@
+const mongoose = require("mongoose");
+const ContactRequest = require("../models/ContactRequest");
+const Notification = require("../models/Notification");
 const User = require("../models/User");
+const {
+  createSellerNotification,
+  normalizeNotification,
+} = require("../utils/sellerNotifications");
+
+const CONTACT_NAME_MAX = 80;
+const CONTACT_EMAIL_MAX = 160;
+const CONTACT_MESSAGE_MAX = 1200;
+const CONTACT_FETCH_LIMIT = 6;
+const NOTIFICATION_FETCH_LIMIT = 10;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const normalizeImageValue = (value, fallback = "") => {
   if (typeof value !== "string") return fallback;
@@ -26,6 +40,22 @@ const toProfilePayload = (user) => ({
   storeCoverImage: user.storeCoverImage || "",
   pickupAddress: user.pickupAddress || {},
 });
+
+const parsePositiveInt = (value, fallback, max) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
+};
+
+const parseBoolean = (value, fallback = false) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "n", "off"].includes(normalized)) return false;
+  }
+  return fallback;
+};
 
 exports.getMe = async (req, res) => {
   try {
@@ -104,5 +134,182 @@ exports.deleteMe = async (req, res) => {
     res.json({ message: "Account deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.submitSellerContactRequest = async (req, res) => {
+  try {
+    const sellerId = String(req.params?.sellerId || "").trim();
+    if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
+      return res.status(400).json({ message: "Seller id is required." });
+    }
+
+    if (req.user?.role === "seller" && String(req.user.id || "").trim() === sellerId) {
+      return res.status(400).json({ message: "You already manage this store." });
+    }
+
+    const seller = await User.findOne({
+      _id: sellerId,
+      role: "seller",
+      sellerStatus: "approved",
+    }).select("_id");
+    if (!seller) {
+      return res.status(404).json({ message: "Seller store not found." });
+    }
+
+    const senderName = String(req.body?.name || "").trim();
+    const senderEmail = String(req.body?.email || "").trim().toLowerCase();
+    const message = String(req.body?.message || "").trim();
+
+    if (senderName.length < 2) {
+      return res.status(400).json({ message: "Please enter your name." });
+    }
+    if (senderName.length > CONTACT_NAME_MAX) {
+      return res.status(400).json({
+        message: `Name cannot exceed ${CONTACT_NAME_MAX} characters.`,
+      });
+    }
+    if (!EMAIL_PATTERN.test(senderEmail) || senderEmail.length > CONTACT_EMAIL_MAX) {
+      return res.status(400).json({ message: "Please enter a valid email address." });
+    }
+    if (message.length < 10) {
+      return res.status(400).json({
+        message: "Message should be at least 10 characters long.",
+      });
+    }
+    if (message.length > CONTACT_MESSAGE_MAX) {
+      return res.status(400).json({
+        message: `Message cannot exceed ${CONTACT_MESSAGE_MAX} characters.`,
+      });
+    }
+
+    const contactRequest = await ContactRequest.create({
+      seller: seller._id,
+      customer:
+        req.user?.role === "customer" && mongoose.Types.ObjectId.isValid(String(req.user.id || ""))
+          ? req.user.id
+          : null,
+      senderName,
+      senderEmail,
+      message,
+    });
+
+    await createSellerNotification({
+      sellerId: seller._id,
+      type: "customer_message",
+      title: "New customer message",
+      message: `${senderName} sent a new store message.`,
+      link: "/seller/dashboard",
+      entityType: "contact_request",
+      entityId: String(contactRequest?._id || "").trim(),
+    });
+
+    return res.status(201).json({
+      message: "Message sent to the store team.",
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.listMyContactRequests = async (req, res) => {
+  try {
+    const sellerId = String(req.user?.id || "").trim();
+    if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
+      return res.status(400).json({ message: "Seller id is required." });
+    }
+
+    const limit = parsePositiveInt(req.query?.limit, CONTACT_FETCH_LIMIT, 20);
+    const [items, total] = await Promise.all([
+      ContactRequest.find({ seller: sellerId })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean(),
+      ContactRequest.countDocuments({ seller: sellerId }),
+    ]);
+
+    return res.json({
+      total,
+      items: (Array.isArray(items) ? items : []).map((entry) => ({
+        id: String(entry?._id || "").trim(),
+        senderName: String(entry?.senderName || "").trim() || "Customer",
+        senderEmail: String(entry?.senderEmail || "").trim(),
+        message: String(entry?.message || "").trim(),
+        createdAt: entry?.createdAt || null,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.listMyNotifications = async (req, res) => {
+  try {
+    const sellerId = String(req.user?.id || "").trim();
+    if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
+      return res.status(400).json({ message: "Seller id is required." });
+    }
+
+    const limit = parsePositiveInt(req.query?.limit, NOTIFICATION_FETCH_LIMIT, 40);
+    const unreadOnly = parseBoolean(req.query?.unreadOnly, false);
+    const filter = {
+      seller: sellerId,
+      ...(unreadOnly ? { isRead: false } : {}),
+    };
+
+    const [items, unreadCount] = await Promise.all([
+      Notification.find(filter).sort({ createdAt: -1 }).limit(limit).lean(),
+      Notification.countDocuments({ seller: sellerId, isRead: false }),
+    ]);
+
+    return res.json({
+      unreadCount,
+      items: (Array.isArray(items) ? items : []).map((entry) =>
+        normalizeNotification(entry)
+      ),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.markMyNotificationsRead = async (req, res) => {
+  try {
+    const sellerId = String(req.user?.id || "").trim();
+    if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
+      return res.status(400).json({ message: "Seller id is required." });
+    }
+
+    const markAll = parseBoolean(req.body?.all, false);
+    const ids = Array.isArray(req.body?.ids)
+      ? req.body.ids
+          .map((value) => String(value || "").trim())
+          .filter((value) => mongoose.Types.ObjectId.isValid(value))
+      : [];
+
+    if (!markAll && ids.length === 0) {
+      return res.status(400).json({ message: "Notification ids are required." });
+    }
+
+    const readAt = new Date();
+    const filter = markAll
+      ? { seller: sellerId, isRead: false }
+      : { seller: sellerId, _id: { $in: ids }, isRead: false };
+
+    await Notification.updateMany(filter, {
+      $set: {
+        isRead: true,
+        readAt,
+      },
+    });
+
+    const unreadCount = await Notification.countDocuments({
+      seller: sellerId,
+      isRead: false,
+    });
+
+    return res.json({ unreadCount });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 };

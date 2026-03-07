@@ -1,5 +1,6 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom";
 import logoPng from "../assets/logo.png";
 import logoCartPng from "../assets/logo-cart.png";
 import { getCart } from "../utils/cart";
@@ -94,6 +95,16 @@ const readCounts = (currentUser) => {
   };
 };
 
+const formatNotificationDate = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+  }).format(date);
+};
+
 const HeaderMenuIcon = ({ kind }) => {
   if (kind === "back") {
     return (
@@ -162,6 +173,11 @@ const HeaderMenuIcon = ({ kind }) => {
 export default function Header({ variant, onFilterClick, isFilterActive = false }) {
   const [user, setUser] = useState(readStoredUser);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [notificationItems, setNotificationItems] = useState([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [notificationLoading, setNotificationLoading] = useState(false);
+  const [notificationMenuStyle, setNotificationMenuStyle] = useState(null);
   const [allCategoriesOpen, setAllCategoriesOpen] = useState(false);
   const [canScrollCategoryRight, setCanScrollCategoryRight] = useState(false);
   const [customerCategoryTree, setCustomerCategoryTree] = useState(DEFAULT_CATEGORY_TREE);
@@ -181,6 +197,9 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const navigate = useNavigate();
   const location = useLocation();
   const accountRef = useRef(null);
+  const notificationRef = useRef(null);
+  const notificationButtonRef = useRef(null);
+  const notificationDropdownRef = useRef(null);
   const categoriesMenuRef = useRef(null);
   const categoryLinksRef = useRef(null);
   const isAuthNav = variant === "auth";
@@ -301,7 +320,57 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     };
   }, [accountOpen]);
 
+  useEffect(() => {
+    if (!notificationOpen) return undefined;
+    const handleOutsideClick = (event) => {
+      const insideTrigger =
+        notificationRef.current && notificationRef.current.contains(event.target);
+      const insideDropdown =
+        notificationDropdownRef.current &&
+        notificationDropdownRef.current.contains(event.target);
+      if (!insideTrigger && !insideDropdown) {
+        setNotificationOpen(false);
+      }
+    };
+    const handleEscape = (event) => {
+      if (event.key === "Escape") setNotificationOpen(false);
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [notificationOpen]);
+
   const closeAccount = () => setAccountOpen(false);
+
+  const updateNotificationMenuPosition = () => {
+    if (typeof window === "undefined") return;
+    const anchor = notificationButtonRef.current || notificationRef.current;
+    if (!anchor) return;
+
+    const rect = anchor.getBoundingClientRect();
+    const viewportWidth = Math.max(
+      window.innerWidth || 0,
+      document.documentElement?.clientWidth || 0
+    );
+    const width = Math.max(280, Math.min(360, viewportWidth - 24));
+    const left = Math.max(12, Math.min(rect.right - width, viewportWidth - width - 12));
+
+    setNotificationMenuStyle({
+      position: "fixed",
+      top: `${Math.round(rect.bottom + 10)}px`,
+      left: `${Math.round(left)}px`,
+      right: "auto",
+      width: `${Math.round(width)}px`,
+    });
+  };
+
+  const syncNotificationState = (items = [], unreadCount = 0) => {
+    setNotificationItems(Array.isArray(items) ? items : []);
+    setNotificationUnreadCount(Math.max(0, Number(unreadCount || 0)));
+  };
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -367,7 +436,6 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const sellerAvatarInitial = sellerNameLabel.slice(0, 1).toUpperCase() || "S";
   const sellerId = String(user?.id || user?._id || readUserIdFromToken()).trim();
   const sellerStorePath = sellerId ? `/store/${sellerId}` : "/seller/dashboard";
-  const sellerPendingOrders = Math.max(Number(user?.sellerPendingOrders || 0), 0);
   const scrollCategoryLinks = (direction = 1) => {
     const node = categoryLinksRef.current;
     if (!node) return;
@@ -389,6 +457,190 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const activeCategoryGroup =
     categoryTree.find((item) => item.label === activeMenuCategory) ||
     categoryTree[0];
+
+  useEffect(() => {
+    if (!isSellerNav || !user) {
+      syncNotificationState([], 0);
+      return undefined;
+    }
+
+    let active = true;
+    let intervalId = null;
+    let hasLoadedOnce = false;
+
+    const fetchSellerNotifications = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+
+      if (active && !hasLoadedOnce) {
+        setNotificationLoading(true);
+      }
+
+      try {
+        const res = await fetch(`${API_URL}/api/users/me/notifications?limit=6`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (!active) return;
+
+        if (res.status === 401) {
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
+          setUser(null);
+          syncNotificationState([], 0);
+          window.dispatchEvent(new Event("user:updated"));
+          navigate("/login");
+          return;
+        }
+
+        if (!res.ok) return;
+        syncNotificationState(data?.items, data?.unreadCount);
+      } catch {
+        if (!active) return;
+      } finally {
+        hasLoadedOnce = true;
+        if (active) setNotificationLoading(false);
+      }
+    };
+
+    fetchSellerNotifications();
+    intervalId = window.setInterval(fetchSellerNotifications, 60000);
+    window.addEventListener("seller:notifications-updated", fetchSellerNotifications);
+
+    return () => {
+      active = false;
+      if (intervalId) window.clearInterval(intervalId);
+      window.removeEventListener("seller:notifications-updated", fetchSellerNotifications);
+    };
+  }, [isSellerNav, navigate, sellerId, user]);
+
+  const markSellerNotificationsRead = async ({ ids = [], all = false } = {}) => {
+    const token = localStorage.getItem("token");
+    if (!token) return null;
+
+    try {
+      const res = await fetch(`${API_URL}/api/users/me/notifications/read`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ ids, all }),
+      });
+      const data = await res.json();
+      if (!res.ok) return null;
+
+      const normalizedIds = Array.isArray(ids)
+        ? ids.map((value) => String(value || "").trim()).filter(Boolean)
+        : [];
+      setNotificationItems((prev) =>
+        prev.map((item) =>
+          all || normalizedIds.includes(String(item?.id || "").trim())
+            ? { ...item, isRead: true }
+            : item
+        )
+      );
+      setNotificationUnreadCount(Math.max(0, Number(data?.unreadCount || 0)));
+      window.dispatchEvent(new Event("seller:notifications-updated"));
+      return data;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleOpenSellerNotification = async (item) => {
+    const itemId = String(item?.id || "").trim();
+    const nextLink = String(item?.link || "").trim();
+    if (itemId && item?.isRead !== true) {
+      await markSellerNotificationsRead({ ids: [itemId] });
+    }
+    setNotificationOpen(false);
+    navigate(nextLink || "/seller/dashboard");
+  };
+
+  useEffect(() => {
+    if (!notificationOpen) return undefined;
+
+    updateNotificationMenuPosition();
+    const syncPosition = () => updateNotificationMenuPosition();
+
+    window.addEventListener("resize", syncPosition);
+    window.addEventListener("scroll", syncPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", syncPosition);
+      window.removeEventListener("scroll", syncPosition, true);
+    };
+  }, [notificationOpen]);
+
+  const sellerNotificationDropdown =
+    notificationOpen && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            ref={notificationDropdownRef}
+            className="account-dropdown seller-notification-dropdown"
+            role="menu"
+            style={
+              notificationMenuStyle || {
+                position: "fixed",
+                top: "64px",
+                right: "12px",
+                left: "auto",
+                width: "min(360px, calc(100vw - 24px))",
+              }
+            }
+          >
+            <div className="seller-notification-dropdown-head">
+              <strong>Notifications</strong>
+              <button
+                className="seller-notification-mark-btn"
+                type="button"
+                onClick={() => markSellerNotificationsRead({ all: true })}
+                disabled={notificationUnreadCount <= 0}
+              >
+                Mark all read
+              </button>
+            </div>
+            <div className="seller-notification-dropdown-list">
+              {notificationItems.map((item) => (
+                <button
+                  key={item.id}
+                  className={`seller-notification-item ${item.isRead ? "" : "is-unread"}`}
+                  type="button"
+                  onClick={() => handleOpenSellerNotification(item)}
+                >
+                  <span className="seller-notification-item-copy">
+                    <strong>{item.title || "Notification"}</strong>
+                    <span>{item.message || "Store update available."}</span>
+                  </span>
+                  <span className="seller-notification-item-meta">
+                    {!item.isRead ? <em>New</em> : null}
+                    <small>{formatNotificationDate(item.createdAt)}</small>
+                  </span>
+                </button>
+              ))}
+              {!notificationLoading && notificationItems.length === 0 && (
+                <p className="seller-notification-empty">No notifications yet.</p>
+              )}
+              {notificationLoading && notificationItems.length === 0 && (
+                <p className="seller-notification-empty">Loading notifications...</p>
+              )}
+            </div>
+            <button
+              className="seller-notification-view-all"
+              type="button"
+              onClick={() => {
+                setNotificationOpen(false);
+                navigate("/seller/dashboard");
+              }}
+            >
+              View all in dashboard
+            </button>
+          </div>,
+          document.body
+        )
+      : null;
 
   useEffect(() => {
     setAllCategoriesOpen(false);
@@ -514,31 +766,43 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           </form>
 
           <div className="seller-profile-wrap">
-            <button
-              className="icon-btn seller-notification-btn"
-              type="button"
-              aria-label="Pending orders"
-              onClick={() => handleProtectedNav("/seller/orders?status=placed")}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M12 4.5a4 4 0 0 1 4 4v2.5c0 1.5.5 2.7 1.5 3.7l.8.8H5.7l.8-.8c1-1 1.5-2.2 1.5-3.7V8.5a4 4 0 0 1 4-4z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M10.2 18.2a2 2 0 0 0 3.6 0"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-              {sellerPendingOrders > 0 && <span className="icon-badge">{sellerPendingOrders}</span>}
-            </button>
+            <div className="seller-notification-menu" ref={notificationRef}>
+              <button
+                ref={notificationButtonRef}
+                className={`icon-btn seller-notification-btn ${notificationOpen ? "active" : ""}`}
+                type="button"
+                aria-label="Notifications"
+                aria-haspopup="menu"
+                aria-expanded={notificationOpen}
+                onClick={() => {
+                  if (!notificationOpen) {
+                    updateNotificationMenuPosition();
+                  }
+                  setNotificationOpen((prev) => !prev);
+                }}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M12 4.5a4 4 0 0 1 4 4v2.5c0 1.5.5 2.7 1.5 3.7l.8.8H5.7l.8-.8c1-1 1.5-2.2 1.5-3.7V8.5a4 4 0 0 1 4-4z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M10.2 18.2a2 2 0 0 0 3.6 0"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                {notificationUnreadCount > 0 && (
+                  <span className="icon-badge">{notificationUnreadCount}</span>
+                )}
+              </button>
+            </div>
             <a className="seller-help-link" href="/#support">
               Help
             </a>
@@ -599,6 +863,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               </div>
             </div>
           </div>
+          {sellerNotificationDropdown}
 
         <nav className="nav-links">
           <Link
