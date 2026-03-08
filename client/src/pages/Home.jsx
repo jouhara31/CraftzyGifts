@@ -95,8 +95,8 @@ export default function Home() {
       ? categoryTree
       : DEFAULT_CATEGORY_TREE
     ).map((group) => ({
-      name: group.label || group.category,
-      image: getCategoryImage(group.label || group.category),
+      name: group.category,
+      image: getCategoryImage(group.category),
       category: group.category,
     }));
 
@@ -306,17 +306,19 @@ export default function Home() {
             const detailLink = item._id ? `/products/${item._id}` : "/products";
             return (
               <article key={item._id || item.name} className="product-card">
-                <img
-                  className="product-image large"
-                  src={getProductImage(item)}
-                  alt={item.name}
-                />
+                <div className="featured-crafts-media">
+                  <img
+                    className="product-image large"
+                    src={getProductImage(item)}
+                    alt={item.name}
+                  />
+                  <span className="chip featured-crafts-badge">
+                    {isCustomizable ? "Customizable" : "Ready-made"}
+                  </span>
+                </div>
                 <div className="product-body">
                   <div className="product-top">
                     <h3>{item.name}</h3>
-                    <span className="chip">
-                      {isCustomizable ? "Customizable" : "Ready-made"}
-                    </span>
                   </div>
                   <div className="product-meta">
                     <span>{item.category || "Hamper"}</span>

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
 
-const SETTINGS_KEY = "admin_platform_settings_v1";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 const DEFAULT_SETTINGS = {
   platformName: "CraftyGifts",
   currencyCode: "INR",
@@ -12,44 +12,109 @@ const DEFAULT_SETTINGS = {
   maintenanceMode: false,
 };
 
-const parseStoredSettings = () => {
+const readApiPayload = async (response) => {
+  const text = await response.text();
+  if (!text) return {};
+
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return DEFAULT_SETTINGS;
-    const parsed = JSON.parse(raw);
-    return {
-      ...DEFAULT_SETTINGS,
-      ...parsed,
-    };
+    return JSON.parse(text);
   } catch {
-    return DEFAULT_SETTINGS;
+    return { message: text };
   }
 };
 
+const normalizeSettings = (value = {}) => ({
+  platformName: String(value?.platformName || DEFAULT_SETTINGS.platformName),
+  currencyCode: String(value?.currencyCode || DEFAULT_SETTINGS.currencyCode),
+  lowStockThreshold: Number(value?.lowStockThreshold ?? DEFAULT_SETTINGS.lowStockThreshold),
+  autoApproveSellers: Boolean(value?.autoApproveSellers),
+  enableOrderEmailAlerts:
+    value?.enableOrderEmailAlerts === undefined
+      ? DEFAULT_SETTINGS.enableOrderEmailAlerts
+      : Boolean(value.enableOrderEmailAlerts),
+  maintenanceMode: Boolean(value?.maintenanceMode),
+});
+
 export default function AdminSettings() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
   const navigate = useNavigate();
 
-  useEffect(() => {
+  const loadSettings = useCallback(async () => {
     const token = localStorage.getItem("token");
     if (!token) {
       navigate("/login");
       return;
     }
-    setSettings(parseStoredSettings());
+
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${API_URL}/api/admin/settings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await readApiPayload(response);
+      if (!response.ok) {
+        setError(data.message || "Unable to load settings.");
+        return;
+      }
+      setSettings(normalizeSettings(data));
+    } catch {
+      setError("Unable to load settings.");
+    } finally {
+      setLoading(false);
+    }
   }, [navigate]);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
 
   const updateField = (field) => (event) => {
     const value =
       event?.target?.type === "checkbox" ? event.target.checked : event.target.value;
     setSettings((prev) => ({ ...prev, [field]: value }));
     setNotice("");
+    setError("");
   };
 
-  const saveSettings = () => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    setNotice("Settings saved locally for this admin session.");
+  const saveSettings = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`${API_URL}/api/admin/settings`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ...settings,
+          lowStockThreshold: Number(settings.lowStockThreshold || 0),
+        }),
+      });
+      const data = await readApiPayload(response);
+      if (!response.ok) {
+        setError(data.message || "Unable to save settings.");
+        return;
+      }
+      setSettings(normalizeSettings(data));
+      setNotice("Settings saved to the platform configuration.");
+    } catch {
+      setError("Unable to save settings.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -57,12 +122,19 @@ export default function AdminSettings() {
       title="Settings"
       description="Platform configuration and operational preferences."
       actions={
-        <button className="btn primary" type="button" onClick={saveSettings}>
-          Save Settings
-        </button>
+        <>
+          <button className="admin-text-action" type="button" onClick={loadSettings}>
+            Refresh
+          </button>
+          <button className="btn primary" type="button" onClick={saveSettings} disabled={saving}>
+            {saving ? "Saving..." : "Save Settings"}
+          </button>
+        </>
       }
     >
+      {loading && !error && <p className="field-hint">Loading settings...</p>}
       {notice && <p className="field-hint">{notice}</p>}
+      {error && <p className="field-hint">{error}</p>}
 
       <section className="seller-panel">
         <div className="field-row">

@@ -25,6 +25,7 @@ import SellerSettings from "./pages/sellerSettings";
 import AdminDashboard from "./pages/adminDashboard";
 import AdminSellers from "./pages/adminSellers";
 import AdminProducts from "./pages/adminProducts";
+import AdminCategories from "./pages/adminCategories";
 import AdminOrders from "./pages/adminOrders";
 import AdminReports from "./pages/adminReports";
 import AdminCustomers from "./pages/adminCustomers";
@@ -138,6 +139,14 @@ function App() {
           element={
             <AdminRoute>
               <AdminProducts />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/categories"
+          element={
+            <AdminRoute>
+              <AdminCategories />
             </AdminRoute>
           }
         />

@@ -5,7 +5,16 @@ const {
   ensureCustomizationMaster,
   normalizeMasterOptions,
 } = require("../utils/customizationMaster");
-const { syncCategoryMaster } = require("../utils/categoryMaster");
+const {
+  ensureCategoryMaster,
+  normalizeCategoryGroups,
+  syncCategoryMaster,
+} = require("../utils/categoryMaster");
+const {
+  ensurePlatformSettings,
+  normalizePlatformSettings,
+  toPlatformSettingsPayload,
+} = require("../utils/platformSettings");
 
 const SELLER_STATUS_SET = new Set(["pending", "approved", "rejected"]);
 const PRODUCT_STATUS_SET = new Set(["active", "inactive"]);
@@ -15,10 +24,36 @@ const PRODUCT_MODERATION_STATUS_SET = new Set([
   "pending_review",
   "rejected",
 ]);
+const CATEGORY_SUBCATEGORY_LIMIT = 60;
 
 const approvedModerationFilter = {
   $or: [{ moderationStatus: "approved" }, { moderationStatus: { $exists: false } }],
 };
+
+const normalizeText = (value = "") => String(value || "").trim();
+const normalizeKey = (value = "") => normalizeText(value).toLowerCase();
+const normalizeSubcategories = (values = [], maxItems = CATEGORY_SUBCATEGORY_LIMIT) => {
+  const source = Array.isArray(values)
+    ? values
+    : String(values || "")
+        .split(/\r?\n|,/)
+        .map((item) => item);
+  const seen = new Set();
+  return source
+    .map((value) => normalizeText(value))
+    .filter((value) => {
+      if (!value) return false;
+      const key = normalizeKey(value);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, maxItems);
+};
+const toCategoryMasterPayload = (config) => ({
+  groups: Array.isArray(config?.groups) ? config.groups : [],
+  updatedAt: config?.updatedAt || null,
+});
 
 exports.getSellers = async (req, res) => {
   try {
@@ -246,6 +281,151 @@ exports.updateAdminCustomizationOptions = async (req, res) => {
       options: config.options,
       updatedAt: config.updatedAt,
     });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getAdminPlatformSettings = async (req, res) => {
+  try {
+    const settings = await ensurePlatformSettings();
+    res.json(toPlatformSettingsPayload(settings));
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getAdminCategories = async (req, res) => {
+  try {
+    const config = await ensureCategoryMaster();
+    res.json(toCategoryMasterPayload(config));
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.createAdminCategory = async (req, res) => {
+  try {
+    const category = normalizeText(req.body?.category);
+    const label = normalizeText(req.body?.label) || category;
+    const subcategories = normalizeSubcategories(req.body?.subcategories);
+
+    if (!category) {
+      return res.status(400).json({ message: "Category name is required." });
+    }
+
+    const config = await ensureCategoryMaster();
+    const groups = Array.isArray(config.groups) ? [...config.groups] : [];
+    const duplicate = groups.some(
+      (group) => normalizeKey(group?.category) === normalizeKey(category)
+    );
+    if (duplicate) {
+      return res.status(400).json({ message: "Category already exists." });
+    }
+
+    config.groups = normalizeCategoryGroups(
+      [
+        ...groups,
+        {
+          category,
+          label,
+          subcategories,
+        },
+      ],
+      groups
+    );
+    await config.save();
+    return res.status(201).json(toCategoryMasterPayload(config));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateAdminCategory = async (req, res) => {
+  try {
+    const config = await ensureCategoryMaster();
+    const groups = Array.isArray(config.groups) ? [...config.groups] : [];
+    const categoryId = normalizeText(req.params?.id);
+    const groupIndex = groups.findIndex((group) => normalizeText(group?.id) === categoryId);
+    if (groupIndex === -1) {
+      return res.status(404).json({ message: "Category not found." });
+    }
+
+    const currentGroup = groups[groupIndex];
+    const nextLabel = normalizeText(req.body?.label) || currentGroup.label || currentGroup.category;
+    const nextSubcategories =
+      req.body && Object.prototype.hasOwnProperty.call(req.body, "subcategories")
+        ? normalizeSubcategories(req.body?.subcategories)
+        : normalizeSubcategories(currentGroup.subcategories);
+
+    const removedSubcategories = normalizeSubcategories(currentGroup.subcategories).filter(
+      (item) => !nextSubcategories.some((value) => normalizeKey(value) === normalizeKey(item))
+    );
+    if (removedSubcategories.length > 0) {
+      const linkedSubcategories = await Product.find({
+        category: currentGroup.category,
+        subcategory: { $in: removedSubcategories },
+      }).distinct("subcategory");
+      if (Array.isArray(linkedSubcategories) && linkedSubcategories.length > 0) {
+        return res.status(400).json({
+          message: `Remove or reassign products using subcategories: ${linkedSubcategories.join(", ")}.`,
+        });
+      }
+    }
+
+    groups[groupIndex] = {
+      ...currentGroup,
+      label: nextLabel,
+      subcategories: nextSubcategories,
+    };
+    config.groups = normalizeCategoryGroups(groups, groups);
+    await config.save();
+    return res.json(toCategoryMasterPayload(config));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.deleteAdminCategory = async (req, res) => {
+  try {
+    const config = await ensureCategoryMaster();
+    const groups = Array.isArray(config.groups) ? [...config.groups] : [];
+    const categoryId = normalizeText(req.params?.id);
+    const targetGroup = groups.find((group) => normalizeText(group?.id) === categoryId);
+    if (!targetGroup) {
+      return res.status(404).json({ message: "Category not found." });
+    }
+
+    const linkedProducts = await Product.countDocuments({ category: targetGroup.category });
+    if (linkedProducts > 0) {
+      return res.status(400).json({
+        message: "Category is in use by products. Reassign or deactivate those products first.",
+      });
+    }
+
+    config.groups = groups.filter((group) => normalizeText(group?.id) !== categoryId);
+    await config.save();
+    return res.json(toCategoryMasterPayload(config));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateAdminPlatformSettings = async (req, res) => {
+  try {
+    const settings = await ensurePlatformSettings();
+    const current = toPlatformSettingsPayload(settings);
+    const next = normalizePlatformSettings(req.body || {}, current);
+
+    settings.platformName = next.platformName;
+    settings.currencyCode = next.currencyCode;
+    settings.lowStockThreshold = next.lowStockThreshold;
+    settings.autoApproveSellers = next.autoApproveSellers;
+    settings.enableOrderEmailAlerts = next.enableOrderEmailAlerts;
+    settings.maintenanceMode = next.maintenanceMode;
+
+    await settings.save();
+    res.json(toPlatformSettingsPayload(settings));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

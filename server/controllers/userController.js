@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 const ContactRequest = require("../models/ContactRequest");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
@@ -73,6 +74,7 @@ exports.updateMe = async (req, res) => {
   try {
     const {
       name,
+      email,
       phone,
       storeName,
       supportEmail,
@@ -85,6 +87,25 @@ exports.updateMe = async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
 
     if (typeof name === "string" && name.trim()) user.name = name.trim();
+    if (typeof email === "string") {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail) {
+        return res.status(400).json({ message: "Email is required" });
+      }
+      if (!EMAIL_PATTERN.test(normalizedEmail)) {
+        return res.status(400).json({ message: "Please enter a valid email address." });
+      }
+      if (normalizedEmail !== String(user.email || "").trim().toLowerCase()) {
+        const existingUser = await User.findOne({
+          email: normalizedEmail,
+          _id: { $ne: user._id },
+        }).select("_id");
+        if (existingUser) {
+          return res.status(400).json({ message: "Email already in use." });
+        }
+      }
+      user.email = normalizedEmail;
+    }
     if (typeof phone === "string") user.phone = phone.trim();
     if (typeof storeName === "string") user.storeName = storeName.trim();
     if (typeof supportEmail === "string") user.supportEmail = supportEmail.trim();
@@ -122,6 +143,39 @@ exports.updateMe = async (req, res) => {
     res.json(toProfilePayload(user));
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.changeMyPassword = async (req, res) => {
+  try {
+    const currentPassword = String(req.body?.currentPassword || "");
+    const newPassword = String(req.body?.newPassword || "");
+
+    if (!currentPassword) {
+      return res.status(400).json({ message: "Current password is required." });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "New password must be at least 6 characters." });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Current password is incorrect." });
+    }
+
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    if (isSamePassword) {
+      return res.status(400).json({ message: "Choose a different password." });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+    return res.json({ message: "Password updated successfully." });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 };
 

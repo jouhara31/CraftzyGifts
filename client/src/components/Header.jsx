@@ -1193,6 +1193,12 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
             Products
           </Link>
           <Link
+            className={`nav-link ${adminActive("/admin/categories") ? "active" : ""}`}
+            to="/admin/categories"
+          >
+            Categories
+          </Link>
+          <Link
             className={`nav-link ${adminActive("/admin/orders") ? "active" : ""}`}
             to="/admin/orders"
           >

@@ -84,7 +84,7 @@ function CategoryFieldsEditor({
             <option value="">Select category</option>
             {categoryTree.map((group) => (
               <option key={group.id || group.category} value={group.category}>
-                {group.label || group.category}
+                {group.category}
               </option>
             ))}
             <option value={CUSTOM_CATEGORY_OPTION}>Add new category</option>

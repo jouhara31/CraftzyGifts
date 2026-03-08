@@ -6,6 +6,7 @@ const ADMIN_NAV_ITEMS = [
   { label: "Dashboard", path: "/admin/dashboard" },
   { label: "Orders", path: "/admin/orders" },
   { label: "Products", path: "/admin/products" },
+  { label: "Categories", path: "/admin/categories" },
   { label: "Customers", path: "/admin/customers" },
   { label: "Inventory", path: "/admin/inventory" },
   { label: "Analytics", path: "/admin/analytics" },
@@ -52,6 +53,19 @@ function AdminNavIcon({ path }) {
         <path d="M3.5 19a5.6 5.6 0 0 1 11.2 0" />
         <circle cx="17.1" cy="9.2" r="2.3" />
         <path d="M14.2 19a4.5 4.5 0 0 1 5.8-4.2A4.4 4.4 0 0 1 21 19" />
+      </svg>
+    );
+  }
+
+  if (path === "/admin/categories") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4.5 6.5h15" />
+        <path d="M4.5 12h15" />
+        <path d="M4.5 17.5h15" />
+        <circle cx="7.5" cy="6.5" r="1.2" />
+        <circle cx="12" cy="12" r="1.2" />
+        <circle cx="16.5" cy="17.5" r="1.2" />
       </svg>
     );
   }

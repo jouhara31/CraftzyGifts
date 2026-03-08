@@ -20,15 +20,26 @@ export default function AdminInventory() {
 
     setError("");
     try {
-      const res = await fetch(`${API_URL}/api/admin/products`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.message || "Unable to load inventory.");
+      const headers = { Authorization: `Bearer ${token}` };
+      const [productRes, settingsRes] = await Promise.all([
+        fetch(`${API_URL}/api/admin/products`, { headers }),
+        fetch(`${API_URL}/api/admin/settings`, { headers }),
+      ]);
+      const [productData, settingsData] = await Promise.all([
+        productRes.json(),
+        settingsRes.json(),
+      ]);
+      if (!productRes.ok) {
+        setError(productData.message || "Unable to load inventory.");
         return;
       }
-      setProducts(Array.isArray(data) ? data : []);
+      setProducts(Array.isArray(productData) ? productData : []);
+      if (settingsRes.ok) {
+        const nextThreshold = Number(settingsData?.lowStockThreshold);
+        if (Number.isFinite(nextThreshold) && nextThreshold >= 0) {
+          setThreshold(nextThreshold);
+        }
+      }
     } catch {
       setError("Unable to load inventory.");
     }

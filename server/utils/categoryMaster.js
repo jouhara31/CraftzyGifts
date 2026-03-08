@@ -27,7 +27,7 @@ const normalizeSubcategories = (values = [], maxItems = 60) => {
 };
 
 const normalizeCategoryGroups = (value, fallback = []) => {
-  const source = Array.isArray(value) ? value : fallback;
+  const source = Array.isArray(value) && value.length > 0 ? value : fallback;
   const mergedByCategory = new Map();
 
   source.forEach((group, index) => {

@@ -190,8 +190,12 @@ export default function AdminDashboard() {
           <div className="seller-panel admin-categories-panel">
             <div className="card-head">
               <h3 className="card-title">Categories</h3>
-              <button className="btn ghost" type="button" onClick={() => navigate("/admin/products")}>
-                Manage products
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => navigate("/admin/categories")}
+              >
+                Manage categories
               </button>
             </div>
             <div className="seller-meta">

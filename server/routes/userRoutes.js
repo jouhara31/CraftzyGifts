@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   getMe,
   updateMe,
+  changeMyPassword,
   deleteMe,
   submitSellerContactRequest,
   listMyContactRequests,
@@ -13,6 +14,7 @@ const { auth, optionalAuth, requireApprovedSeller } = require("../middleware/aut
 
 router.get("/me", auth, getMe);
 router.patch("/me", auth, updateMe);
+router.patch("/me/password", auth, changeMyPassword);
 router.delete("/me", auth, deleteMe);
 router.get("/me/contact-requests", auth, requireApprovedSeller, listMyContactRequests);
 router.get("/me/notifications", auth, requireApprovedSeller, listMyNotifications);

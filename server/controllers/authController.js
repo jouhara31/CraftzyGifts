@@ -1,6 +1,7 @@
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { ensurePlatformSettings } = require("../utils/platformSettings");
 
 // REGISTER
 exports.register = async (req, res) => {
@@ -13,7 +14,12 @@ exports.register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const normalizedRole = role === "seller" ? "seller" : "customer";
-    const sellerStatus = normalizedRole === "seller" ? "pending" : "approved";
+    const platformSettings =
+      normalizedRole === "seller" ? await ensurePlatformSettings() : null;
+    const sellerStatus =
+      normalizedRole === "seller" && !platformSettings?.autoApproveSellers
+        ? "pending"
+        : "approved";
 
     const user = new User({
       name,

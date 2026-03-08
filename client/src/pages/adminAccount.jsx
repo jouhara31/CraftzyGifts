@@ -1,16 +1,71 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
+const EMPTY_PROFILE = {
+  id: "",
+  name: "",
+  email: "",
+  role: "admin",
+  phone: "",
+  supportEmail: "",
+  profileImage: "",
+  sellerStatus: "",
+  storeName: "",
+};
 
-const parseStoredUser = () => {
+const readApiPayload = async (response) => {
+  const text = await response.text();
+  if (!text) return {};
+
   try {
-    const raw = localStorage.getItem("user");
-    return raw ? JSON.parse(raw) : {};
+    return JSON.parse(text);
   } catch {
-    return {};
+    return { message: text };
   }
+};
+
+const persistUserToStorage = (user) => {
+  if (!user || typeof user !== "object") return;
+
+  const nextUser = {
+    id: user.id || "",
+    name: user.name || "",
+    email: user.email || "",
+    role: user.role || "admin",
+    sellerStatus: user.sellerStatus || "",
+    storeName: user.storeName || "",
+    phone: user.phone || "",
+    supportEmail: user.supportEmail || "",
+    profileImage: user.profileImage || "",
+    storeCoverImage: user.storeCoverImage || "",
+  };
+  const profileImage = String(nextUser.profileImage || "");
+
+  try {
+    localStorage.setItem("user", JSON.stringify(nextUser));
+    if (profileImage) {
+      localStorage.setItem(USER_PROFILE_IMAGE_KEY, profileImage);
+    } else {
+      localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
+    }
+  } catch {
+    try {
+      const { profileImage: _profileImage, ...rest } = nextUser;
+      localStorage.setItem("user", JSON.stringify(rest));
+      if (profileImage) {
+        localStorage.setItem(USER_PROFILE_IMAGE_KEY, profileImage);
+      } else {
+        localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
+      }
+    } catch {
+      // Ignore storage quota errors to avoid blocking the profile flow.
+    }
+  }
+
+  window.dispatchEvent(new Event("user:updated"));
 };
 
 const readFileAsDataUrl = (file) =>
@@ -23,13 +78,11 @@ const readFileAsDataUrl = (file) =>
   });
 
 export default function AdminAccount() {
-  const [profile, setProfile] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    supportEmail: "",
-    profileImage: "",
-  });
+  const [profile, setProfile] = useState(EMPTY_PROFILE);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [imageSaving, setImageSaving] = useState(false);
   const [profileImageModalOpen, setProfileImageModalOpen] = useState(false);
   const [profileImageDraft, setProfileImageDraft] = useState("");
   const [profileImageDraftName, setProfileImageDraftName] = useState("");
@@ -43,22 +96,36 @@ export default function AdminAccount() {
   const profileImageInputRef = useRef(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
+  const loadProfile = useCallback(async () => {
     const token = localStorage.getItem("token");
     if (!token) {
       navigate("/login");
       return;
     }
 
-    const user = parseStoredUser();
-    setProfile({
-      name: String(user.name || ""),
-      email: String(user.email || ""),
-      phone: String(user.phone || ""),
-      supportEmail: String(user.supportEmail || ""),
-      profileImage: String(user.profileImage || localStorage.getItem(USER_PROFILE_IMAGE_KEY) || ""),
-    });
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${API_URL}/api/users/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await readApiPayload(response);
+      if (!response.ok) {
+        setError(data.message || "Unable to load profile.");
+        return;
+      }
+      setProfile({ ...EMPTY_PROFILE, ...data });
+      persistUserToStorage(data);
+    } catch {
+      setError("Unable to load profile.");
+    } finally {
+      setLoading(false);
+    }
   }, [navigate]);
+
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
 
   useEffect(() => {
     if (!profileImageModalOpen) return undefined;
@@ -70,21 +137,6 @@ export default function AdminAccount() {
     document.addEventListener("keydown", onEscape);
     return () => document.removeEventListener("keydown", onEscape);
   }, [profileImageModalOpen]);
-
-  const persistProfileToStorage = (nextProfile) => {
-    const currentUser = parseStoredUser();
-    const mergedProfile = {
-      ...currentUser,
-      ...nextProfile,
-    };
-    localStorage.setItem("user", JSON.stringify(mergedProfile));
-    if (mergedProfile.profileImage) {
-      localStorage.setItem(USER_PROFILE_IMAGE_KEY, mergedProfile.profileImage);
-    } else {
-      localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-    }
-    window.dispatchEvent(new Event("user:updated"));
-  };
 
   const onProfileChange = (field) => (event) => {
     setProfile((prev) => ({ ...prev, [field]: event.target.value }));
@@ -98,12 +150,56 @@ export default function AdminAccount() {
     setNotice("");
   };
 
-  const saveProfile = () => {
-    persistProfileToStorage(profile);
-    setNotice("Account profile saved.");
+  const saveProfile = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`${API_URL}/api/users/me`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: profile.name,
+          email: profile.email,
+          phone: profile.phone,
+          supportEmail: profile.supportEmail,
+        }),
+      });
+      const data = await readApiPayload(response);
+      if (!response.ok) {
+        setError(data.message || "Unable to save profile.");
+        return;
+      }
+      setProfile({ ...EMPTY_PROFILE, ...data });
+      persistUserToStorage(data);
+      setNotice("Account profile saved.");
+    } catch {
+      setError("Unable to save profile.");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const savePassword = () => {
+  const savePassword = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    if (!passwordForm.currentPassword) {
+      setError("Current password is required.");
+      return;
+    }
     if (!passwordForm.newPassword) {
       setError("New password is required.");
       return;
@@ -113,13 +209,37 @@ export default function AdminAccount() {
       return;
     }
 
+    setPasswordSaving(true);
     setError("");
-    setNotice("Password change API is not configured yet. Profile is unchanged.");
-    setPasswordForm({
-      currentPassword: "",
-      newPassword: "",
-      confirmPassword: "",
-    });
+    setNotice("");
+    try {
+      const response = await fetch(`${API_URL}/api/users/me/password`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+        }),
+      });
+      const data = await readApiPayload(response);
+      if (!response.ok) {
+        setError(data.message || "Unable to update password.");
+        return;
+      }
+      setNotice(data.message || "Password updated.");
+      setPasswordForm({
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
+    } catch {
+      setError("Unable to update password.");
+    } finally {
+      setPasswordSaving(false);
+    }
   };
 
   const adminDisplayName = String(profile.name || "Admin").trim() || "Admin";
@@ -166,15 +286,39 @@ export default function AdminAccount() {
     }
   };
 
-  const applyProfileImage = () => {
-    const nextProfile = {
-      ...profile,
-      profileImage: profileImageDraft,
-    };
-    setProfile(nextProfile);
-    persistProfileToStorage(nextProfile);
-    setNotice("Profile picture updated.");
-    closeProfileImageModal();
+  const applyProfileImage = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    setImageSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`${API_URL}/api/users/me`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ profileImage: profileImageDraft }),
+      });
+      const data = await readApiPayload(response);
+      if (!response.ok) {
+        setError(data.message || "Unable to update profile image.");
+        return;
+      }
+      setProfile({ ...EMPTY_PROFILE, ...data });
+      persistUserToStorage(data);
+      setNotice("Profile picture updated.");
+      closeProfileImageModal();
+    } catch {
+      setError("Unable to update profile image.");
+    } finally {
+      setImageSaving(false);
+    }
   };
 
   const removeProfileImageDraft = () => {
@@ -189,7 +333,13 @@ export default function AdminAccount() {
     <AdminSidebarLayout
       title="Profile"
       description="Admin profile and security settings."
+      actions={
+        <button className="admin-text-action" type="button" onClick={loadProfile}>
+          Refresh
+        </button>
+      }
     >
+      {loading && !error && <p className="field-hint">Loading profile...</p>}
       {error && <p className="field-hint">{error}</p>}
       {notice && <p className="field-hint">{notice}</p>}
 
@@ -238,8 +388,8 @@ export default function AdminAccount() {
           </div>
         </div>
         <div className="seller-profile-hero-actions">
-          <button className="btn primary" type="button" onClick={saveProfile}>
-            Save Profile
+          <button className="btn primary" type="button" onClick={saveProfile} disabled={saving}>
+            {saving ? "Saving..." : "Save Profile"}
           </button>
         </div>
       </section>
@@ -251,15 +401,30 @@ export default function AdminAccount() {
           </div>
           <div className="field">
             <label htmlFor="adminName">Full name</label>
-            <input id="adminName" type="text" value={profile.name} onChange={onProfileChange("name")} />
+            <input
+              id="adminName"
+              type="text"
+              value={profile.name}
+              onChange={onProfileChange("name")}
+            />
           </div>
           <div className="field">
             <label htmlFor="adminEmail">Email</label>
-            <input id="adminEmail" type="email" value={profile.email} onChange={onProfileChange("email")} />
+            <input
+              id="adminEmail"
+              type="email"
+              value={profile.email}
+              onChange={onProfileChange("email")}
+            />
           </div>
           <div className="field">
             <label htmlFor="adminPhone">Phone</label>
-            <input id="adminPhone" type="text" value={profile.phone} onChange={onProfileChange("phone")} />
+            <input
+              id="adminPhone"
+              type="text"
+              value={profile.phone}
+              onChange={onProfileChange("phone")}
+            />
           </div>
           <div className="field">
             <label htmlFor="adminSupportEmail">Support email</label>
@@ -315,14 +480,23 @@ export default function AdminAccount() {
               onChange={onPasswordChange("confirmPassword")}
             />
           </div>
-          <button className="btn ghost" type="button" onClick={savePassword}>
-            Update Password
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={savePassword}
+            disabled={passwordSaving}
+          >
+            {passwordSaving ? "Updating..." : "Update Password"}
           </button>
         </article>
       </section>
 
       {profileImageModalOpen && (
-        <div className="profile-image-modal-backdrop" role="presentation" onClick={closeProfileImageModal}>
+        <div
+          className="profile-image-modal-backdrop"
+          role="presentation"
+          onClick={closeProfileImageModal}
+        >
           <div
             className="profile-image-modal"
             role="dialog"
@@ -343,9 +517,15 @@ export default function AdminAccount() {
             </div>
             <div className="profile-image-modal-body">
               <div className="profile-image-modal-preview">
-                {profileImageDraft ? <img src={profileImageDraft} alt="Profile preview" /> : <span>{adminInitial}</span>}
+                {profileImageDraft ? (
+                  <img src={profileImageDraft} alt="Profile preview" />
+                ) : (
+                  <span>{adminInitial}</span>
+                )}
               </div>
-              {profileImageDraftName && <p className="field-hint">Selected: {profileImageDraftName}</p>}
+              {profileImageDraftName && (
+                <p className="field-hint">Selected: {profileImageDraftName}</p>
+              )}
               <input
                 ref={profileImageInputRef}
                 className="profile-image-modal-input"
@@ -366,8 +546,13 @@ export default function AdminAccount() {
               <button type="button" className="btn ghost" onClick={closeProfileImageModal}>
                 Cancel
               </button>
-              <button type="button" className="btn primary" onClick={applyProfileImage}>
-                Save picture
+              <button
+                type="button"
+                className="btn primary"
+                onClick={applyProfileImage}
+                disabled={imageSaving}
+              >
+                {imageSaving ? "Saving..." : "Save picture"}
               </button>
             </div>
           </div>

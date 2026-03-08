@@ -213,6 +213,7 @@ const buildSidebarSections = (role) => {
           { label: "Dashboard", path: "/admin/dashboard" },
           { label: "Customers", path: "/admin/customers" },
           { label: "Products", path: "/admin/products" },
+          { label: "Categories", path: "/admin/categories" },
           { label: "Orders", path: "/admin/orders" },
           { label: "Inventory", path: "/admin/inventory" },
           { label: "Analytics", path: "/admin/analytics" },
