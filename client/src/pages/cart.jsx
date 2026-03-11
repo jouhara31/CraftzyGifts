@@ -6,9 +6,12 @@ import { addToCart, getCart, removeFromCart, updateQuantity } from "../utils/car
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
+const isGenericHamperItem = (item) =>
+  Boolean(String(item?.customization?.catalogSellerId || "").trim());
 const getCustomizationCharge = (item) =>
   Number(item?.customization?.makingCharge || 0);
 const getItemPrice = (item) => {
+  if (isGenericHamperItem(item)) return 0;
   if (typeof item?.price === "number" && Number.isFinite(item.price)) {
     return item.price;
   }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import Header from "../components/Header";
 import CustomizationPanel from "../components/customizationPanel";
 import { getProductImage } from "../utils/productMedia";
@@ -14,6 +14,7 @@ const OPTION_LABELS = {
   cards: "Card type",
 };
 const HIDDEN_EXISTING_OPTION_KEYS = new Set(["custom_hamper_items"]);
+const GENERIC_HAMPER_LABEL = "Build Your Own Hamper";
 
 const formatPrice = (value) => Number(value || 0).toLocaleString("en-IN");
 const normalizeItemType = (value) =>
@@ -162,8 +163,14 @@ const readStoredUserRole = () => {
 };
 
 export default function Customization() {
-  const { id } = useParams();
+  const { id, sellerId: sellerIdParam } = useParams();
+  const location = useLocation();
   const [product, setProduct] = useState(null);
+  const [existingProduct, setExistingProduct] = useState(null);
+  const [catalogProductId, setCatalogProductId] = useState("");
+  const [catalogSellerId, setCatalogSellerId] = useState("");
+  const [sellerProfile, setSellerProfile] = useState(null);
+  const [sellerMinimumCharge, setSellerMinimumCharge] = useState(0);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [userRole, setUserRole] = useState(() => readStoredUserRole());
@@ -193,22 +200,80 @@ export default function Customization() {
         return;
       }
 
-      try {
-        const res = await fetch(`${API_URL}/api/products/${id}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        setProduct(data);
-        setExistingCustomization(getDefaultExistingCustomization(data));
+      setCatalogProductId("");
+      setCatalogSellerId("");
+      setSellerProfile(null);
+      setSellerMinimumCharge(0);
+      setProduct(null);
+      setExistingProduct(null);
 
-        const savedCustomization = getCart().find((item) => item.id === data._id)
-          ?.customization;
+      try {
+        const searchParams = new URLSearchParams(location.search);
+        const queryProductId = String(searchParams.get("productId") || "").trim();
+        const existingProductId = String(
+          queryProductId || (!sellerIdParam ? id : "") || ""
+        ).trim();
+
+        let activeSellerId = String(sellerIdParam || "").trim();
+        let resolvedExistingProduct = null;
+
+        if (existingProductId) {
+          const productRes = await fetch(`${API_URL}/api/products/${existingProductId}`);
+          if (productRes.ok) {
+            resolvedExistingProduct = await productRes.json();
+            if (!activeSellerId) {
+              activeSellerId = String(
+                resolvedExistingProduct?.seller?._id ||
+                  resolvedExistingProduct?.seller ||
+                  ""
+              ).trim();
+            }
+          }
+        }
+
+        if (!activeSellerId) {
+          setProduct(null);
+          return;
+        }
+
+        const catalogRes = await fetch(
+          `${API_URL}/api/products/seller/${activeSellerId}/customization`
+        );
+        if (!catalogRes.ok) {
+          setProduct(null);
+          return;
+        }
+        const catalogData = await catalogRes.json();
+        const catalogProduct = catalogData?.catalogProduct || null;
+        const resolvedCatalogProductId = String(
+          catalogData?.catalogProductId || catalogProduct?._id || ""
+        ).trim();
+
+        setCatalogSellerId(activeSellerId);
+        setSellerProfile(catalogData?.seller || null);
+        setCatalogProductId(resolvedCatalogProductId);
+        setSellerMinimumCharge(
+          Number(catalogData?.sellerMinimumCharge || catalogProduct?.makingCharge || 0)
+        );
+        setProduct(catalogProduct);
+        setExistingProduct(resolvedExistingProduct);
+        setExistingCustomization(
+          getDefaultExistingCustomization(resolvedExistingProduct || catalogProduct)
+        );
+
+        const cart = getCart();
+        const savedCustomization =
+          (existingProductId
+            ? cart.find((item) => item.id === existingProductId)?.customization
+            : null) ||
+          cart.find((item) => item.id === resolvedCatalogProductId)?.customization;
         if (!savedCustomization) return;
 
         const savedMode = inferSavedMode(savedCustomization);
         if (savedMode) setCustomizationMode(savedMode);
 
         if (savedMode === "build") {
-          const sellerItems = getSellerCatalogItems(data);
+          const sellerItems = getSellerCatalogItems(catalogProduct);
           const hasSellerCatalog = sellerItems.length > 0;
           const sellerBaseIds = new Set(
             sellerItems
@@ -269,7 +334,7 @@ export default function Customization() {
       }
     };
     load();
-  }, [id, navigate]);
+  }, [id, location.search, navigate, sellerIdParam]);
 
   useEffect(() => {
     const syncUserRole = () => setUserRole(readStoredUserRole());
@@ -277,9 +342,9 @@ export default function Customization() {
     return () => window.removeEventListener("user:updated", syncUserRole);
   }, []);
 
-  const sellerContentCategories = useMemo(
-    () => getSellerCatalogCategories(product),
-    [product]
+  const existingContentCategories = useMemo(
+    () => getSellerCatalogCategories(existingProduct),
+    [existingProduct]
   );
   const sellerCatalogItems = useMemo(
     () => getSellerCatalogItems(product),
@@ -361,16 +426,11 @@ export default function Customization() {
       setSelectedSellerBaseId("");
       return;
     }
-    if (
-      sellerBaseItems.some(
-        (item) =>
-          item.id === selectedSellerBaseId && Number(item.stock || 0) > 0
-      )
-    ) {
-      return;
+    if (!selectedSellerBaseId) return;
+    const selected = sellerBaseItems.find((item) => item.id === selectedSellerBaseId);
+    if (!selected || Number(selected.stock || 0) <= 0) {
+      setSelectedSellerBaseId("");
     }
-    const preferred = sellerBaseItems.find((item) => Number(item.stock || 0) > 0);
-    setSelectedSellerBaseId(preferred?.id || "");
   }, [hasSellerBuildOptions, sellerBaseItems, selectedSellerBaseId]);
 
   useEffect(() => {
@@ -389,15 +449,12 @@ export default function Customization() {
       return;
     }
 
-    if (sellerBaseGroups.some((group) => group.mainItem === selectedSellerBaseMain)) {
-      return;
+    if (
+      selectedSellerBaseMain &&
+      !sellerBaseGroups.some((group) => group.mainItem === selectedSellerBaseMain)
+    ) {
+      setSelectedSellerBaseMain("");
     }
-
-    const preferredGroup =
-      sellerBaseGroups.find((group) =>
-        group.variants.some((item) => Number(item.stock || 0) > 0)
-      ) || sellerBaseGroups[0];
-    setSelectedSellerBaseMain(preferredGroup?.mainItem || "");
   }, [
     hasSellerBuildOptions,
     sellerBaseGroups,
@@ -473,18 +530,18 @@ export default function Customization() {
 
   const optionLabelLookup = useMemo(() => {
     const lookup = { ...OPTION_LABELS };
-    sellerContentCategories.forEach((category) => {
+    existingContentCategories.forEach((category) => {
       lookup[category.id] = category.label;
     });
     return lookup;
-  }, [sellerContentCategories]);
+  }, [existingContentCategories]);
 
   const optionValueLookup = useMemo(() => {
     const lookup = {};
 
     Object.keys(OPTION_LABELS).forEach((key) => {
-      const options = Array.isArray(product?.customizationOptions?.[key])
-        ? product.customizationOptions[key]
+      const options = Array.isArray(existingProduct?.customizationOptions?.[key])
+        ? existingProduct.customizationOptions[key]
         : [];
       lookup[key] = options.reduce((acc, option) => {
         const text = String(option || "").trim();
@@ -493,7 +550,7 @@ export default function Customization() {
       }, {});
     });
 
-    sellerContentCategories.forEach((category) => {
+    existingContentCategories.forEach((category) => {
       lookup[category.id] = category.items.reduce((acc, item) => {
         acc[item.id] = item.name;
         acc[item.name] = item.name;
@@ -502,7 +559,7 @@ export default function Customization() {
     });
 
     return lookup;
-  }, [product, sellerContentCategories]);
+  }, [existingProduct, existingContentCategories]);
 
   const existingSummaryItems = useMemo(() => {
     const selectedOptions = sanitizeExistingSelections(
@@ -573,20 +630,39 @@ export default function Customization() {
     (sum, item) => sum + item.price * item.quantity,
     0
   );
-  const sellerMinimumCharge = Number(product?.makingCharge || 0);
-  const buildModeCharge = Math.max(sellerMinimumCharge, itemSubtotal);
+  const minimumHamperCharge = Number(sellerMinimumCharge || 0);
+  const buildModeCharge = minimumHamperCharge + itemSubtotal;
+  const existingModeCharge = Number(existingProduct?.makingCharge || 0);
   const effectiveCustomizationCharge =
     customizationMode === "build"
       ? buildModeCharge
       : customizationMode === "existing"
-        ? sellerMinimumCharge
+        ? existingModeCharge
         : 0;
-  const totalPrice = Number(product?.price || 0) + effectiveCustomizationCharge;
+  const existingBasePrice = Number(existingProduct?.price || 0);
+  const totalPrice =
+    customizationMode === "existing"
+      ? existingBasePrice + existingModeCharge
+      : effectiveCustomizationCharge;
 
   const isSellerAccount = userRole === "seller";
-  const isDisabled = Boolean(product && !product.isCustomizable);
+  const sellerDisplayName = String(
+    sellerProfile?.storeName || sellerProfile?.name || ""
+  ).trim();
+  const isExistingUnavailable = !existingProduct || !existingProduct.isCustomizable;
+  const isBuildDisabled = Boolean(product && !product.isCustomizable);
+  const isDisabled = customizationMode === "existing" ? isExistingUnavailable : isBuildDisabled;
   const isBuildUnavailable = customizationMode === "build" && !hasSellerBuildOptions;
   const isModeChosen = Boolean(customizationMode);
+  const existingProductId = String(
+    existingProduct?._id || existingProduct?.id || ""
+  ).trim();
+  const showExistingProduct = customizationMode === "existing" && existingProduct;
+  const buildSummaryImage = selectedSellerBase?.image || "";
+  const summaryImage = showExistingProduct ? getProductImage(existingProduct) : buildSummaryImage;
+  const summaryTitle = showExistingProduct
+    ? String(existingProduct?.name || GENERIC_HAMPER_LABEL).trim()
+    : GENERIC_HAMPER_LABEL;
 
   const updateQuantity = (itemId, change) => {
     setItemQuantities((current) => {
@@ -614,78 +690,135 @@ export default function Customization() {
       setNotice("Seller account cannot place orders. Use a customer account.");
       return false;
     }
-    if (!product || !product.isCustomizable) return false;
     if (!customizationMode) {
       setNotice("Please choose a customization option first.");
       return false;
     }
-    if (customizationMode === "build" && !hasSellerBuildOptions) {
-      setNotice("Seller has not listed custom hamper items yet.");
-      return false;
-    }
-    if (
-      customizationMode === "build" &&
-      hasSellerBuildOptions &&
-      sellerBaseItems.length > 0 &&
-      !selectedSellerBase
-    ) {
-      setNotice("Please select one hamper base to continue.");
-      return false;
+    if (customizationMode === "existing") {
+      if (!existingProduct || !existingProduct.isCustomizable) {
+        setNotice("This product is not customizable.");
+        return false;
+      }
+    } else if (customizationMode === "build") {
+      if (!product || !product.isCustomizable) return false;
+      if (!hasSellerBuildOptions) {
+        setNotice("Seller has not listed custom hamper items yet.");
+        return false;
+      }
+      if (sellerBaseItems.length > 0 && !selectedSellerBase) {
+        setNotice("Please select one hamper base to continue.");
+        return false;
+      }
+      if (!catalogSellerId) {
+        setNotice("Unable to link hamper to seller.");
+        return false;
+      }
+      if (!catalogProductId) {
+        setNotice("Unable to link hamper to seller catalog.");
+        return false;
+      }
     }
 
     const cart = getCart();
-    const exists = cart.some((item) => item.id === product._id);
-    if (!exists) {
-      addToCart({
-        id: product._id,
-        name: product.name,
-        price: product.price,
-        isCustomizable: product.isCustomizable,
-        category: product.category,
-        image: getProductImage(product),
-        seller: {
-          id: String(product?.seller?._id || product?.seller?.id || "").trim(),
-          name: String(product?.seller?.name || "").trim(),
-          storeName: String(product?.seller?.storeName || "").trim(),
-          profileImage: String(product?.seller?.profileImage || "").trim(),
-        },
-      });
-    }
 
     const existingReferenceImages = getReferenceImages(existingCustomization);
     const buildReferenceImages = (buildReferenceImageNames || [])
       .filter(Boolean)
       .slice(0, 3);
 
-    const payload =
-      customizationMode === "existing"
-        ? {
-            mode: "existing",
-            selectedOptions: sanitizeExistingSelections(
-              existingCustomization.selectedOptions
-            ),
-            selectedItems: [],
-            wishCardText: existingCustomization.wishCardText?.trim() || "",
-            specialNote: existingCustomization.specialNote?.trim() || "",
-            ideaDescription: existingCustomization.ideaDescription?.trim() || "",
-            referenceImageUrls: existingReferenceImages,
-            referenceImageUrl: existingReferenceImages[0] || "",
-            addGiftWrap: Boolean(existingCustomization.addGiftWrap),
-            makingCharge: sellerMinimumCharge,
-          }
-        : {
-            mode: "build",
-            selectedOptions: selectedSellerBase ? { hamperBase: selectedSellerBase.id } : {},
-            selectedItems,
-            wishCardText: buildWishCardText.trim(),
-            specialNote: buildSpecialNote.trim(),
-            ideaDescription: buildIdeaDescription.trim(),
-            referenceImageUrls: buildReferenceImages,
-            referenceImageUrl: buildReferenceImages[0] || "",
-            makingCharge: buildModeCharge,
-          };
+    if (customizationMode === "existing") {
+      const existingProductId = String(
+        existingProduct?._id || existingProduct?.id || ""
+      ).trim();
+      if (!existingProductId) {
+        setNotice("Unable to link customization to product.");
+        return false;
+      }
+      const exists = cart.some((item) => item.id === existingProductId);
+      if (!exists) {
+        const sellerInfo =
+          existingProduct?.seller && typeof existingProduct.seller === "object"
+            ? existingProduct.seller
+            : null;
+        const sellerId = String(
+          sellerInfo?._id ||
+            sellerInfo?.id ||
+            existingProduct?.seller ||
+            catalogSellerId ||
+            ""
+        ).trim();
+        addToCart({
+          id: existingProductId,
+          name: String(existingProduct?.name || GENERIC_HAMPER_LABEL).trim(),
+          price: Number(existingProduct?.price || 0),
+          isCustomizable: Boolean(existingProduct?.isCustomizable),
+          category: String(existingProduct?.category || "Custom hamper").trim(),
+          image: getProductImage(existingProduct || {}),
+          seller: {
+            id: sellerId,
+            name: String(sellerInfo?.name || sellerProfile?.name || "").trim(),
+            storeName: String(
+              sellerInfo?.storeName || sellerProfile?.storeName || ""
+            ).trim(),
+            profileImage: String(
+              sellerInfo?.profileImage || sellerProfile?.profileImage || ""
+            ).trim(),
+          },
+        });
+      }
 
-    setCustomization(product._id, payload);
+      const payload = {
+        mode: "existing",
+        selectedOptions: sanitizeExistingSelections(existingCustomization.selectedOptions),
+        selectedItems: [],
+        wishCardText: existingCustomization.wishCardText?.trim() || "",
+        specialNote: existingCustomization.specialNote?.trim() || "",
+        ideaDescription: existingCustomization.ideaDescription?.trim() || "",
+        referenceImageUrls: existingReferenceImages,
+        referenceImageUrl: existingReferenceImages[0] || "",
+        addGiftWrap: Boolean(existingCustomization.addGiftWrap),
+        makingCharge: existingModeCharge,
+      };
+
+      setCustomization(existingProductId, payload);
+      setNotice("Customization saved to cart.");
+      return true;
+    }
+
+    const exists = cart.some((item) => item.id === catalogProductId);
+    if (!exists) {
+      const sellerId = catalogSellerId || String(product?.seller?._id || product?.seller || "");
+      addToCart({
+        id: catalogProductId,
+        name: GENERIC_HAMPER_LABEL,
+        price: 0,
+        isCustomizable: product.isCustomizable,
+        category: "Custom hamper",
+        image: "",
+        isGenericHamper: true,
+        seller: {
+          id: String(sellerId || "").trim(),
+          name: String(sellerProfile?.name || "").trim(),
+          storeName: String(sellerProfile?.storeName || "").trim(),
+          profileImage: String(sellerProfile?.profileImage || "").trim(),
+        },
+      });
+    }
+
+    const payload = {
+      mode: "build",
+      selectedOptions: selectedSellerBase ? { hamperBase: selectedSellerBase.id } : {},
+      selectedItems,
+      wishCardText: buildWishCardText.trim(),
+      specialNote: buildSpecialNote.trim(),
+      ideaDescription: buildIdeaDescription.trim(),
+      referenceImageUrls: buildReferenceImages,
+      referenceImageUrl: buildReferenceImages[0] || "",
+      makingCharge: buildModeCharge,
+      catalogSellerId: catalogSellerId || undefined,
+    };
+
+    setCustomization(catalogProductId, payload);
     setNotice("Customization saved to cart.");
     return true;
   };
@@ -699,11 +832,11 @@ export default function Customization() {
     );
   }
 
-  if (!product) {
+  if (!product && !existingProduct) {
     return (
       <div className="page custom-builder-page">
         <Header />
-        <p>Unable to load product customization.</p>
+        <p>Unable to load hamper customization.</p>
       </div>
     );
   }
@@ -719,14 +852,25 @@ export default function Customization() {
             build a hamper from scratch.
           </p>
         </div>
-        <Link className="link" to={`/products/${id}`}>
-          Back to product
+        <Link
+          className="link"
+          to={
+            existingProductId
+              ? `/products/${existingProductId}`
+              : catalogSellerId
+                ? `/store/${catalogSellerId}`
+                : "/products"
+          }
+        >
+          {existingProductId ? "Back to product" : "Back to store"}
         </Link>
       </div>
 
       {isDisabled && (
         <p className="field-hint">
-          This product is marked non-customizable by the seller.
+          {customizationMode === "existing"
+            ? "This product is marked non-customizable by the seller."
+            : "This hamper is marked non-customizable by the seller."}
         </p>
       )}
       {isSellerAccount && (
@@ -749,7 +893,7 @@ export default function Customization() {
                   setCustomizationMode("existing");
                   setNotice("");
                 }}
-                disabled={isDisabled}
+                disabled={isExistingUnavailable}
               >
                 <strong>Modify existing hamper</strong>
                 <small>
@@ -770,7 +914,7 @@ export default function Customization() {
                       : "Seller has not listed custom hamper items yet."
                   );
                 }}
-                disabled={isDisabled}
+                disabled={isBuildDisabled}
               >
                 <strong>Build your own hamper</strong>
                 <small>
@@ -792,7 +936,7 @@ export default function Customization() {
               <h3 className="hamper-block-title">Existing hamper changes</h3>
               <div className="hamper-existing-form">
                 <CustomizationPanel
-                  product={product}
+                  product={existingProduct || product}
                   value={existingCustomization}
                   onChange={(nextValue) => {
                     setExistingCustomization(nextValue);
@@ -828,10 +972,9 @@ export default function Customization() {
                                     selectedSellerBaseMain === group.mainItem ? "active" : ""
                                   }`}
                                   onClick={() => {
-                                    const preferredVariant =
-                                      group.variants.find(
-                                        (item) => Number(item.stock || 0) > 0
-                                      ) || group.variants[0];
+                                    const preferredVariant = group.variants.find(
+                                      (item) => item.id === selectedSellerBaseId
+                                    );
                                     setSelectedSellerBaseMain(group.mainItem);
                                     setSelectedSellerBaseId(preferredVariant?.id || "");
                                     setShowBaseVariants(true);
@@ -1006,7 +1149,7 @@ export default function Customization() {
               ) : (
                 <section className="hamper-builder-block">
                   <p className="field-hint">
-                    Seller has not listed custom hamper items for this product yet.
+                    Seller has not listed custom hamper items yet.
                   </p>
                 </section>
               )}
@@ -1033,9 +1176,24 @@ export default function Customization() {
           </div>
 
           <div className="hamper-summary-meta">
-            <img src={getProductImage(product)} alt={product.name} />
+            <div className="hamper-summary-media">
+              {summaryImage ? (
+                <img src={summaryImage} alt={summaryTitle || GENERIC_HAMPER_LABEL} />
+              ) : (
+                <span
+                  className="hamper-summary-loader"
+                  role="status"
+                  aria-label="Select items to preview"
+                />
+              )}
+            </div>
             <div>
-              <p>{product.name}</p>
+              <p>{summaryTitle}</p>
+              {!showExistingProduct && sellerDisplayName && (
+                <small>
+                  Seller: <strong>{sellerDisplayName}</strong>
+                </small>
+              )}
               <small>
                 Mode:{" "}
                 <strong>
@@ -1137,29 +1295,30 @@ export default function Customization() {
           </ul>
 
           <div className="hamper-total-card">
-            <div className="hamper-total-row">
-              <span>Base hamper price</span>
-              <strong>₹{formatPrice(product.price)}</strong>
-            </div>
-
-            {customizationMode === "build" && (
+            {customizationMode === "existing" && (
               <>
                 <div className="hamper-total-row">
-                  <span>Selected items total</span>
-                  <strong>₹{formatPrice(itemSubtotal)}</strong>
+                  <span>Base product price</span>
+                  <strong>₹{formatPrice(existingBasePrice)}</strong>
                 </div>
                 <div className="hamper-total-row">
-                  <span>Seller minimum charge</span>
-                  <strong>₹{formatPrice(sellerMinimumCharge)}</strong>
+                  <span>Customization charge</span>
+                  <strong>₹{formatPrice(existingModeCharge)}</strong>
                 </div>
               </>
             )}
 
-            {customizationMode === "existing" && (
-              <div className="hamper-total-row">
-                <span>Customization charge</span>
-                <strong>₹{formatPrice(sellerMinimumCharge)}</strong>
-              </div>
+            {customizationMode === "build" && (
+              <>
+                <div className="hamper-total-row">
+                  <span>Seller minimum charge</span>
+                  <strong>₹{formatPrice(minimumHamperCharge)}</strong>
+                </div>
+                <div className="hamper-total-row">
+                  <span>Selected items total</span>
+                  <strong>₹{formatPrice(itemSubtotal)}</strong>
+                </div>
+              </>
             )}
 
             <div className="hamper-total-row total">

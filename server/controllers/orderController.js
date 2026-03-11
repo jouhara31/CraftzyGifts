@@ -79,6 +79,9 @@ const hasCustomization = (customization) => {
   return Object.values(selectedItems).some((value) => Boolean(value));
 };
 
+const isGenericHamperCustomization = (customization) =>
+  Boolean(String(customization?.catalogSellerId || "").trim());
+
 const parseQuantity = (value) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < 1) return 1;
@@ -434,6 +437,9 @@ const collectCustomizationStockAdjustments = (order) => {
   return { adjustmentMap, requiredIds };
 };
 
+const isGenericHamperOrder = (order) =>
+  Boolean(String(order?.customization?.catalogSellerId || "").trim());
+
 const getCustomizationInventoryScopeFilter = (order) => {
   if (order?.seller) {
     return { seller: order.seller };
@@ -555,6 +561,13 @@ const deductInventory = async (order) => {
   if (order.inventoryAdjusted) return null;
   const orderQuantity = parseQuantity(order.quantity);
 
+  if (isGenericHamperOrder(order)) {
+    await applyCustomizationStockAdjustments(order, -1);
+    order.inventoryAdjusted = true;
+    order.inventoryRestocked = false;
+    return null;
+  }
+
   const updated = await Product.findOneAndUpdate(
     { _id: order.product, stock: { $gte: orderQuantity } },
     { $inc: { stock: -orderQuantity } },
@@ -596,6 +609,13 @@ const deductInventory = async (order) => {
 const restockInventory = async (order) => {
   if (!order.inventoryAdjusted || order.inventoryRestocked) return;
   const orderQuantity = parseQuantity(order.quantity);
+
+  if (isGenericHamperOrder(order)) {
+    await applyCustomizationStockAdjustments(order, 1);
+    order.inventoryAdjusted = false;
+    order.inventoryRestocked = true;
+    return;
+  }
 
   await Product.findByIdAndUpdate(order.product, { $inc: { stock: orderQuantity } });
   await applyCustomizationStockAdjustments(order, 1);
@@ -710,6 +730,7 @@ exports.createOrder = async (req, res) => {
 
     const { productId, quantity = 1, customization, shippingAddress, paymentMode } =
       req.body;
+    const isGenericHamper = isGenericHamperCustomization(customization);
 
     const parsedQuantity = parseQuantity(quantity);
     const mode = ONLINE_PAYMENT_MODES.has(paymentMode) ? paymentMode : "cod";
@@ -732,7 +753,18 @@ exports.createOrder = async (req, res) => {
         message: "Sellers cannot place orders for their own products.",
       });
     }
-    if ((product.stock || 0) < parsedQuantity) {
+
+    if (isGenericHamper) {
+      const catalogSellerId = String(customization?.catalogSellerId || "").trim();
+      if (!catalogSellerId || String(product.seller) !== catalogSellerId) {
+        return res.status(400).json({ message: "Invalid seller for hamper order." });
+      }
+      if (!product.isCustomizable) {
+        return res
+          .status(400)
+          .json({ message: "Hamper customization not available for this product." });
+      }
+    } else if ((product.stock || 0) < parsedQuantity) {
       const availableQty = Math.max(0, Number(product.stock || 0));
       return res.status(409).json({
         message: `Insufficient stock for ${product.name} (requested ${parsedQuantity}, available ${availableQty})`,
@@ -752,6 +784,7 @@ exports.createOrder = async (req, res) => {
         .json({ message: "Customization not available for this product" });
     }
 
+    const customizationMode = String(customization?.mode || "").trim().toLowerCase();
     let normalizedCustomization = product.isCustomizable
       ? { ...(customization || {}) }
       : undefined;
@@ -765,23 +798,32 @@ exports.createOrder = async (req, res) => {
       );
       normalizedCustomization = {
         ...(customization || {}),
+        catalogSellerId: isGenericHamper
+          ? String(customization?.catalogSellerId || "").trim()
+          : undefined,
         selectedItems: normalizedCatalog.selectedItems,
         selectedOptions: normalizedCatalog.selectedOptions,
       };
-      minimumCatalogCharge = normalizedCatalog.minimumChargeFromCatalog;
+      minimumCatalogCharge =
+        customizationMode === "existing" ? 0 : normalizedCatalog.minimumChargeFromCatalog;
     }
 
-    const price = product.price * parsedQuantity;
     const sellerCharge = Number(product.makingCharge || 0);
     const requestedCharge = Number(customization?.makingCharge);
     const resolvedCharge =
       Number.isFinite(requestedCharge) && requestedCharge >= 0
         ? Math.round(requestedCharge)
         : sellerCharge;
-    const makingCharge = product.isCustomizable
+    const standardPrice = product.price * parsedQuantity;
+    const standardMakingCharge = product.isCustomizable
       ? Math.max(sellerCharge, resolvedCharge, minimumCatalogCharge)
       : 0;
-    const total = price + makingCharge;
+    const standardTotal = standardPrice + standardMakingCharge;
+    const price = isGenericHamper ? 0 : standardPrice;
+    const makingCharge = isGenericHamper
+      ? Math.max(0, sellerCharge) + minimumCatalogCharge
+      : standardMakingCharge;
+    const total = isGenericHamper ? makingCharge : standardTotal;
     const onlineMode = ONLINE_PAYMENT_MODES.has(mode);
 
     const order = new Order({

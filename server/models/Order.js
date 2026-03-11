@@ -62,6 +62,7 @@ const orderSchema = new mongoose.Schema(
       specialNote: { type: String },
       ideaDescription: { type: String },
       makingCharge: { type: Number, default: 0 },
+      catalogSellerId: { type: String },
       selectedOptions: {
         type: Map,
         of: String,

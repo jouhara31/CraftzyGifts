@@ -790,6 +790,81 @@ exports.getSellerProducts = async (req, res) => {
   }
 };
 
+exports.getSellerCustomizationCatalog = async (req, res) => {
+  try {
+    const sellerId = String(req.params.sellerId || "").trim();
+    if (!sellerId) {
+      return res.status(400).json({ message: "Seller id is required." });
+    }
+
+    const requesterId = String(req.user?.id || "").trim();
+    const isOwner = requesterId && requesterId === sellerId;
+    const sellerFilter = {
+      _id: sellerId,
+      role: "seller",
+    };
+    if (!isOwner) {
+      sellerFilter.sellerStatus = "approved";
+    }
+
+    const seller = await User.findOne(sellerFilter)
+      .select("name storeName profileImage")
+      .lean();
+    if (!seller) {
+      return res.status(404).json({ message: "Seller store not found." });
+    }
+
+    const visibility = getPublicVisibilityFilter();
+    const productFilter = {
+      seller: sellerId,
+      isCustomizable: true,
+      $and: visibility.$and,
+    };
+    const products = await Product.find(productFilter)
+      .select(
+        "name price makingCharge customizationCatalog customizationOptions seller isCustomizable"
+      )
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!Array.isArray(products) || products.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "Seller has no customizable products yet." });
+    }
+
+    const hasCatalogItems = (product) =>
+      Array.isArray(product?.customizationCatalog) &&
+      product.customizationCatalog.some((category) =>
+        Array.isArray(category?.items)
+          ? category.items.some((item) => item?.active !== false)
+          : false
+      );
+
+    const catalogProduct = products.find((product) => hasCatalogItems(product)) || products[0];
+    const catalogProductId = String(catalogProduct?._id || "").trim();
+    if (!catalogProductId) {
+      return res
+        .status(404)
+        .json({ message: "Seller hamper catalog not found." });
+    }
+
+    const charges = products
+      .map((product) => Number(product?.makingCharge || 0))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const sellerMinimumCharge = charges.length > 0 ? Math.min(...charges) : 0;
+
+    res.json({
+      seller,
+      catalogProductId,
+      sellerMinimumCharge,
+      catalogProduct,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 exports.getPublicSellerStore = async (req, res) => {
   try {
     const sellerId = String(req.params.sellerId || "").trim();

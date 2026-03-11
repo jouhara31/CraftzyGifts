@@ -5,14 +5,24 @@ import { clearCart, getCart } from "../utils/cart";
 import { getProductImage } from "../utils/productMedia";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const isGenericHamperItem = (item) =>
+  Boolean(String(item?.customization?.catalogSellerId || "").trim());
 const getCustomizationCharge = (item) =>
   Number(item?.customization?.makingCharge || 0);
 const getItemPrice = (item) => {
+  if (isGenericHamperItem(item)) return 0;
   if (typeof item?.price === "number" && Number.isFinite(item.price)) {
     return item.price;
   }
   const parsed = Number(String(item?.price ?? "").replace(/[^\d.]/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
+};
+const hasReferenceImages = (customization) => {
+  if (!customization || typeof customization !== "object") return false;
+  if (Array.isArray(customization.referenceImageUrls)) {
+    return customization.referenceImageUrls.some((value) => String(value || "").trim());
+  }
+  return Boolean(String(customization.referenceImageUrl || "").trim());
 };
 const formatPrice = (value) => Number(value || 0).toLocaleString("en-IN");
 const ONLINE_PAYMENT_MODES = new Set(["upi", "card"]);
@@ -100,6 +110,9 @@ export default function Checkout() {
   );
   const items = buyNowItem ? [buyNowItem] : cartItems;
   const primaryItem = items[0] || null;
+  const needsReferenceUpload = items.some(
+    (item) => Boolean(item?.isCustomizable) && !hasReferenceImages(item?.customization)
+  );
   const primarySellerId = String(
     primaryItem?.seller?.id || primaryItem?.seller?._id || ""
   ).trim();
@@ -400,6 +413,12 @@ export default function Checkout() {
               <span>₹{formatPrice(total)}</span>
             </div>
           </div>
+          {needsReferenceUpload && (
+            <p className="field-hint">
+              Personalized image needed? Please choose Customize to upload your image before
+              placing the order.
+            </p>
+          )}
           <button
             className="btn primary"
             type="button"

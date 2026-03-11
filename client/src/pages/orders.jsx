@@ -681,9 +681,21 @@ export default function Orders() {
               sub: buildOrderNote(order),
             },
           ];
-          const productName = asText(order?.product?.name) || "Hamper";
-          const productCategory = asText(order?.product?.category) || "Curated gift";
-          const productDescription = asText(order?.product?.description) || buildOrderNote(order);
+          const isGenericHamper = Boolean(
+            String(order?.customization?.catalogSellerId || "").trim()
+          );
+          const productName = isGenericHamper
+            ? "Build Your Own Hamper"
+            : asText(order?.product?.name) || "Hamper";
+          const productCategory = isGenericHamper
+            ? "Custom hamper"
+            : asText(order?.product?.category) || "Curated gift";
+          const productDescription = isGenericHamper
+            ? "Seller hamper customization order."
+            : asText(order?.product?.description) || buildOrderNote(order);
+          const productImageSource = isGenericHamper
+            ? getProductImage({ category: "customgifts" })
+            : getProductImage(order?.product || {});
 
           return (
             <article key={order._id} className="customer-order-card">
@@ -705,7 +717,7 @@ export default function Orders() {
                 <div className="customer-order-product">
                   <img
                     className="customer-order-product-image"
-                    src={getProductImage(order?.product || {})}
+                    src={productImageSource}
                     alt={productName}
                     loading="lazy"
                   />

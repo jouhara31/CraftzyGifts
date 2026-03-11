@@ -5,6 +5,7 @@ const {
   getCategoryMaster,
   getProductById,
   getSellerProducts,
+  getSellerCustomizationCatalog,
   getPublicSellerStore,
   getCustomizationMasterOptions,
   createProduct,
@@ -16,6 +17,11 @@ const { auth, optionalAuth, requireRole, requireApprovedSeller } = require("../m
 router.get("/", getProducts);
 router.get("/categories", getCategoryMaster);
 router.get("/seller/me", auth, requireRole("seller"), requireApprovedSeller, getSellerProducts);
+router.get(
+  "/seller/:sellerId/customization",
+  optionalAuth,
+  getSellerCustomizationCatalog
+);
 router.get("/seller/:sellerId/public", optionalAuth, getPublicSellerStore);
 router.get(
   "/customization-options",

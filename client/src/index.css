@@ -13419,12 +13419,36 @@ h6 {
   border-bottom: 1px solid var(--hamper-border);
 }
 
-.hamper-summary-meta img {
+.hamper-summary-media {
   width: 64px;
   height: 64px;
   border-radius: 8px;
-  object-fit: cover;
   border: 1px solid var(--hamper-border);
+  background: var(--hamper-surface-soft);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.hamper-summary-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hamper-summary-loader {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--hamper-border);
+  border-top-color: var(--hamper-accent);
+  animation: hamper-spin 1s linear infinite;
+}
+
+@keyframes hamper-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .hamper-summary-meta p {

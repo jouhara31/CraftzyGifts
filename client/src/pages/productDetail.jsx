@@ -939,7 +939,13 @@ export default function ProductDetail() {
                 <button
                   className="pdp-btn pdp-btn-outline"
                   type="button"
-                  onClick={() => navigate(`/customize/${product._id}`)}
+                  onClick={() => {
+                    if (!sellerId) {
+                      setNotice("Seller info missing. Unable to open customization.");
+                      return;
+                    }
+                    navigate(`/customize/seller/${sellerId}?productId=${product._id}`);
+                  }}
                 >
                   Customize
                 </button>

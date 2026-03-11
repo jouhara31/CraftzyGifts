@@ -229,6 +229,9 @@ export default function CustomizationPanel({ product, value, onChange }) {
           Upload style references, hamper layout ideas, or color inspiration
           (up to 3).
         </p>
+        <p className="field-hint">
+          Personalized image needed? Upload it here before checkout.
+        </p>
         {imageReferences.length > 0 && (
           <div className="reference-preview-grid">
             {imageReferences.map((source, index) => (
