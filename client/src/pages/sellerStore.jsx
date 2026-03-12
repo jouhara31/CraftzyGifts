@@ -3,7 +3,11 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import Header from "../components/Header";
 import { getProductImage } from "../utils/productMedia";
 import { prefetchProductDetail } from "../utils/productDetailCache";
-import { clearSellerStoreCache, loadSellerStore } from "../utils/sellerStoreCache";
+import {
+  clearSellerStoreCache,
+  getCachedSellerStore,
+  loadSellerStore,
+} from "../utils/sellerStoreCache";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
@@ -382,16 +386,29 @@ export default function SellerStore() {
     let ignore = false;
 
     const loadStore = async () => {
-      setLoading(true);
+      const token = localStorage.getItem("token");
+      const cacheOptions = { ...STORE_CORE_LOAD_OPTIONS, token };
+      const cached = getCachedSellerStore(sellerId, cacheOptions);
+      if (cached) {
+        const seller = cached?.seller || null;
+        const feedbacks = Array.isArray(cached?.feedbacks) ? cached.feedbacks : [];
+        feedbackLoadAttemptedRef.current = feedbacks.length > 0;
+        setStoreData({
+          seller,
+          products: Array.isArray(cached?.products) ? cached.products : [],
+          feedbacks,
+          stats: cached?.stats || null,
+        });
+        setDraft(buildDraftFromSeller(seller || {}));
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
       setError("");
       setFeedbackLoading(false);
       feedbackLoadAttemptedRef.current = false;
       try {
-        const token = localStorage.getItem("token");
-        const data = await loadSellerStore(sellerId, {
-          ...STORE_CORE_LOAD_OPTIONS,
-          token,
-        });
+        const data = await loadSellerStore(sellerId, cacheOptions);
         if (ignore) return;
         const seller = data?.seller || null;
         const feedbacks = Array.isArray(data?.feedbacks) ? data.feedbacks : [];
@@ -403,7 +420,6 @@ export default function SellerStore() {
           stats: data?.stats || null,
         });
         setDraft(buildDraftFromSeller(seller || {}));
-        setActiveTab(requestedTab);
         setSearchText("");
         setSortBy("latest");
         setShowCount(12);
@@ -426,7 +442,7 @@ export default function SellerStore() {
     return () => {
       ignore = true;
     };
-  }, [sellerId, requestedTab]);
+  }, [sellerId]);
 
   const seller = useMemo(() => storeData?.seller || {}, [storeData?.seller]);
   const sellerDraftSeed = useMemo(() => buildDraftFromSeller(seller), [seller]);
@@ -1043,70 +1059,89 @@ export default function SellerStore() {
                   ) : null}
                 </div>
                 <div className="seller-store-main-body">
-                  <div className={`seller-store-brand-row ${isOwnerSeller && editMode ? "is-editing" : ""}`}>
-                    <div className={`seller-store-avatar ${isOwnerSeller && editMode ? "is-editable" : ""}`} aria-hidden="true">
-                      {sellerProfileImage ? <img src={sellerProfileImage} alt="" /> : sellerInitial}
-                      {isOwnerSeller && editMode ? (
-                        <>
-                          <button
-                            className="seller-store-image-edit-btn seller-store-avatar-edit"
-                            type="button"
-                            onClick={() => avatarInputRef.current?.click()}
-                            aria-label="Edit store profile image"
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <path
-                                d="M4 16.9V20h3.1l9.4-9.4-3.1-3.1L4 16.9Zm14.7-8.5a.9.9 0 0 0 0-1.2l-1.9-1.9a.9.9 0 0 0-1.2 0l-1.5 1.5 3.1 3.1 1.5-1.5Z"
-                                fill="currentColor"
+                  <div className="seller-store-info-row">
+                    <div className="seller-store-info-text">
+                      <div className={`seller-store-brand-row ${isOwnerSeller && editMode ? "is-editing" : ""}`}>
+                        <div className={`seller-store-avatar ${isOwnerSeller && editMode ? "is-editable" : ""}`} aria-hidden="true">
+                          {sellerProfileImage ? <img src={sellerProfileImage} alt="" /> : sellerInitial}
+                          {isOwnerSeller && editMode ? (
+                            <>
+                              <button
+                                className="seller-store-image-edit-btn seller-store-avatar-edit"
+                                type="button"
+                                onClick={() => avatarInputRef.current?.click()}
+                                aria-label="Edit store profile image"
+                              >
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                  <path
+                                    d="M4 16.9V20h3.1l9.4-9.4-3.1-3.1L4 16.9Zm14.7-8.5a.9.9 0 0 0 0-1.2l-1.9-1.9a.9.9 0 0 0-1.2 0l-1.5 1.5 3.1 3.1 1.5-1.5Z"
+                                    fill="currentColor"
+                                  />
+                                </svg>
+                              </button>
+                              <input
+                                ref={avatarInputRef}
+                                type="file"
+                                accept="image/*"
+                                className="seller-store-file-input"
+                                onChange={(event) => handleImagePick(event, "profileImage")}
                               />
-                            </svg>
-                          </button>
-                          <input
-                            ref={avatarInputRef}
-                            type="file"
-                            accept="image/*"
-                            className="seller-store-file-input"
-                            onChange={(event) => handleImagePick(event, "profileImage")}
-                          />
-                        </>
-                      ) : null}
-                    </div>
-                    {isOwnerSeller && editMode ? (
-                      <div className="seller-store-brand-edit">
-                        <input
-                          type="text"
-                          value={draft.storeName}
-                          onChange={handleDraft("storeName")}
-                          placeholder="Store name"
-                        />
-                        <textarea
-                          value={draft.about}
-                          onChange={handleDraft("about")}
-                          placeholder="About your store"
-                          rows={3}
-                        />
+                            </>
+                          ) : null}
+                        </div>
+                        {isOwnerSeller && editMode ? (
+                          <div className="seller-store-brand-edit">
+                            <input
+                              type="text"
+                              value={draft.storeName}
+                              onChange={handleDraft("storeName")}
+                              placeholder="Store name"
+                            />
+                            <textarea
+                              value={draft.about}
+                              onChange={handleDraft("about")}
+                              placeholder="About your store"
+                              rows={3}
+                            />
+                          </div>
+                        ) : (
+                          <div className="seller-store-brand-copy">
+                            <h3>{sellerShopName}</h3>
+                            <p>{sellerAbout}</p>
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <div className="seller-store-brand-copy">
-                        <h3>{sellerShopName}</h3>
-                        <p>{sellerAbout}</p>
-                      </div>
-                    )}
-                  </div>
 
-                  <div className="seller-store-kpi-row">
-                    <div className="seller-store-kpi">
-                      <span>Location</span>
-                      <strong>{locationText}</strong>
+                      <div className="seller-store-kpi-row">
+                        <div className="seller-store-kpi">
+                          <span>Location</span>
+                          <strong>{locationText}</strong>
+                        </div>
+                        <div className="seller-store-kpi">
+                          <span>Joined</span>
+                          <strong>{joinedText}</strong>
+                        </div>
+                        <div className="seller-store-kpi">
+                          <span>All Products</span>
+                          <strong>{listedProducts}</strong>
+                        </div>
+                      </div>
                     </div>
-                    <div className="seller-store-kpi">
-                      <span>Joined</span>
-                      <strong>{joinedText}</strong>
-                    </div>
-                    <div className="seller-store-kpi">
-                      <span>All Products</span>
-                      <strong>{listedProducts}</strong>
-                    </div>
+                    {sellerId ? (
+                      <Link
+                        className="seller-store-hamper-btn"
+                        to={`/customize/seller/${sellerId}?mode=build`}
+                        aria-label="Build your own hamper"
+                      >
+                        <img
+                          className="hamper-btn-image"
+                          src="/images/hamper-btn.png"
+                          alt=""
+                          aria-hidden="true"
+                        />
+                        <span className="hamper-btn-text">Build your own hamper</span>
+                      </Link>
+                    ) : null}
                   </div>
 
                   {isOwnerSeller && editMode ? (

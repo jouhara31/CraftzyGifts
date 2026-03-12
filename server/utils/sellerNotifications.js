@@ -69,6 +69,27 @@ const createSellerNotification = async ({
   );
 };
 
+const createCustomerNotification = async ({
+  customerId,
+  type,
+  title,
+  message,
+  link = "",
+  entityType = "",
+  entityId = "",
+  key = "",
+}) =>
+  createSellerNotification({
+    sellerId: customerId,
+    type,
+    title,
+    message,
+    link,
+    entityType,
+    entityId,
+    key,
+  });
+
 const maybeCreateInventoryNotifications = async ({
   sellerId,
   product,
@@ -119,6 +140,7 @@ const maybeCreateInventoryNotifications = async ({
 module.exports = {
   LOW_STOCK_THRESHOLD,
   createSellerNotification,
+  createCustomerNotification,
   maybeCreateInventoryNotifications,
   normalizeNotification,
 };

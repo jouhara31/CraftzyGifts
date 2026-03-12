@@ -165,6 +165,10 @@ const readStoredUserRole = () => {
 export default function Customization() {
   const { id, sellerId: sellerIdParam } = useParams();
   const location = useLocation();
+  const isBuildOnly = useMemo(() => {
+    const mode = new URLSearchParams(location.search).get("mode");
+    return String(mode || "").trim().toLowerCase() === "build";
+  }, [location.search]);
   const [product, setProduct] = useState(null);
   const [existingProduct, setExistingProduct] = useState(null);
   const [catalogProductId, setCatalogProductId] = useState("");
@@ -174,7 +178,7 @@ export default function Customization() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [userRole, setUserRole] = useState(() => readStoredUserRole());
-  const [customizationMode, setCustomizationMode] = useState("");
+  const [customizationMode, setCustomizationMode] = useState(() => (isBuildOnly ? "build" : ""));
 
   const [existingCustomization, setExistingCustomization] = useState(
     getDefaultExistingCustomization()
@@ -209,6 +213,8 @@ export default function Customization() {
 
       try {
         const searchParams = new URLSearchParams(location.search);
+        const queryMode = String(searchParams.get("mode") || "").trim().toLowerCase();
+        const preferBuild = queryMode === "build";
         const queryProductId = String(searchParams.get("productId") || "").trim();
         const existingProductId = String(
           queryProductId || (!sellerIdParam ? id : "") || ""
@@ -261,6 +267,13 @@ export default function Customization() {
           getDefaultExistingCustomization(resolvedExistingProduct || catalogProduct)
         );
 
+        const sellerItems = getSellerCatalogItems(catalogProduct);
+        const hasSellerCatalog = sellerItems.length > 0;
+        if (preferBuild) {
+          setCustomizationMode("build");
+          setNotice(hasSellerCatalog ? "" : "Seller has not listed custom hamper items yet.");
+        }
+
         const cart = getCart();
         const savedCustomization =
           (existingProductId
@@ -270,11 +283,9 @@ export default function Customization() {
         if (!savedCustomization) return;
 
         const savedMode = inferSavedMode(savedCustomization);
-        if (savedMode) setCustomizationMode(savedMode);
+        if (savedMode && !preferBuild) setCustomizationMode(savedMode);
 
         if (savedMode === "build") {
-          const sellerItems = getSellerCatalogItems(catalogProduct);
-          const hasSellerCatalog = sellerItems.length > 0;
           const sellerBaseIds = new Set(
             sellerItems
               .filter((item) => item.type === "base")
@@ -305,7 +316,7 @@ export default function Customization() {
             return acc;
           }, {});
           setItemQuantities(restoredQuantities);
-        } else if (savedMode === "existing") {
+        } else if (savedMode === "existing" && !preferBuild) {
           const savedReferences = getReferenceImages(savedCustomization);
           const savedSelections = sanitizeExistingSelections(
             savedCustomization.selectedOptions
@@ -881,55 +892,78 @@ export default function Customization() {
 
       <div className="hamper-builder-layout">
         <div className="hamper-builder-main">
-          <section className="hamper-builder-block">
-            <h3 className="hamper-block-title">Choose customization type</h3>
-            <div className="hamper-mode-grid">
-              <button
-                type="button"
-                className={`hamper-mode-card ${
-                  customizationMode === "existing" ? "active" : ""
-                }`}
-                onClick={() => {
-                  setCustomizationMode("existing");
-                  setNotice("");
-                }}
-                disabled={isExistingUnavailable}
-              >
-                <strong>Modify existing hamper</strong>
-                <small>
-                  Adjust preset options such as gift box, chocolates, frame,
-                  perfume, and card.
-                </small>
-              </button>
-              <button
-                type="button"
-                className={`hamper-mode-card ${
-                  customizationMode === "build" ? "active" : ""
-                }`}
-                onClick={() => {
-                  setCustomizationMode("build");
-                  setNotice(
-                    hasSellerBuildOptions
-                      ? ""
-                      : "Seller has not listed custom hamper items yet."
-                  );
-                }}
-                disabled={isBuildDisabled}
-              >
-                <strong>Build your own hamper</strong>
-                <small>
-                  {hasSellerBuildOptions
-                    ? "Choose items listed by this seller and set quantity."
-                    : "Available only after seller lists custom hamper items."}
-                </small>
-              </button>
-            </div>
-            {!isModeChosen && (
-              <p className="hamper-mode-note">
-                Select one option to continue.
+          {!isBuildOnly ? (
+            <section className="hamper-builder-block">
+              <h3 className="hamper-block-title">Choose customization type</h3>
+              <div className="hamper-mode-grid">
+                <button
+                  type="button"
+                  className={`hamper-mode-card ${
+                    customizationMode === "existing" ? "active" : ""
+                  }`}
+                  onClick={() => {
+                    setCustomizationMode("existing");
+                    setNotice("");
+                  }}
+                  disabled={isExistingUnavailable}
+                >
+                  <strong>Modify existing hamper</strong>
+                  <small>
+                    Adjust preset options such as gift box, chocolates, frame,
+                    perfume, and card.
+                  </small>
+                </button>
+                <button
+                  type="button"
+                  className={`hamper-mode-card hamper-build-card ${
+                    customizationMode === "build" ? "active" : ""
+                  }`}
+                  onClick={() => {
+                    if (!hasSellerBuildOptions) {
+                      navigate(
+                        catalogSellerId ? `/store/${catalogSellerId}` : "/products"
+                      );
+                      return;
+                    }
+                    const targetSellerId = catalogSellerId || sellerIdParam;
+                    if (targetSellerId) {
+                      const params = new URLSearchParams();
+                      params.set("mode", "build");
+                      if (existingProductId) params.set("productId", existingProductId);
+                      navigate(`/customize/seller/${targetSellerId}?${params.toString()}`);
+                      return;
+                    }
+                    setCustomizationMode("build");
+                    setNotice("");
+                  }}
+                  disabled={isBuildDisabled}
+                >
+                  <span className="hamper-mode-thumb" aria-hidden="true">
+                    <img src="/images/hamper-btn.png" alt="" />
+                  </span>
+                  <strong>Build your own hamper</strong>
+                  <small>
+                    {hasSellerBuildOptions
+                      ? "Choose items listed by this seller and set quantity."
+                      : "Available only after seller lists custom hamper items."}
+                  </small>
+                </button>
+              </div>
+              {!isModeChosen && (
+                <p className="hamper-mode-note">
+                  Select one option to continue.
+                </p>
+              )}
+            </section>
+          ) : (
+            <section className="hamper-builder-block">
+              <h3 className="hamper-block-title">You can make your own hamper</h3>
+              <p className="field-hint">
+                Choose a base, add items, and personalize your gift. We will craft
+                it exactly as you want.
               </p>
-            )}
-          </section>
+            </section>
+          )}
 
           {customizationMode === "existing" && (
             <section className="hamper-builder-block">

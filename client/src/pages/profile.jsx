@@ -357,7 +357,12 @@ export default function Profile() {
   const roleLabel = ROLE_LABEL[role] || "Buyer";
   const sidebarSections = useMemo(() => buildSidebarSections(role), [role]);
   const isSellerProfileViewOnly = role === "seller";
+  const isCustomerProfile = role === "customer";
   const ordersPath = role === "seller" ? "/seller/orders" : "/orders";
+  const pageClassName =
+    role === "customer" ? "page profile-page customer-profile" : "page profile-page";
+  const profileImageActionLabel = isCustomerProfile ? "Save" : "Update";
+  const profileImageActionLoadingLabel = isCustomerProfile ? "Saving..." : "Updating...";
   const pickupAddressLabel = [
     profile?.pickupAddress?.line1,
     profile?.pickupAddress?.city,
@@ -736,7 +741,7 @@ export default function Profile() {
   };
 
   return (
-    <div className="page profile-page">
+    <div className={pageClassName}>
       <Header variant={headerVariant} />
       <div className="section-head">
         <div>
@@ -759,28 +764,72 @@ export default function Profile() {
         <div className="profile-layout">
           <aside className="profile-sidebar">
             <div className="profile-card">
-              <div className="profile-hello">
-                {role !== "seller" && (
+              {isCustomerProfile ? (
+                <div className="customer-profile-hero">
                   <div className="profile-avatar">
                     {showSidebarAvatarImage ? (
                       <img src={profile.profileImage} alt={profile.name || "Profile"} />
                     ) : (
                       sidebarAvatarInitial
                     )}
+                    <button
+                      className="customer-avatar-edit-btn"
+                      type="button"
+                      onClick={openProfileImageModal}
+                      aria-haspopup="dialog"
+                      aria-expanded={profileImageModalOpen}
+                      aria-label="Edit profile picture"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          d="M4 16.5V20h3.5l9.6-9.6-3.5-3.5L4 16.5z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M12.9 7.5l3.5 3.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
                   </div>
-                )}
-                <div>
-                  <p className="muted">{roleLabel} account</p>
-                  <p className="profile-name">{profile.name}</p>
-                  <p className="profile-role-meta">{profile.email}</p>
+                  <div className="customer-profile-copy">
+                    <p className="muted">{roleLabel} account</p>
+                    <p className="profile-name">{profile.name}</p>
+                  </div>
                 </div>
-              </div>
-              <div className="profile-role-badges">
-                <span className="chip">{roleLabel}</span>
-                {role === "seller" && (
-                  <span className="chip">Status: {profile.sellerStatus || "pending"}</span>
-                )}
-              </div>
+              ) : (
+                <>
+                  <div className="profile-hello">
+                    {role !== "seller" && (
+                      <div className="profile-avatar">
+                        {showSidebarAvatarImage ? (
+                          <img src={profile.profileImage} alt={profile.name || "Profile"} />
+                        ) : (
+                          sidebarAvatarInitial
+                        )}
+                      </div>
+                    )}
+                    <div>
+                      <p className="muted">{roleLabel} account</p>
+                      <p className="profile-name">{profile.name}</p>
+                      <p className="profile-role-meta">{profile.email}</p>
+                    </div>
+                  </div>
+                  <div className="profile-role-badges">
+                    <span className="chip">{roleLabel}</span>
+                    {role === "seller" && (
+                      <span className="chip">Status: {profile.sellerStatus || "pending"}</span>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
 
             {sidebarSections.map((section) => (
@@ -1065,7 +1114,7 @@ export default function Profile() {
                 onClick={() => updateProfileImage()}
                 disabled={imageUpdating}
               >
-                {imageUpdating ? "Updating..." : "Update"}
+                {imageUpdating ? profileImageActionLoadingLabel : profileImageActionLabel}
               </button>
             </div>
           </div>

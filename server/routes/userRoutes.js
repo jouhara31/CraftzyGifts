@@ -17,8 +17,8 @@ router.patch("/me", auth, updateMe);
 router.patch("/me/password", auth, changeMyPassword);
 router.delete("/me", auth, deleteMe);
 router.get("/me/contact-requests", auth, requireApprovedSeller, listMyContactRequests);
-router.get("/me/notifications", auth, requireApprovedSeller, listMyNotifications);
-router.patch("/me/notifications/read", auth, requireApprovedSeller, markMyNotificationsRead);
+router.get("/me/notifications", auth, listMyNotifications);
+router.patch("/me/notifications/read", auth, markMyNotificationsRead);
 router.post("/sellers/:sellerId/contact", optionalAuth, submitSellerContactRequest);
 
 module.exports = router;

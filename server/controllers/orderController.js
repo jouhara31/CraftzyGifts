@@ -3,6 +3,7 @@ const Order = require("../models/Order");
 const Product = require("../models/Product");
 const {
   createSellerNotification,
+  createCustomerNotification,
   maybeCreateInventoryNotifications,
 } = require("../utils/sellerNotifications");
 
@@ -93,6 +94,90 @@ const getOrderShortCode = (orderId) =>
     .trim()
     .slice(-8)
     .toUpperCase() || "ORDER";
+
+const buildCustomerOrderNotification = (order, details = {}) => ({
+  customerId: order?.customer,
+  type: String(details.type || "").trim(),
+  title: String(details.title || "").trim(),
+  message: String(details.message || "").trim(),
+  link: "/orders",
+  entityType: "order",
+  entityId: String(order?._id || "").trim(),
+  key: String(details.key || "").trim(),
+});
+
+const notifyCustomerForOrder = async (order, details) => {
+  if (!order || !details) return null;
+  return createCustomerNotification(buildCustomerOrderNotification(order, details));
+};
+
+const buildCustomerStatusNotification = (order, status) => {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  const orderCode = getOrderShortCode(order?._id);
+  const orderKey = String(order?._id || "").trim() || "order";
+  if (!normalizedStatus || !orderCode) return null;
+
+  switch (normalizedStatus) {
+    case "processing":
+      return {
+        type: "order_processing",
+        title: "Order is being prepared",
+        message: `Order #${orderCode} is now being prepared.`,
+        key: `${orderKey}_processing`,
+      };
+    case "shipped":
+      return {
+        type: "order_shipped",
+        title: "Order shipped",
+        message: `Order #${orderCode} is on the way.`,
+        key: `${orderKey}_shipped`,
+      };
+    case "delivered":
+      return {
+        type: "order_delivered",
+        title: "Order delivered",
+        message: `Order #${orderCode} was delivered.`,
+        key: `${orderKey}_delivered`,
+      };
+    case "cancelled":
+      return {
+        type: "order_cancelled",
+        title: "Order cancelled",
+        message: `Order #${orderCode} was cancelled.`,
+        key: `${orderKey}_cancelled`,
+      };
+    case "return_requested":
+      return {
+        type: "return_requested",
+        title: "Return requested",
+        message: `Return requested for Order #${orderCode}.`,
+        key: `${orderKey}_return_requested`,
+      };
+    case "return_rejected":
+      return {
+        type: "return_rejected",
+        title: "Return rejected",
+        message: `Return request for Order #${orderCode} was rejected.`,
+        key: `${orderKey}_return_rejected`,
+      };
+    case "refund_initiated":
+      return {
+        type: "refund_initiated",
+        title: "Refund initiated",
+        message: `Refund initiated for Order #${orderCode}.`,
+        key: `${orderKey}_refund_initiated`,
+      };
+    case "refunded":
+      return {
+        type: "refunded",
+        title: "Refund completed",
+        message: `Refund completed for Order #${orderCode}.`,
+        key: `${orderKey}_refunded`,
+      };
+    default:
+      return null;
+  }
+};
 
 const buildStockError = (message, details = {}, status = 409) => {
   const error = new Error(message);
@@ -717,6 +802,31 @@ const processPaymentWebhook = async (payload, signature) => {
       entityId: String(order._id || "").trim(),
     });
   }
+  const orderCode = getOrderShortCode(order._id);
+  if (event === "payment.succeeded") {
+    await notifyCustomerForOrder(order, {
+      type: "payment_received",
+      title: "Payment received",
+      message: `Payment received for Order #${orderCode}.`,
+      key: `${String(order._id || "").trim()}_payment_received`,
+    });
+  }
+  if (event === "payment.failed") {
+    await notifyCustomerForOrder(order, {
+      type: "payment_failed",
+      title: "Payment failed",
+      message: `Payment failed for Order #${orderCode}. Please try again.`,
+      key: `${String(order._id || "").trim()}_payment_failed`,
+    });
+  }
+  if (event === "payment.refunded") {
+    await notifyCustomerForOrder(order, {
+      type: "refunded",
+      title: "Refund completed",
+      message: `Refund completed for Order #${orderCode}.`,
+      key: `${String(order._id || "").trim()}_refunded`,
+    });
+  }
   return populateOrderForCustomer(order);
 };
 
@@ -870,6 +980,22 @@ exports.createOrder = async (req, res) => {
         entityId: String(order._id || "").trim(),
       });
     }
+    const orderCode = getOrderShortCode(order._id);
+    if (onlineMode) {
+      await notifyCustomerForOrder(order, {
+        type: "payment_pending",
+        title: "Payment pending",
+        message: `Payment pending for Order #${orderCode}. Complete payment to confirm.`,
+        key: `${String(order._id || "").trim()}_payment_pending`,
+      });
+    } else {
+      await notifyCustomerForOrder(order, {
+        type: "order_placed",
+        title: "Order placed",
+        message: `Order #${orderCode} has been placed successfully.`,
+        key: `${String(order._id || "").trim()}_placed`,
+      });
+    }
     await order.populate("product");
     res.status(201).json(order);
   } catch (error) {
@@ -1004,6 +1130,13 @@ exports.requestReturn = async (req, res) => {
       entityType: "order",
       entityId: String(order._id || "").trim(),
     });
+    const customerReturnNotification = buildCustomerStatusNotification(
+      order,
+      "return_requested"
+    );
+    if (customerReturnNotification) {
+      await notifyCustomerForOrder(order, customerReturnNotification);
+    }
     res.json(order);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -1082,6 +1215,10 @@ exports.reviewReturn = async (req, res) => {
     if (decision === "reject") {
       order.status = "return_rejected";
       await order.save();
+      const customerNotification = buildCustomerStatusNotification(order, order.status);
+      if (customerNotification) {
+        await notifyCustomerForOrder(order, customerNotification);
+      }
       return res.json(order);
     }
 
@@ -1096,6 +1233,10 @@ exports.reviewReturn = async (req, res) => {
     await restockInventory(order);
     await order.save();
     await order.populate("product");
+    const customerNotification = buildCustomerStatusNotification(order, order.status);
+    if (customerNotification) {
+      await notifyCustomerForOrder(order, customerNotification);
+    }
     return res.json(order);
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -1152,6 +1293,10 @@ exports.updateOrderStatus = async (req, res) => {
     }
 
     await order.save();
+    const customerNotification = buildCustomerStatusNotification(order, status);
+    if (customerNotification) {
+      await notifyCustomerForOrder(order, customerNotification);
+    }
     await populateOrderForCustomer(order);
     res.json(order);
   } catch (error) {

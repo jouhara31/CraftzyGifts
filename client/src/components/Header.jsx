@@ -174,8 +174,15 @@ const HeaderUtilityIcon = ({ kind }) => {
   if (kind === "bell") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 4a4 4 0 0 0-4 4v2.2c0 .9-.3 1.8-.9 2.5L6 14.2V16h12v-1.8l-1.1-1.5a4.2 4.2 0 0 1-.9-2.5V8a4 4 0 0 0-4-4Z" />
-        <path d="M9.5 18a2.5 2.5 0 0 0 5 0" />
+        <path
+          d="M12 3.8c-2.9 0-5.2 2.3-5.2 5.2v2.6c0 1.3-.5 2.5-1.4 3.4l-.6.6h14.4l-.6-.6c-.9-.9-1.4-2.1-1.4-3.4V9c0-2.9-2.3-5.2-5.2-5.2Z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="12" cy="17.5" r="1.15" fill="none" stroke="currentColor" strokeWidth="1.6" />
       </svg>
     );
   }
@@ -275,8 +282,8 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const location = useLocation();
   const headerRef = useRef(null);
   const accountRef = useRef(null);
-  const notificationRef = useRef(null);
   const notificationButtonRef = useRef(null);
+  const notificationMobileButtonRef = useRef(null);
   const notificationDropdownRef = useRef(null);
   const categoriesMenuRef = useRef(null);
   const categoryLinksRef = useRef(null);
@@ -401,8 +408,9 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   useEffect(() => {
     if (!notificationOpen) return undefined;
     const handleOutsideClick = (event) => {
-      const insideTrigger =
-        notificationRef.current && notificationRef.current.contains(event.target);
+      const insideTrigger = [notificationButtonRef.current, notificationMobileButtonRef.current]
+        .filter(Boolean)
+        .some((node) => node.contains(event.target));
       const insideDropdown =
         notificationDropdownRef.current &&
         notificationDropdownRef.current.contains(event.target);
@@ -423,9 +431,15 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
 
   const closeAccount = () => setAccountOpen(false);
 
+  const getNotificationAnchor = () => {
+    const candidates = [notificationButtonRef.current, notificationMobileButtonRef.current];
+    const visibleNode = candidates.find((node) => node && node.offsetParent !== null);
+    return visibleNode || candidates.find(Boolean);
+  };
+
   const updateNotificationMenuPosition = () => {
     if (typeof window === "undefined") return;
-    const anchor = notificationButtonRef.current || notificationRef.current;
+    const anchor = getNotificationAnchor();
     if (!anchor) return;
 
     const rect = anchor.getBoundingClientRect();
@@ -541,6 +555,10 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     { label: "About Us", href: "/#about-us" },
     { label: "Contact", href: "/#support" },
   ];
+  const isCustomerUser = Boolean(user) && (!user.role || user.role === "customer");
+  const showCustomerNotification =
+    isCustomerUser && !isSellerNav && !isAdminNav && !isAuthNav;
+  const showNotificationMenu = isSellerNav || showCustomerNotification;
   const customerBottomNavItems = [
     { label: "Home", to: "/", icon: "home", active: location.pathname === "/" },
     {
@@ -619,7 +637,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   };
 
   useEffect(() => {
-    if (!isSellerNav || !user) {
+    if (!showNotificationMenu || !user) {
       syncNotificationState([], 0);
       return undefined;
     }
@@ -627,8 +645,9 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     let active = true;
     let intervalId = null;
     let hasLoadedOnce = false;
+    const eventName = isSellerNav ? "seller:notifications-updated" : "customer:notifications-updated";
 
-    const fetchSellerNotifications = async () => {
+    const fetchNotifications = async () => {
       const token = localStorage.getItem("token");
       if (!token) return;
 
@@ -664,18 +683,18 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       }
     };
 
-    fetchSellerNotifications();
-    intervalId = window.setInterval(fetchSellerNotifications, 60000);
-    window.addEventListener("seller:notifications-updated", fetchSellerNotifications);
+    fetchNotifications();
+    intervalId = window.setInterval(fetchNotifications, 60000);
+    window.addEventListener(eventName, fetchNotifications);
 
     return () => {
       active = false;
       if (intervalId) window.clearInterval(intervalId);
-      window.removeEventListener("seller:notifications-updated", fetchSellerNotifications);
+      window.removeEventListener(eventName, fetchNotifications);
     };
-  }, [isSellerNav, navigate, sellerId, user]);
+  }, [isSellerNav, navigate, showNotificationMenu, user]);
 
-  const markSellerNotificationsRead = async ({ ids = [], all = false } = {}) => {
+  const markNotificationsRead = async ({ ids = [], all = false } = {}) => {
     const token = localStorage.getItem("token");
     if (!token) return null;
 
@@ -702,21 +721,23 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
         )
       );
       setNotificationUnreadCount(Math.max(0, Number(data?.unreadCount || 0)));
-      window.dispatchEvent(new Event("seller:notifications-updated"));
+      window.dispatchEvent(
+        new Event(isSellerNav ? "seller:notifications-updated" : "customer:notifications-updated")
+      );
       return data;
     } catch {
       return null;
     }
   };
 
-  const handleOpenSellerNotification = async (item) => {
+  const handleOpenNotification = async (item) => {
     const itemId = String(item?.id || "").trim();
     const nextLink = String(item?.link || "").trim();
     if (itemId && item?.isRead !== true) {
-      await markSellerNotificationsRead({ ids: [itemId] });
+      await markNotificationsRead({ ids: [itemId] });
     }
     setNotificationOpen(false);
-    navigate(nextLink || "/seller/dashboard");
+    navigate(nextLink || (isSellerNav ? "/seller/dashboard" : "/orders"));
   };
 
   useEffect(() => {
@@ -734,12 +755,14 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     };
   }, [notificationOpen]);
 
-  const sellerNotificationDropdown =
-    notificationOpen && typeof document !== "undefined"
+  const notificationDropdown =
+    showNotificationMenu && notificationOpen && typeof document !== "undefined"
       ? createPortal(
           <div
             ref={notificationDropdownRef}
-            className="account-dropdown seller-notification-dropdown"
+            className={`account-dropdown seller-notification-dropdown ${
+              isSellerNav ? "" : "customer-notification-dropdown"
+            }`}
             role="menu"
             style={
               notificationMenuStyle || {
@@ -756,7 +779,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               <button
                 className="seller-notification-mark-btn"
                 type="button"
-                onClick={() => markSellerNotificationsRead({ all: true })}
+                onClick={() => markNotificationsRead({ all: true })}
                 disabled={notificationUnreadCount <= 0}
               >
                 Mark all read
@@ -768,11 +791,11 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                   key={item.id}
                   className={`seller-notification-item ${item.isRead ? "" : "is-unread"}`}
                   type="button"
-                  onClick={() => handleOpenSellerNotification(item)}
+                  onClick={() => handleOpenNotification(item)}
                 >
                   <span className="seller-notification-item-copy">
                     <strong>{item.title || "Notification"}</strong>
-                    <span>{item.message || "Store update available."}</span>
+                    <span>{item.message || "Update available."}</span>
                   </span>
                   <span className="seller-notification-item-meta">
                     {!item.isRead ? <em>New</em> : null}
@@ -792,10 +815,10 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               type="button"
               onClick={() => {
                 setNotificationOpen(false);
-                navigate("/seller/dashboard");
+                navigate(isSellerNav ? "/seller/dashboard" : "/orders");
               }}
             >
-              View all in dashboard
+              {isSellerNav ? "View all in dashboard" : "View all orders"}
             </button>
           </div>,
           document.body
@@ -1012,7 +1035,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                 <HeaderUtilityIcon kind={mobileMenuOpen ? "close" : "menu"} />
               </button>
             </div>
-            <div className="seller-notification-menu" ref={notificationRef}>
+            <div className="seller-notification-menu">
               <button
                 ref={notificationButtonRef}
                 className={`icon-btn seller-notification-btn ${notificationOpen ? "active" : ""}`}
@@ -1110,7 +1133,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               </div>
             </div>
           </div>
-          {sellerNotificationDropdown}
+          {notificationDropdown}
 
         <nav className="nav-links">
           <Link
@@ -1400,7 +1423,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               </div>
             )}
 
-            <button
+          <button
               className={`icon-btn mobile-header-btn ${mobileSearchOpen ? "active" : ""}`}
               type="button"
               aria-label={mobileSearchOpen ? "Close search" : "Open search"}
@@ -1409,6 +1432,28 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
             >
               <HeaderUtilityIcon kind={mobileSearchOpen ? "close" : "search"} />
             </button>
+
+            {showCustomerNotification && (
+              <button
+                ref={notificationButtonRef}
+                className={`icon-btn header-notification-btn ${notificationOpen ? "active" : ""}`}
+                type="button"
+                aria-label="Notifications"
+                aria-haspopup="menu"
+                aria-expanded={notificationOpen}
+                onClick={() => {
+                  if (!notificationOpen) {
+                    updateNotificationMenuPosition();
+                  }
+                  setNotificationOpen((prev) => !prev);
+                }}
+              >
+                <HeaderUtilityIcon kind="bell" />
+                {notificationUnreadCount > 0 && (
+                  <span className="icon-badge">{notificationUnreadCount}</span>
+                )}
+              </button>
+            )}
 
             <Link className="icon-btn" to={toAuthPath("/wishlist")} aria-label="Wishlist">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1470,6 +1515,27 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
             >
               <HeaderUtilityIcon kind={mobileSearchOpen ? "close" : "search"} />
             </button>
+            {showCustomerNotification && (
+              <button
+                ref={notificationMobileButtonRef}
+                className={`icon-btn header-notification-btn ${notificationOpen ? "active" : ""}`}
+                type="button"
+                aria-label="Notifications"
+                aria-haspopup="menu"
+                aria-expanded={notificationOpen}
+                onClick={() => {
+                  if (!notificationOpen) {
+                    updateNotificationMenuPosition();
+                  }
+                  setNotificationOpen((prev) => !prev);
+                }}
+              >
+                <HeaderUtilityIcon kind="bell" />
+                {notificationUnreadCount > 0 && (
+                  <span className="icon-badge">{notificationUnreadCount}</span>
+                )}
+              </button>
+            )}
             <Link className="icon-btn" to={toAuthPath("/cart")} aria-label="Cart">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -1725,6 +1791,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
         </nav>
       )}
       </header>
+      {notificationDropdown}
       {customerBottomNavPortal}
     </>
   );

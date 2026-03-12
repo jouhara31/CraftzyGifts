@@ -58,6 +58,17 @@ const parseBoolean = (value, fallback = false) => {
   return fallback;
 };
 
+const ensureApprovedSeller = async (userId) => {
+  const user = await User.findById(userId).select("role sellerStatus");
+  if (!user || user.role !== "seller") {
+    return { ok: false, status: 403, message: "Forbidden" };
+  }
+  if (user.sellerStatus !== "approved") {
+    return { ok: false, status: 403, message: "Seller account is not approved yet." };
+  }
+  return { ok: true };
+};
+
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
@@ -268,9 +279,17 @@ exports.submitSellerContactRequest = async (req, res) => {
 
 exports.listMyContactRequests = async (req, res) => {
   try {
-    const sellerId = String(req.user?.id || "").trim();
-    if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
-      return res.status(400).json({ message: "Seller id is required." });
+    const userId = String(req.user?.id || "").trim();
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "User id is required." });
+    }
+    if (req.user?.role === "seller") {
+      const approval = await ensureApprovedSeller(userId);
+      if (!approval.ok) {
+        return res.status(approval.status).json({ message: approval.message });
+      }
+    } else if (req.user?.role !== "customer") {
+      return res.status(403).json({ message: "Forbidden" });
     }
 
     const limit = parsePositiveInt(req.query?.limit, CONTACT_FETCH_LIMIT, 20);
@@ -299,21 +318,29 @@ exports.listMyContactRequests = async (req, res) => {
 
 exports.listMyNotifications = async (req, res) => {
   try {
-    const sellerId = String(req.user?.id || "").trim();
-    if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
-      return res.status(400).json({ message: "Seller id is required." });
+    const userId = String(req.user?.id || "").trim();
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "User id is required." });
+    }
+    if (req.user?.role === "seller") {
+      const approval = await ensureApprovedSeller(userId);
+      if (!approval.ok) {
+        return res.status(approval.status).json({ message: approval.message });
+      }
+    } else if (req.user?.role !== "customer") {
+      return res.status(403).json({ message: "Forbidden" });
     }
 
     const limit = parsePositiveInt(req.query?.limit, NOTIFICATION_FETCH_LIMIT, 40);
     const unreadOnly = parseBoolean(req.query?.unreadOnly, false);
     const filter = {
-      seller: sellerId,
+      seller: userId,
       ...(unreadOnly ? { isRead: false } : {}),
     };
 
     const [items, unreadCount] = await Promise.all([
       Notification.find(filter).sort({ createdAt: -1 }).limit(limit).lean(),
-      Notification.countDocuments({ seller: sellerId, isRead: false }),
+      Notification.countDocuments({ seller: userId, isRead: false }),
     ]);
 
     return res.json({
@@ -347,8 +374,8 @@ exports.markMyNotificationsRead = async (req, res) => {
 
     const readAt = new Date();
     const filter = markAll
-      ? { seller: sellerId, isRead: false }
-      : { seller: sellerId, _id: { $in: ids }, isRead: false };
+      ? { seller: userId, isRead: false }
+      : { seller: userId, _id: { $in: ids }, isRead: false };
 
     await Notification.updateMany(filter, {
       $set: {
@@ -358,7 +385,7 @@ exports.markMyNotificationsRead = async (req, res) => {
     });
 
     const unreadCount = await Notification.countDocuments({
-      seller: sellerId,
+      seller: userId,
       isRead: false,
     });
 
