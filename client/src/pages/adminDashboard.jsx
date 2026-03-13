@@ -73,6 +73,30 @@ export default function AdminDashboard() {
   };
 
   const cards = overview?.cards || {};
+  const categoriesPanel = (
+    <div className="seller-panel admin-categories-panel">
+      <div className="card-head">
+        <h3 className="card-title">Categories</h3>
+        <button
+          className="btn ghost"
+          type="button"
+          onClick={() => navigate("/admin/categories")}
+        >
+          Manage categories
+        </button>
+      </div>
+      <div className="seller-meta">
+        {(overview?.categories || []).map((category) => (
+          <span key={category} className="seller-chip">
+            {category}
+          </span>
+        ))}
+      </div>
+      {!error && (overview?.categories || []).length === 0 && (
+        <p className="field-hint">No categories found.</p>
+      )}
+    </div>
+  );
 
   return (
     <AdminSidebarLayout
@@ -116,6 +140,8 @@ export default function AdminDashboard() {
             </div>
           </div>
         </div>
+
+        {categoriesPanel}
 
         <div className="seller-overview">
           <div className="seller-panel admin-pending-panel">
@@ -185,29 +211,6 @@ export default function AdminDashboard() {
                 <p className="field-hint">No orders yet.</p>
               )}
             </div>
-          </div>
-
-          <div className="seller-panel admin-categories-panel">
-            <div className="card-head">
-              <h3 className="card-title">Categories</h3>
-              <button
-                className="btn ghost"
-                type="button"
-                onClick={() => navigate("/admin/categories")}
-              >
-                Manage categories
-              </button>
-            </div>
-            <div className="seller-meta">
-              {(overview?.categories || []).map((category) => (
-                <span key={category} className="seller-chip">
-                  {category}
-                </span>
-              ))}
-            </div>
-            {!error && (overview?.categories || []).length === 0 && (
-              <p className="field-hint">No categories found.</p>
-            )}
           </div>
         </div>
       </div>

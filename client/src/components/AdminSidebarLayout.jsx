@@ -104,7 +104,13 @@ function AdminNavIcon({ path }) {
   );
 }
 
-export default function AdminSidebarLayout({ title, description, actions, children }) {
+export default function AdminSidebarLayout({
+  title,
+  description,
+  actions,
+  titleActions,
+  children,
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -215,8 +221,13 @@ export default function AdminSidebarLayout({ title, description, actions, childr
 
         <section className="admin-shell-content">
           <div className="section-head admin-shell-head">
-            <div>
-              <h2>{title}</h2>
+            <div className="admin-shell-title">
+              <div className="admin-shell-title-row">
+                <h2>{title}</h2>
+                {titleActions && (
+                  <div className="admin-shell-title-actions">{titleActions}</div>
+                )}
+              </div>
               {description && <p>{description}</p>}
             </div>
             {actions && <div className="seller-toolbar">{actions}</div>}
