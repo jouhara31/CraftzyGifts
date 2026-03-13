@@ -949,26 +949,26 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
         <nav className="auth-header-nav" aria-label="Auth actions">
           <Link className="auth-header-link with-icon" to="/">
             <HeaderMenuIcon kind="back" />
-            Back to Home
+            <span className="auth-header-label">Back to Home</span>
           </Link>
           {isRegisterRoute ? (
             <>
               <Link className="auth-header-link with-icon" to="/login">
                 <HeaderMenuIcon kind="login" />
-                Login
+                <span className="auth-header-label">Login</span>
               </Link>
               <Link
                 className={`auth-header-link with-icon ${sellerIntent ? "active" : ""}`}
                 to="/register?seller=1"
               >
                 <HeaderMenuIcon kind="seller" />
-                Become a Seller
+                <span className="auth-header-label">Become a Seller</span>
               </Link>
             </>
           ) : (
             <Link className="auth-header-link with-icon" to="/register">
               <HeaderMenuIcon kind="register" />
-              Create Account
+              <span className="auth-header-label">Create Account</span>
             </Link>
           )}
         </nav>
