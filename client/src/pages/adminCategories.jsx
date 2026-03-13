@@ -518,7 +518,11 @@ export default function AdminCategories() {
       title="Categories"
       description="Control the category master used by seller product forms while still allowing custom additions."
       titleActions={
-        <button className="admin-text-action" type="button" onClick={loadCategories}>
+        <button
+          className="admin-text-action admin-category-refresh-mobile"
+          type="button"
+          onClick={loadCategories}
+        >
           Refresh
         </button>
       }
@@ -533,6 +537,13 @@ export default function AdminCategories() {
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
+          <button
+            className="admin-text-action admin-category-refresh-desktop"
+            type="button"
+            onClick={loadCategories}
+          >
+            Refresh
+          </button>
         </div>
       }
     >

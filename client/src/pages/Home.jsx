@@ -72,19 +72,19 @@ export default function Home() {
   const features = [
     {
       title: "Curated Craft Collections",
-      text: "Handpicked gift collections from trusted artisans for birthdays, weddings, festivals, and meaningful moments.",
+      text: "Handpicked gifts for birthdays, weddings, festivals, and more.",
       image: "/images/about/handcraft.png",
       path: "/products",
     },
     {
       title: "Custom Hampers",
-      text: "Build personalized hampers with selected products, custom notes, and thoughtful add-ons made for your recipient.",
+      text: "Build a hamper with selected items, notes, and add‑ons.",
       image: "/images/about/customhamper.png",
       path: "/products?custom=1",
     },
     {
       title: "Secure Checkout",
-      text: "Enjoy safe payments, clear order tracking, and dependable support from checkout to delivery.",
+      text: "Safe payments, clear tracking, and dependable support.",
       image: "/images/about/secure.png",
       path: "/checkout",
     },

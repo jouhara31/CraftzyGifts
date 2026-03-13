@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
+import logoPng from "../assets/logo.png";
 import { getWishlist } from "../utils/wishlist";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
 
 const ROLE_LABEL = {
-  customer: "Buyer",
+  customer: "Customer",
   seller: "Seller",
   admin: "Admin",
 };
@@ -28,6 +29,7 @@ const formatJoinedDate = (value) => {
   if (Number.isNaN(date.getTime())) return "Not available";
   return date.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 };
+
 
 const loadImageFromSource = (source) =>
   new Promise((resolve, reject) => {
@@ -240,11 +242,108 @@ const buildSidebarSections = (role) => {
     {
       title: "Account",
       items: [
-        { label: "Profile Information", active: true },
-        { label: "Manage Addresses", path: "/checkout" },
+        { label: "Profile Information", path: "/profile-info" },
+        { label: "Manage Addresses", path: "/manage-addresses" },
       ],
     },
   ];
+};
+
+const ProfileMenuIcon = ({ name }) => {
+  const key = String(name || "").toLowerCase();
+
+  if (key.includes("wishlist") || key.includes("favour") || key.includes("favorite")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 20s-7-4.7-7-10a4.2 4.2 0 0 1 7-2.9A4.2 4.2 0 0 1 19 10c0 5.3-7 10-7 10Z" />
+      </svg>
+    );
+  }
+
+  if (key.includes("order")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 6.5h14v12H5z" />
+        <path d="M8 4.5h8" />
+        <path d="M8.5 10.5h7M8.5 14h5" />
+      </svg>
+    );
+  }
+
+  if (key.includes("cart")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="9" cy="19" r="1.7" />
+        <circle cx="17" cy="19" r="1.7" />
+        <path d="M3 5h2l2.2 9.2a1 1 0 0 0 1 .8h8.8a1 1 0 0 0 1-.8L20 8H7" />
+      </svg>
+    );
+  }
+
+  if (key.includes("address") || key.includes("location")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 21s7-7.4 7-12a7 7 0 0 0-14 0c0 4.6 7 12 7 12Z" />
+        <circle cx="12" cy="9" r="2.6" />
+      </svg>
+    );
+  }
+
+  if (key.includes("download")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3v11" />
+        <path d="M8 10l4 4 4-4" />
+        <path d="M4.5 20.5h15" />
+      </svg>
+    );
+  }
+
+  if (key.includes("language")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3.5 12h17" />
+        <path d="M12 3.5a14 14 0 0 1 0 17" />
+        <path d="M12 3.5a14 14 0 0 0 0 17" />
+      </svg>
+    );
+  }
+
+  if (key.includes("subscription") || key.includes("payment")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3.5" y="6" width="17" height="12" rx="2.4" />
+        <path d="M3.5 10h17" />
+        <path d="M7.5 15h4" />
+      </svg>
+    );
+  }
+
+  if (key.includes("profile") || key.includes("account")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="8" r="3.2" />
+        <path d="M5 20a7 7 0 0 1 14 0" />
+      </svg>
+    );
+  }
+
+  if (key.includes("logout") || key.includes("sign out")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M10 6h8v12h-8" />
+        <path d="M6 12h10" />
+        <path d="M10 8l-4 4 4 4" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="4.2" />
+    </svg>
+  );
 };
 
 const fetchRoleOverview = async (role, token) => {
@@ -329,7 +428,7 @@ const fetchRoleOverview = async (role, token) => {
       { label: "Delivered", value: String(delivered) },
       { label: "Wishlist items", value: String(getWishlist().length) },
     ],
-    rowsTitle: "Recent buyer orders",
+    rowsTitle: "My Orders",
     rows: orders.slice(0, 5).map((order) => ({
       key: order._id?.slice(-8)?.toUpperCase() || "Order",
       value: `${order.status} • ${formatMoney(order.total)}`,
@@ -354,7 +453,7 @@ export default function Profile() {
   const role = profile?.role || "customer";
   const headerVariant =
     role === "seller" ? "seller" : role === "admin" ? "admin" : undefined;
-  const roleLabel = ROLE_LABEL[role] || "Buyer";
+  const roleLabel = ROLE_LABEL[role] || "Customer";
   const sidebarSections = useMemo(() => buildSidebarSections(role), [role]);
   const isSellerProfileViewOnly = role === "seller";
   const isCustomerProfile = role === "customer";
@@ -743,6 +842,23 @@ export default function Profile() {
   return (
     <div className={pageClassName}>
       <Header variant={headerVariant} />
+      {isCustomerProfile && (
+        <div className="profile-topbar">
+          <div className="profile-topbar-brand">
+            <img className="brand-logo-head" src={logoPng} alt="CraftzyGifts" />
+            <div className="profile-topbar-copy">
+              <span className="brand-head-text">CraftzyGifts</span>
+              <span className="profile-topbar-sub">My Profile</span>
+            </div>
+          </div>
+          <Link className="profile-topbar-settings" to="/settings" aria-label="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.2" />
+              <path d="M19.5 13.3v-2.6l-1.9-.5a5.9 5.9 0 0 0-.5-1.3l1-1.7-1.8-1.8-1.7 1a5.9 5.9 0 0 0-1.3-.5l-.5-1.9h-2.6l-.5 1.9a5.9 5.9 0 0 0-1.3.5l-1.7-1-1.8 1.8 1 1.7a5.9 5.9 0 0 0-.5 1.3l-1.9.5v2.6l1.9.5a5.9 5.9 0 0 0 .5 1.3l-1 1.7 1.8 1.8 1.7-1a5.9 5.9 0 0 0 1.3.5l.5 1.9h2.6l.5-1.9a5.9 5.9 0 0 0 1.3-.5l1.7 1 1.8-1.8-1-1.7a5.9 5.9 0 0 0 .5-1.3z" />
+            </svg>
+          </Link>
+        </div>
+      )}
       <div className="section-head">
         <div>
           <h2>{isSellerProfileViewOnly ? "Seller Profile" : "My Account"}</h2>
@@ -763,7 +879,7 @@ export default function Profile() {
       {profile && (
         <div className="profile-layout">
           <aside className="profile-sidebar">
-            <div className="profile-card">
+            <div className={`profile-card${isCustomerProfile ? " profile-hero-card" : ""}`}>
               {isCustomerProfile ? (
                 <div className="customer-profile-hero">
                   <div className="profile-avatar">
@@ -781,27 +897,41 @@ export default function Profile() {
                       aria-label="Edit profile picture"
                     >
                       <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect
+                          x="3.5"
+                          y="6.5"
+                          width="17"
+                          height="13"
+                          rx="2.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                        />
                         <path
-                          d="M4 16.5V20h3.5l9.6-9.6-3.5-3.5L4 16.5z"
+                          d="M8 6.5l1.6-2h4.8l1.6 2"
                           fill="none"
                           stroke="currentColor"
                           strokeWidth="1.7"
                           strokeLinecap="round"
                           strokeLinejoin="round"
                         />
-                        <path
-                          d="M12.9 7.5l3.5 3.5"
+                        <circle
+                          cx="12"
+                          cy="13"
+                          r="3.2"
                           fill="none"
                           stroke="currentColor"
                           strokeWidth="1.7"
-                          strokeLinecap="round"
                         />
                       </svg>
                     </button>
                   </div>
                   <div className="customer-profile-copy">
-                    <p className="muted">{roleLabel} account</p>
                     <p className="profile-name">{profile.name}</p>
+                    <p className="profile-role-meta">{profile.email}</p>
+                    <Link className="btn primary profile-edit-btn" to="/edit-profile">
+                      Edit Profile
+                    </Link>
                   </div>
                 </div>
               ) : (
@@ -837,21 +967,36 @@ export default function Profile() {
                 <div className="profile-menu">
                   <p className="profile-menu-title">{section.title}</p>
                   {section.items.map((item) => {
+                    const visibilityClass = item.mobileOnly
+                      ? "mobile-only"
+                      : item.desktopOnly
+                        ? "desktop-only"
+                        : "";
                     if (item.path) {
                       return (
-                        <Link key={item.label} className="profile-link" to={item.path}>
-                          {item.label}
+                        <Link
+                          key={item.key || item.label}
+                          className={`profile-link ${visibilityClass}`.trim()}
+                          to={item.path}
+                        >
+                          <span className="profile-link-icon" aria-hidden="true">
+                            <ProfileMenuIcon name={item.label} />
+                          </span>
+                          <span className="profile-link-text">{item.label}</span>
                         </Link>
                       );
                     }
                     return (
                       <span
-                        key={item.label}
-                        className={`profile-link ${item.active ? "active" : ""} ${
+                        key={item.key || item.label}
+                        className={`profile-link ${visibilityClass} ${item.active ? "active" : ""} ${
                           item.muted ? "muted" : ""
-                        }`}
+                        }`.trim()}
                       >
-                        {item.label}
+                        <span className="profile-link-icon" aria-hidden="true">
+                          <ProfileMenuIcon name={item.label} />
+                        </span>
+                        <span className="profile-link-text">{item.label}</span>
                       </span>
                     );
                   })}
@@ -860,7 +1005,10 @@ export default function Profile() {
             ))}
 
             <button className="profile-logout" type="button" onClick={logout}>
-              Logout
+              <span className="profile-link-icon" aria-hidden="true">
+                <ProfileMenuIcon name="Logout" />
+              </span>
+              <span className="profile-link-text">Logout</span>
             </button>
           </aside>
 
@@ -920,7 +1068,7 @@ export default function Profile() {
               </div>
             )}
 
-            <div className="profile-card">
+            <div className="profile-card" id="profile-details">
               <div className="profile-section-header">
                 <h3>{isSellerProfileViewOnly ? "Profile Details" : "Personal Information"}</h3>
               </div>

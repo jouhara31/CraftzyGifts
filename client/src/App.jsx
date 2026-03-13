@@ -16,6 +16,10 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import ReturnPolicy from "./pages/ReturnPolicy";
 import ShippingPolicy from "./pages/ShippingPolicy";
+import Settings from "./pages/settings";
+import EditProfile from "./pages/editProfile";
+import ProfileInfo from "./pages/profileInfo";
+import ManageAddresses from "./pages/manageAddresses";
 import SellerDashboard from "./pages/sellerDashboard";
 import SellerProducts from "./pages/sellerProducts";
 import SellerListedItems from "./pages/sellerListedItems";
@@ -48,6 +52,11 @@ function App() {
     pathname === "/login" ||
     pathname === "/register" ||
     pathname === "/checkout" ||
+    pathname === "/profile" ||
+    pathname === "/profile-info" ||
+    pathname === "/edit-profile" ||
+    pathname === "/manage-addresses" ||
+    pathname === "/settings" ||
     pathname.startsWith("/seller/") ||
     pathname.startsWith("/admin/");
 
@@ -65,6 +74,10 @@ function App() {
         <Route path="/orders" element={<Orders />} />
         <Route path="/wishlist" element={<Wishlist />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/profile-info" element={<ProfileInfo />} />
+        <Route path="/edit-profile" element={<EditProfile />} />
+        <Route path="/manage-addresses" element={<ManageAddresses />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="/terms" element={<TermsOfService />} />
         <Route path="/return-policy" element={<ReturnPolicy />} />

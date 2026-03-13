@@ -61,9 +61,16 @@ export default function Footer() {
 
       <footer className="market-footer">
         <div className="market-footer-newsletter">
-          <div>
-            <h3>Stay Updated</h3>
-            <p>Get the latest craft trends and exclusive deals</p>
+          <div className="market-footer-newsletter-brand">
+            <img
+              className="market-footer-newsletter-logo"
+              src={logoPng}
+              alt="Craftzy Gifts logo"
+            />
+            <div>
+              <h3>Stay Updated</h3>
+              <p>Get the latest craft trends and exclusive deals</p>
+            </div>
           </div>
           <form
             className="market-newsletter-form"
@@ -75,10 +82,6 @@ export default function Footer() {
         </div>
 
         <div className="market-footer-links-grid">
-          <div className="market-footer-brand">
-            <img className="market-footer-logo" src={logoPng} alt="Craftzy Gifts logo" />
-          </div>
-
           <div className="market-footer-links">
             <h4>Shop</h4>
             <Link to="/products">All Products</Link>

@@ -26,6 +26,32 @@ const normalizeImageValue = (value, fallback = "") => {
   return text;
 };
 
+const normalizeAddressPayload = (value) => {
+  if (!value || typeof value !== "object") return null;
+  const nextAddress = {};
+  if (typeof value.line1 === "string") nextAddress.line1 = value.line1.trim();
+  if (typeof value.city === "string") nextAddress.city = value.city.trim();
+  if (typeof value.state === "string") nextAddress.state = value.state.trim();
+  if (typeof value.pincode === "string") nextAddress.pincode = value.pincode.trim();
+  return nextAddress;
+};
+
+const normalizeSavedAddresses = (items) => {
+  if (!Array.isArray(items)) return null;
+  const cleaned = items
+    .map((entry) => ({
+      label: typeof entry?.label === "string" ? entry.label.trim() : "",
+      line1: typeof entry?.line1 === "string" ? entry.line1.trim() : "",
+      city: typeof entry?.city === "string" ? entry.city.trim() : "",
+      state: typeof entry?.state === "string" ? entry.state.trim() : "",
+      pincode: typeof entry?.pincode === "string" ? entry.pincode.trim() : "",
+    }))
+    .filter((entry) =>
+      [entry.label, entry.line1, entry.city, entry.state, entry.pincode].some(Boolean)
+    );
+  return cleaned;
+};
+
 const toProfilePayload = (user) => ({
   id: String(user._id || ""),
   name: user.name,
@@ -33,12 +59,28 @@ const toProfilePayload = (user) => ({
   role: user.role,
   createdAt: user.createdAt,
   phone: user.phone,
+  gender: user.gender || "",
+  dateOfBirth: user.dateOfBirth || "",
   storeName: user.storeName,
   sellerStatus: user.sellerStatus,
   supportEmail: user.supportEmail,
   about: user.about,
   profileImage: user.profileImage || "",
   storeCoverImage: user.storeCoverImage || "",
+  shippingAddress: user.shippingAddress || {},
+  billingAddress: user.billingAddress || {},
+  billingSameAsShipping:
+    typeof user.billingSameAsShipping === "boolean" ? user.billingSameAsShipping : true,
+  savedAddresses: Array.isArray(user.savedAddresses)
+    ? user.savedAddresses.map((entry) => ({
+        id: String(entry?._id || ""),
+        label: entry?.label || "",
+        line1: entry?.line1 || "",
+        city: entry?.city || "",
+        state: entry?.state || "",
+        pincode: entry?.pincode || "",
+      }))
+    : [],
   pickupAddress: user.pickupAddress || {},
 });
 
@@ -72,7 +114,7 @@ const ensureApprovedSeller = async (userId) => {
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "name email role createdAt phone storeName sellerStatus supportEmail about profileImage storeCoverImage pickupAddress"
+      "name email role createdAt phone gender dateOfBirth storeName sellerStatus supportEmail about profileImage storeCoverImage shippingAddress billingAddress billingSameAsShipping savedAddresses pickupAddress"
     );
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(toProfilePayload(user));
@@ -87,11 +129,17 @@ exports.updateMe = async (req, res) => {
       name,
       email,
       phone,
+      gender,
+      dateOfBirth,
       storeName,
       supportEmail,
       about,
       profileImage,
       storeCoverImage,
+      shippingAddress,
+      billingAddress,
+      billingSameAsShipping,
+      savedAddresses,
       pickupAddress,
     } = req.body;
     const user = await User.findById(req.user.id);
@@ -118,6 +166,13 @@ exports.updateMe = async (req, res) => {
       user.email = normalizedEmail;
     }
     if (typeof phone === "string") user.phone = phone.trim();
+    if (typeof gender === "string") {
+      const normalizedGender = gender.trim();
+      if (["male", "female", "other", "prefer_not", ""].includes(normalizedGender)) {
+        user.gender = normalizedGender;
+      }
+    }
+    if (typeof dateOfBirth === "string") user.dateOfBirth = dateOfBirth.trim();
     if (typeof storeName === "string") user.storeName = storeName.trim();
     if (typeof supportEmail === "string") user.supportEmail = supportEmail.trim();
     if (typeof about === "string") user.about = about.trim();
@@ -126,6 +181,34 @@ exports.updateMe = async (req, res) => {
     }
     if (typeof storeCoverImage === "string") {
       user.storeCoverImage = normalizeImageValue(storeCoverImage, user.storeCoverImage || "");
+    }
+
+    if (typeof billingSameAsShipping !== "undefined") {
+      user.billingSameAsShipping = parseBoolean(
+        billingSameAsShipping,
+        user.billingSameAsShipping
+      );
+    }
+
+    if (shippingAddress && typeof shippingAddress === "object") {
+      const nextShipping = normalizeAddressPayload(shippingAddress);
+      user.shippingAddress = {
+        ...(user.shippingAddress || {}),
+        ...(nextShipping || {}),
+      };
+    }
+
+    if (billingAddress && typeof billingAddress === "object") {
+      const nextBilling = normalizeAddressPayload(billingAddress);
+      user.billingAddress = {
+        ...(user.billingAddress || {}),
+        ...(nextBilling || {}),
+      };
+    }
+
+    const nextSavedAddresses = normalizeSavedAddresses(savedAddresses);
+    if (nextSavedAddresses) {
+      user.savedAddresses = nextSavedAddresses;
     }
 
     if (pickupAddress && typeof pickupAddress === "object") {

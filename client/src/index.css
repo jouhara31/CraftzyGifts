@@ -5736,10 +5736,6 @@ h6 {
   background: linear-gradient(180deg, #fff 0%, #fcf6f1 100%);
 }
 
-.admin-category-summary .stat-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .admin-category-grid {
   align-items: start;
 }
@@ -5776,6 +5772,14 @@ h6 {
   display: inline-flex;
   align-items: center;
   margin-left: auto;
+}
+
+.admin-category-refresh-mobile {
+  display: none;
+}
+
+.admin-category-refresh-desktop {
+  display: inline-flex;
 }
 
 .admin-category-card .card-head {
@@ -5828,6 +5832,18 @@ h6 {
   .admin-page .admin-category-actions .search {
     flex: 1;
     min-width: 0;
+  }
+
+  .admin-page .admin-category-summary .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-category-refresh-desktop {
+    display: none;
+  }
+
+  .admin-category-refresh-mobile {
+    display: inline-flex;
   }
 }
 
