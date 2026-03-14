@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 const ContactRequest = require("../models/ContactRequest");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
@@ -64,6 +65,9 @@ const toProfilePayload = (user) => ({
   storeName: user.storeName,
   sellerStatus: user.sellerStatus,
   supportEmail: user.supportEmail,
+  country: user.country,
+  timezone: user.timezone,
+  language: user.language,
   about: user.about,
   profileImage: user.profileImage || "",
   storeCoverImage: user.storeCoverImage || "",
@@ -100,6 +104,68 @@ const parseBoolean = (value, fallback = false) => {
   return fallback;
 };
 
+const API_KEY_PREFIX = {
+  production: "cg_live",
+  development: "cg_test",
+};
+
+const buildApiKey = (type = "development") => {
+  const normalizedType = type === "production" ? "production" : "development";
+  const prefix = API_KEY_PREFIX[normalizedType] || API_KEY_PREFIX.development;
+  const token = crypto.randomBytes(24).toString("hex");
+  const key = `${prefix}_${token}`;
+  const hash = crypto.createHash("sha256").update(key).digest("hex");
+  return {
+    key,
+    hash,
+    prefix,
+    last4: key.slice(-4),
+    type: normalizedType,
+  };
+};
+
+const normalizeWebhookUrl = (value) => {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  if (!/^https?:\/\//i.test(url)) return "";
+  return url;
+};
+
+const normalizeWebhookEvents = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
+
+const formatApiKeyPayload = (entry) => ({
+  id: String(entry?._id || "").trim(),
+  name: entry?.name || "",
+  type: entry?.type || "development",
+  prefix: entry?.prefix || "",
+  last4: entry?.last4 || "",
+  status: entry?.status || "active",
+  createdAt: entry?.createdAt || null,
+  lastUsedAt: entry?.lastUsedAt || null,
+});
+
+const formatWebhookPayload = (entry) => ({
+  id: String(entry?._id || "").trim(),
+  url: entry?.url || "",
+  events: Array.isArray(entry?.events) ? entry.events : [],
+  status: entry?.status || "active",
+  createdAt: entry?.createdAt || null,
+  lastTriggeredAt: entry?.lastTriggeredAt || null,
+});
+
 const ensureApprovedSeller = async (userId) => {
   const user = await User.findById(userId).select("role sellerStatus");
   if (!user || user.role !== "seller") {
@@ -114,7 +180,7 @@ const ensureApprovedSeller = async (userId) => {
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "name email role createdAt phone gender dateOfBirth storeName sellerStatus supportEmail about profileImage storeCoverImage shippingAddress billingAddress billingSameAsShipping savedAddresses pickupAddress"
+      "name email role createdAt phone gender dateOfBirth storeName sellerStatus supportEmail country timezone language about profileImage storeCoverImage shippingAddress billingAddress billingSameAsShipping savedAddresses pickupAddress"
     );
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(toProfilePayload(user));
@@ -133,6 +199,9 @@ exports.updateMe = async (req, res) => {
       dateOfBirth,
       storeName,
       supportEmail,
+      country,
+      timezone,
+      language,
       about,
       profileImage,
       storeCoverImage,
@@ -175,6 +244,9 @@ exports.updateMe = async (req, res) => {
     if (typeof dateOfBirth === "string") user.dateOfBirth = dateOfBirth.trim();
     if (typeof storeName === "string") user.storeName = storeName.trim();
     if (typeof supportEmail === "string") user.supportEmail = supportEmail.trim();
+    if (typeof country === "string") user.country = country.trim();
+    if (typeof timezone === "string") user.timezone = timezone.trim();
+    if (typeof language === "string") user.language = language.trim();
     if (typeof about === "string") user.about = about.trim();
     if (typeof profileImage === "string") {
       user.profileImage = normalizeImageValue(profileImage, user.profileImage || "");
@@ -237,6 +309,149 @@ exports.updateMe = async (req, res) => {
     res.json(toProfilePayload(user));
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.listMyApiKeys = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("apiKeys");
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const items = (Array.isArray(user.apiKeys) ? user.apiKeys : [])
+      .map((entry) => formatApiKeyPayload(entry))
+      .sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+    return res.json({ items });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.createMyApiKey = async (req, res) => {
+  try {
+    const nameInput = String(req.body?.name || "").trim();
+    const typeInput = String(req.body?.type || "")
+      .trim()
+      .toLowerCase();
+    const type = typeInput === "production" ? "production" : "development";
+    const name =
+      nameInput || (type === "production" ? "Production API Key" : "Development API Key");
+    const { key, hash, prefix, last4, type: keyType } = buildApiKey(type);
+    const user = await User.findById(req.user.id).select("apiKeys");
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const entry = {
+      name,
+      type: keyType,
+      prefix,
+      last4,
+      hash,
+      status: "active",
+      createdAt: new Date(),
+    };
+
+    user.apiKeys = Array.isArray(user.apiKeys) ? user.apiKeys : [];
+    user.apiKeys.push(entry);
+    await user.save();
+    const savedEntry = user.apiKeys[user.apiKeys.length - 1];
+
+    return res.status(201).json({
+      key,
+      item: formatApiKeyPayload(savedEntry),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.revokeMyApiKey = async (req, res) => {
+  try {
+    const keyId = String(req.params?.keyId || "").trim();
+    if (!keyId || !mongoose.Types.ObjectId.isValid(keyId)) {
+      return res.status(400).json({ message: "API key id is required." });
+    }
+
+    const user = await User.findById(req.user.id).select("apiKeys");
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const keyDoc = user.apiKeys?.id(keyId);
+    if (!keyDoc) return res.status(404).json({ message: "API key not found." });
+
+    keyDoc.status = "revoked";
+    await user.save();
+
+    return res.json({ item: formatApiKeyPayload(keyDoc) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.listMyWebhooks = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("webhooks");
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const items = (Array.isArray(user.webhooks) ? user.webhooks : [])
+      .map((entry) => formatWebhookPayload(entry))
+      .sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+    return res.json({ items });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.createMyWebhook = async (req, res) => {
+  try {
+    const url = normalizeWebhookUrl(req.body?.url);
+    if (!url) {
+      return res.status(400).json({ message: "Please provide a valid webhook URL." });
+    }
+    const events = normalizeWebhookEvents(req.body?.events);
+    const secret = `whsec_${crypto.randomBytes(24).toString("hex")}`;
+
+    const user = await User.findById(req.user.id).select("webhooks");
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    user.webhooks = Array.isArray(user.webhooks) ? user.webhooks : [];
+    user.webhooks.push({
+      url,
+      events: events.length ? events : ["*"],
+      secret,
+      status: "active",
+      createdAt: new Date(),
+    });
+    await user.save();
+    const savedWebhook = user.webhooks[user.webhooks.length - 1];
+
+    return res.status(201).json({
+      item: formatWebhookPayload(savedWebhook),
+      secret,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.deleteMyWebhook = async (req, res) => {
+  try {
+    const webhookId = String(req.params?.webhookId || "").trim();
+    if (!webhookId || !mongoose.Types.ObjectId.isValid(webhookId)) {
+      return res.status(400).json({ message: "Webhook id is required." });
+    }
+
+    const user = await User.findById(req.user.id).select("webhooks");
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const hook = user.webhooks?.id(webhookId);
+    if (!hook) return res.status(404).json({ message: "Webhook not found." });
+
+    hook.deleteOne();
+    await user.save();
+
+    return res.json({ message: "Webhook deleted." });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 };
 

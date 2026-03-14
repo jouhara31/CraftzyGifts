@@ -109,11 +109,15 @@ export default function AdminSidebarLayout({
   description,
   actions,
   titleActions,
+  pageClassName = "",
   children,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const pageClasses = ["page seller-page admin-page", pageClassName]
+    .filter(Boolean)
+    .join(" ");
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -128,7 +132,7 @@ export default function AdminSidebarLayout({
   }, [location.pathname]);
 
   return (
-    <div className="page seller-page admin-page">
+    <div className={pageClasses}>
       <div className="admin-classic-top">
         <button
           className="admin-menu-btn"
@@ -157,23 +161,9 @@ export default function AdminSidebarLayout({
               <path d="M10 14 19 5" />
               <path d="M19 13v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4" />
             </svg>
-            View Site
+            <span className="admin-view-site-label admin-view-site-desktop">Home</span>
+            <span className="admin-view-site-label admin-view-site-mobile">Home</span>
           </Link>
-          <Link className="admin-text-action" to="/admin/account">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="8" r="3.2" />
-              <path d="M5.5 19a6.5 6.5 0 0 1 13 0" />
-            </svg>
-            Account
-          </Link>
-          <button className="admin-text-action" type="button" onClick={handleLogout}>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M14 7V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2v-2" />
-              <path d="M10 12h10" />
-              <path d="m17 8 3 4-3 4" />
-            </svg>
-            Logout
-          </button>
         </div>
       </div>
 
@@ -216,6 +206,20 @@ export default function AdminSidebarLayout({
                 <span>{item.label}</span>
               </NavLink>
             ))}
+            <button
+              className="admin-shell-link admin-shell-link-logout admin-mobile-only"
+              type="button"
+              onClick={handleLogout}
+            >
+              <span className="admin-shell-link-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M14 7V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2v-2" />
+                  <path d="M10 12h10" />
+                  <path d="m17 8 3 4-3 4" />
+                </svg>
+              </span>
+              <span>Logout</span>
+            </button>
           </nav>
         </aside>
 
@@ -235,6 +239,24 @@ export default function AdminSidebarLayout({
           {children}
         </section>
       </div>
+
+      <nav className="admin-bottom-nav" aria-label="Admin mobile navigation">
+        {ADMIN_NAV_ITEMS.map((item) => (
+          <NavLink
+            key={item.path}
+            to={item.path}
+            className={({ isActive }) =>
+              `admin-bottom-link ${isActive ? "active" : ""}`.trim()
+            }
+            onClick={() => setSidebarOpen(false)}
+          >
+            <span className="admin-bottom-icon">
+              <AdminNavIcon path={item.path} />
+            </span>
+            <span className="admin-bottom-label">{item.label}</span>
+          </NavLink>
+        ))}
+      </nav>
     </div>
   );
 }

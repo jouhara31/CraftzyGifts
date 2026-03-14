@@ -10,6 +10,7 @@ export default function AdminOrders() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [error, setError] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const navigate = useNavigate();
 
   const loadOrders = useCallback(async () => {
@@ -20,6 +21,7 @@ export default function AdminOrders() {
     }
 
     setError("");
+    setIsRefreshing(true);
     try {
       const res = await fetch(`${API_URL}/api/admin/orders`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -32,6 +34,8 @@ export default function AdminOrders() {
       setOrders(Array.isArray(data) ? data : []);
     } catch {
       setError("Unable to load orders.");
+    } finally {
+      setIsRefreshing(false);
     }
   }, [navigate]);
 
@@ -63,6 +67,24 @@ export default function AdminOrders() {
     <AdminSidebarLayout
       title="Orders"
       description="Complete order management with search and filters."
+      pageClassName="admin-page-orders"
+      titleActions={
+        <div className="admin-orders-title-actions">
+          <button
+            className={`admin-text-action ${isRefreshing ? "is-loading" : ""}`.trim()}
+            type="button"
+            onClick={loadOrders}
+            aria-busy={isRefreshing}
+            disabled={isRefreshing}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 12a8 8 0 1 1-2.4-5.6" />
+              <path d="M20 5v5h-5" />
+            </svg>
+            {isRefreshing ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+      }
       actions={
         <>
           <div className="search">
@@ -85,9 +107,6 @@ export default function AdminOrders() {
               </option>
             ))}
           </select>
-          <button className="admin-text-action" type="button" onClick={loadOrders}>
-            Refresh
-          </button>
         </>
       }
     >

@@ -24,7 +24,32 @@ const userSchema = new mongoose.Schema(
     },
     dateOfBirth: { type: String },
     supportEmail: { type: String },
+    country: { type: String },
+    timezone: { type: String },
+    language: { type: String },
     about: { type: String },
+    apiKeys: [
+      {
+        name: { type: String },
+        type: { type: String, enum: ["production", "development"], default: "development" },
+        prefix: { type: String },
+        last4: { type: String },
+        hash: { type: String },
+        status: { type: String, enum: ["active", "revoked"], default: "active" },
+        createdAt: { type: Date, default: Date.now },
+        lastUsedAt: { type: Date },
+      },
+    ],
+    webhooks: [
+      {
+        url: { type: String },
+        events: [{ type: String }],
+        secret: { type: String },
+        status: { type: String, enum: ["active", "disabled"], default: "active" },
+        createdAt: { type: Date, default: Date.now },
+        lastTriggeredAt: { type: Date },
+      },
+    ],
     profileImage: { type: String },
     storeCoverImage: { type: String },
     shippingAddress: {
