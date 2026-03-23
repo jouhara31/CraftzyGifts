@@ -1,21 +1,31 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
-const USER_PROFILE_IMAGE_KEY = "user_profile_image";
+import { API_URL } from "../apiBase";
+import { persistAuthSession } from "../utils/authSession";
 
 export default function Login() {
   const [form, setForm] = useState({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  const [status, setStatus] = useState(null);
+
+  useEffect(() => {
+    if (location.state?.notice) {
+      setStatus({ type: "info", message: location.state.notice });
+    }
+  }, [location.state?.notice]);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+    if (status) setStatus(null);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (status) setStatus(null);
     try {
       const res = await fetch(`${API_URL}/api/auth/login`, {
         method: "POST",
@@ -24,29 +34,29 @@ export default function Login() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert("Login successful!");
-        localStorage.setItem("token", data.token);
-        if (data.user) {
-          localStorage.setItem("user", JSON.stringify(data.user));
-          if (typeof data.user.profileImage === "string" && data.user.profileImage) {
-            localStorage.setItem(USER_PROFILE_IMAGE_KEY, data.user.profileImage);
-          } else {
-            localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-          }
-        }
-        window.dispatchEvent(new Event("user:updated"));
+        persistAuthSession({
+          token: data.token,
+          refreshToken: data.refreshToken,
+          user: data.user,
+        });
         let nextPath = "/";
         if (data?.user?.role === "seller") {
-          nextPath = "/seller/dashboard";
+          nextPath =
+            String(data?.user?.sellerStatus || "").trim().toLowerCase() === "approved"
+              ? "/seller/dashboard"
+              : "/seller/pending";
         } else if (data?.user?.role === "admin") {
           nextPath = "/admin/dashboard";
         }
         navigate(nextPath);
       } else {
-        alert(data.message);
+        setStatus({
+          type: "error",
+          message: data?.message || "Login failed. Please try again.",
+        });
       }
     } catch (err) {
-      alert("Error: " + err.message);
+      setStatus({ type: "error", message: `Error: ${err.message}` });
     }
   };
 
@@ -60,6 +70,15 @@ export default function Login() {
           <p className="auth-sub">
             Access your cart, wishlist, and personalized hampers.
           </p>
+          {status?.message ? (
+            <div
+              className={`auth-alert${status.type ? ` is-${status.type}` : ""}`}
+              role={status.type === "error" ? "alert" : "status"}
+              aria-live={status.type === "error" ? "assertive" : "polite"}
+            >
+              {status.message}
+            </div>
+          ) : null}
           <div className="auth-form">
             <label className="auth-label" htmlFor="email">
               Email
@@ -160,3 +179,4 @@ export default function Login() {
     </div>
   );
 }
+

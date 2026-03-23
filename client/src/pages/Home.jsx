@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import Header from "../components/Header";
+import ProductHoverImage from "../components/ProductHoverImage";
 import {
   DEFAULT_CATEGORY_TREE,
   buildCategoryPath,
   loadCategoryTree,
 } from "../utils/categoryMaster";
-import { getCategoryImage, getProductImage } from "../utils/productMedia";
+import { getCategoryImage } from "../utils/productMedia";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 
 export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -307,9 +308,9 @@ export default function Home() {
             return (
               <article key={item._id || item.name} className="product-card">
                 <div className="featured-crafts-media">
-                  <img
+                  <ProductHoverImage
                     className="product-image large"
-                    src={getProductImage(item)}
+                    product={item}
                     alt={item.name}
                   />
                   <span className="chip featured-crafts-badge">
@@ -372,3 +373,4 @@ export default function Home() {
     </div>
   );
 }
+

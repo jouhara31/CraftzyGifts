@@ -4,7 +4,8 @@ import Header from "../components/Header";
 import logoPng from "../assets/logo.png";
 import { getWishlist } from "../utils/wishlist";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
+import { clearAuthSession, logoutSession } from "../utils/authSession";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
 
 const ROLE_LABEL = {
@@ -19,7 +20,6 @@ const ACTIVE_ORDER_STATUSES = new Set([
   "processing",
   "shipped",
   "return_requested",
-  "refund_initiated",
 ]);
 
 const formatMoney = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
@@ -482,10 +482,7 @@ export default function Profile() {
     (profile?.name || profile?.storeName || "U").trim().slice(0, 1).toUpperCase() || "U";
   const showSidebarAvatarImage = Boolean(profile?.profileImage);
   const clearSessionAndRedirect = useCallback((path = "/login") => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-    window.dispatchEvent(new Event("user:updated"));
+    clearAuthSession();
     navigate(path);
   }, [navigate]);
 
@@ -831,11 +828,8 @@ export default function Profile() {
     }
   };
 
-  const logout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-    window.dispatchEvent(new Event("user:updated"));
+  const logout = async () => {
+    await logoutSession();
     navigate("/");
   };
 
@@ -1271,3 +1265,4 @@ export default function Profile() {
     </div>
   );
 }
+

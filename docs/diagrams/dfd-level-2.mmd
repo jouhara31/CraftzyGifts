@@ -1,0 +1,7 @@
+flowchart LR
+  Customer -->|Select items| Customize[Customization Builder]
+  Customize -->|Add to cart| Cart[Cart]
+  Cart -->|Checkout| Checkout[Checkout and Payment]
+  Checkout -->|Create order| Orders[Order Service]
+  Orders -->|Notify| Seller[Seller]
+  Orders -->|Status update| Customer

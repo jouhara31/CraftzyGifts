@@ -13,6 +13,14 @@ const {
   deleteProduct,
 } = require("../controllers/productController");
 const { auth, optionalAuth, requireRole, requireApprovedSeller } = require("../middleware/auth");
+const { createRateLimiter } = require("../middleware/rateLimit");
+
+const sellerWriteRateLimit = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 45,
+  keyPrefix: "seller-products",
+  message: "Too many product changes in a short time. Please slow down and try again shortly.",
+});
 
 router.get("/", getProducts);
 router.get("/categories", getCategoryMaster);
@@ -31,8 +39,29 @@ router.get(
   getCustomizationMasterOptions
 );
 router.get("/:id", getProductById);
-router.post("/", auth, requireRole("seller"), requireApprovedSeller, createProduct);
-router.patch("/:id", auth, requireRole("seller"), requireApprovedSeller, updateProduct);
-router.delete("/:id", auth, requireRole("seller"), requireApprovedSeller, deleteProduct);
+router.post(
+  "/",
+  auth,
+  requireRole("seller"),
+  requireApprovedSeller,
+  sellerWriteRateLimit,
+  createProduct
+);
+router.patch(
+  "/:id",
+  auth,
+  requireRole("seller"),
+  requireApprovedSeller,
+  sellerWriteRateLimit,
+  updateProduct
+);
+router.delete(
+  "/:id",
+  auth,
+  requireRole("seller"),
+  requireApprovedSeller,
+  sellerWriteRateLimit,
+  deleteProduct
+);
 
 module.exports = router;

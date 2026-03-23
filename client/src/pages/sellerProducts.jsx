@@ -10,10 +10,12 @@ import {
 } from "../utils/categoryMaster";
 import { getProductImage } from "../utils/productMedia";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const MAX_SELLING_PRICE = 200000;
 const MAX_MRP = 500000;
 const MAX_SURCHARGE = 50000;
+const MIN_PRODUCT_IMAGES = 3;
+const MAX_PRODUCT_IMAGES = 5;
 const LEGACY_OPTION_LABELS = {
   giftBoxes: "Gift boxes",
   chocolates: "Chocolates",
@@ -178,6 +180,22 @@ const joinListForField = (value = []) =>
     .filter(Boolean)
     .join("\n");
 
+const normalizeProductImages = (value) =>
+  (Array.isArray(value) ? value : [])
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean)
+    .slice(0, MAX_PRODUCT_IMAGES);
+
+const readImageFileAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve(typeof reader.result === "string" ? reader.result : "");
+    };
+    reader.onerror = () => reject(new Error("Unable to read selected image."));
+    reader.readAsDataURL(file);
+  });
+
 const createDefaultPackagingStyle = (style = {}) => ({
   id: String(style?.id || createId("pack")),
   title: String(style?.title || "").trim(),
@@ -303,8 +321,8 @@ const buildInitialProductForm = () => ({
   packagingStyles: [],
   isCustomizable: false,
   makingCharge: "0",
-  imageData: "",
-  imageName: "",
+  imageList: [],
+  imageNames: [],
   status: "active",
   customizationCatalog: [],
   hiddenCustomizationCatalog: [],
@@ -344,22 +362,26 @@ const buildProductPayload = (formState) => {
     occasions: normalizeTextAreaLines(formState.occasionsText, 8),
     includedItems: normalizeTextAreaLines(formState.includedItemsText, 20),
     highlights: normalizeTextAreaLines(formState.highlightsText, 20),
-    packagingStyles: formState.isCustomizable
-      ? toPayloadPackagingStyles(formState.packagingStyles)
-      : [],
+    packagingStyles: toPayloadPackagingStyles(formState.packagingStyles),
     isCustomizable: Boolean(formState.isCustomizable),
     makingCharge: formState.isCustomizable ? roundMoney(formState.makingCharge || 0) : 0,
     status: formState.status === "inactive" ? "inactive" : "active",
-    images: formState.imageData ? [formState.imageData] : [],
+    images: normalizeProductImages(formState.imageList),
     customizationCatalog: formState.isCustomizable
       ? preservedCustomizationCatalog
       : [],
   };
 };
 
-const validatePayload = (payload) => {
+const validatePayload = (payload, { requireMinimumImages = false } = {}) => {
   if (!payload.name) return "Product name is required.";
   if (!payload.category) return "Category is required.";
+  if ((payload.images || []).length > MAX_PRODUCT_IMAGES) {
+    return `You can upload up to ${MAX_PRODUCT_IMAGES} product images only.`;
+  }
+  if (requireMinimumImages && (payload.images || []).length < MIN_PRODUCT_IMAGES) {
+    return `Upload at least ${MIN_PRODUCT_IMAGES} product images.`;
+  }
   if (!Number.isFinite(payload.price) || payload.price <= 0) {
     return "Price must be greater than zero.";
   }
@@ -508,8 +530,14 @@ const mapProductToForm = (product = {}) => {
     packagingStyles: normalizePackagingStylesForForm(product.packagingStyles),
     isCustomizable: Boolean(product.isCustomizable),
     makingCharge: String(Number(product.makingCharge || 0)),
-    imageData: Array.isArray(product.images) && product.images[0] ? product.images[0] : "",
-    imageName: "",
+    imageList: normalizeProductImages(
+      Array.isArray(product.images) && product.images.length > 0
+        ? product.images
+        : product.image
+          ? [product.image]
+          : []
+    ),
+    imageNames: [],
     status: product.status === "inactive" ? "inactive" : "active",
     customizationCatalog: [],
     hiddenCustomizationCatalog: preservedCustomizationCatalog,
@@ -658,7 +686,7 @@ export default function SellerProducts() {
     setNotice("");
 
     const payload = buildProductPayload(form);
-    const validationError = validatePayload(payload);
+    const validationError = validatePayload(payload, { requireMinimumImages: true });
     if (validationError) {
       setError(validationError);
       return;
@@ -842,32 +870,36 @@ export default function SellerProducts() {
   };
 
   const handleImageFileSelection = (event, setter) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      setter((prev) => ({ ...prev, imageData: "", imageName: "" }));
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) {
+      setter((prev) => ({ ...prev, imageList: [], imageNames: [] }));
       return;
     }
 
-    if (!file.type.startsWith("image/")) {
-      setError("Please choose an image file.");
+    if (files.length > MAX_PRODUCT_IMAGES) {
+      setError(`You can upload up to ${MAX_PRODUCT_IMAGES} product images only.`);
+      event.target.value = "";
+      return;
+    }
+
+    if (files.some((file) => !file.type.startsWith("image/"))) {
+      setError("Please choose image files only.");
       event.target.value = "";
       return;
     }
 
     setError("");
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      setter((prev) => ({
-        ...prev,
-        imageData: result,
-        imageName: file.name,
-      }));
-    };
-    reader.onerror = () => {
-      setError("Unable to read selected image.");
-    };
-    reader.readAsDataURL(file);
+    Promise.all(files.map(readImageFileAsDataUrl))
+      .then((images) => {
+        setter((prev) => ({
+          ...prev,
+          imageList: normalizeProductImages(images),
+          imageNames: files.map((file) => file.name),
+        }));
+      })
+      .catch(() => {
+        setError("Unable to read selected images.");
+      });
   };
 
   const handleImageUpload = (event) => {
@@ -876,6 +908,18 @@ export default function SellerProducts() {
 
   const handleEditImageUpload = (event) => {
     handleImageFileSelection(event, setEditForm);
+  };
+
+  const removeSelectedImage = (setter, index) => {
+    setter((prev) => ({
+      ...prev,
+      imageList: (Array.isArray(prev.imageList) ? prev.imageList : []).filter(
+        (_, imageIndex) => imageIndex !== index
+      ),
+      imageNames: (Array.isArray(prev.imageNames) ? prev.imageNames : []).filter(
+        (_, imageIndex) => imageIndex !== index
+      ),
+    }));
   };
 
   const startEdit = (product) => {
@@ -1035,24 +1079,50 @@ export default function SellerProducts() {
           </div>
 
           <div className="field">
-            <label htmlFor="newProductImageUpload">Upload product image</label>
+            <label htmlFor="newProductImageUpload">Upload product images</label>
             <input
               id="newProductImageUpload"
               ref={imageInputRef}
               type="file"
               accept="image/*"
+              multiple
               onChange={handleImageUpload}
             />
-            <p className="field-hint">Optional. JPG/PNG/WEBP.</p>
-            {form.imageName && <p className="field-hint">Selected: {form.imageName}</p>}
+            <p className="field-hint">
+              Add at least {MIN_PRODUCT_IMAGES} images. Up to {MAX_PRODUCT_IMAGES} JPG/PNG/WEBP
+              files.
+            </p>
+            {form.imageList.length > 0 && (
+              <p className="field-hint">Selected: {form.imageList.length} image(s)</p>
+            )}
           </div>
 
-          {form.imageData && (
-            <img
-              className="product-image seller-product-form-preview"
-              src={form.imageData}
-              alt="Product preview"
-            />
+          {form.imageList.length > 0 && (
+            <div className="seller-product-preview-grid">
+              {form.imageList.map((image, index) => (
+                <div key={`new-product-image-${index}`} className="seller-product-preview-tile">
+                  <img
+                    className="product-image seller-product-form-preview"
+                    src={image}
+                    alt={`Product preview ${index + 1}`}
+                  />
+                  <div className="seller-product-preview-meta">
+                    <span>
+                      {form.imageNames[index]
+                        ? `${index + 1}. ${form.imageNames[index]}`
+                        : `Image ${index + 1}`}
+                    </span>
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      onClick={() => removeSelectedImage(setForm, index)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
 
           <div className="field-row">
@@ -1260,35 +1330,49 @@ export default function SellerProducts() {
           </div>
 
           <div className="field">
-            <label htmlFor="editProductImageUpload">Replace product image</label>
+            <label htmlFor="editProductImageUpload">Replace product images</label>
             <input
               id="editProductImageUpload"
               ref={editImageInputRef}
               type="file"
               accept="image/*"
+              multiple
               onChange={handleEditImageUpload}
             />
-            <p className="field-hint">Optional. JPG/PNG/WEBP.</p>
-            {editForm.imageName && <p className="field-hint">Selected: {editForm.imageName}</p>}
+            <p className="field-hint">
+              Replace with up to {MAX_PRODUCT_IMAGES} JPG/PNG/WEBP images.
+            </p>
+            {editForm.imageList.length > 0 && (
+              <p className="field-hint">Selected: {editForm.imageList.length} image(s)</p>
+            )}
           </div>
 
-          {editForm.imageData && (
-            <>
-              <img
-                className="product-image seller-product-form-preview"
-                src={editForm.imageData}
-                alt="Edit product preview"
-              />
-              <div className="seller-toolbar">
-                <button
-                  className="btn ghost"
-                  type="button"
-                  onClick={() => setEditForm((prev) => ({ ...prev, imageData: "", imageName: "" }))}
-                >
-                  Remove image
-                </button>
-              </div>
-            </>
+          {editForm.imageList.length > 0 && (
+            <div className="seller-product-preview-grid">
+              {editForm.imageList.map((image, index) => (
+                <div key={`edit-product-image-${index}`} className="seller-product-preview-tile">
+                  <img
+                    className="product-image seller-product-form-preview"
+                    src={image}
+                    alt={`Edit product preview ${index + 1}`}
+                  />
+                  <div className="seller-product-preview-meta">
+                    <span>
+                      {editForm.imageNames[index]
+                        ? `${index + 1}. ${editForm.imageNames[index]}`
+                        : `Image ${index + 1}`}
+                    </span>
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      onClick={() => removeSelectedImage(setEditForm, index)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
 
           <div className="field-row">
@@ -1561,3 +1645,4 @@ export default function SellerProducts() {
     </div>
   );
 }
+

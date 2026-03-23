@@ -8,6 +8,10 @@ const {
   createSellerNotification,
   normalizeNotification,
 } = require("../utils/sellerNotifications");
+const { publishNotificationUpdate, subscribeNotificationStream } = require("../utils/notificationStream");
+const { revokeAllRefreshTokens } = require("../utils/authSessions");
+const { MIN_PASSWORD_LENGTH } = require("../utils/authValidation");
+const { normalizeInstagramUrl } = require("../utils/socialLinks");
 
 const CONTACT_NAME_MAX = 80;
 const CONTACT_EMAIL_MAX = 160;
@@ -15,6 +19,8 @@ const CONTACT_MESSAGE_MAX = 1200;
 const CONTACT_FETCH_LIMIT = 6;
 const NOTIFICATION_FETCH_LIMIT = 10;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DEFAULT_RETURN_WINDOW_DAYS = 7;
+const MAX_RETURN_WINDOW_DAYS = 30;
 
 const normalizeImageValue = (value, fallback = "") => {
   if (typeof value !== "string") return fallback;
@@ -53,6 +59,12 @@ const normalizeSavedAddresses = (items) => {
   return cleaned;
 };
 
+const normalizeReturnWindowDays = (value, fallback = DEFAULT_RETURN_WINDOW_DAYS) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 0) return fallback;
+  return Math.min(parsed, MAX_RETURN_WINDOW_DAYS);
+};
+
 const toProfilePayload = (user) => ({
   id: String(user._id || ""),
   name: user.name,
@@ -69,6 +81,8 @@ const toProfilePayload = (user) => ({
   timezone: user.timezone,
   language: user.language,
   about: user.about,
+  instagramUrl: user.instagramUrl || "",
+  returnWindowDays: normalizeReturnWindowDays(user.returnWindowDays),
   profileImage: user.profileImage || "",
   storeCoverImage: user.storeCoverImage || "",
   shippingAddress: user.shippingAddress || {},
@@ -180,7 +194,7 @@ const ensureApprovedSeller = async (userId) => {
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "name email role createdAt phone gender dateOfBirth storeName sellerStatus supportEmail country timezone language about profileImage storeCoverImage shippingAddress billingAddress billingSameAsShipping savedAddresses pickupAddress"
+      "name email role createdAt phone gender dateOfBirth storeName sellerStatus supportEmail country timezone language about instagramUrl returnWindowDays profileImage storeCoverImage shippingAddress billingAddress billingSameAsShipping savedAddresses pickupAddress"
     );
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(toProfilePayload(user));
@@ -203,6 +217,8 @@ exports.updateMe = async (req, res) => {
       timezone,
       language,
       about,
+      instagramUrl,
+      returnWindowDays,
       profileImage,
       storeCoverImage,
       shippingAddress,
@@ -248,6 +264,28 @@ exports.updateMe = async (req, res) => {
     if (typeof timezone === "string") user.timezone = timezone.trim();
     if (typeof language === "string") user.language = language.trim();
     if (typeof about === "string") user.about = about.trim();
+    if (typeof instagramUrl === "string") {
+      const normalizedInstagram = normalizeInstagramUrl(instagramUrl);
+      if (normalizedInstagram.error) {
+        return res.status(400).json({ message: normalizedInstagram.error });
+      }
+      user.instagramUrl = normalizedInstagram.value;
+    }
+    if (typeof returnWindowDays !== "undefined") {
+      if (user.role !== "seller") {
+        return res.status(400).json({ message: "Return settings are only available for sellers." });
+      }
+      const parsedReturnWindowDays = Number.parseInt(returnWindowDays, 10);
+      if (!Number.isInteger(parsedReturnWindowDays) || parsedReturnWindowDays < 0) {
+        return res.status(400).json({ message: "Return days must be a whole number from 0 to 30." });
+      }
+      if (parsedReturnWindowDays > MAX_RETURN_WINDOW_DAYS) {
+        return res.status(400).json({
+          message: `Return days cannot exceed ${MAX_RETURN_WINDOW_DAYS}.`,
+        });
+      }
+      user.returnWindowDays = parsedReturnWindowDays;
+    }
     if (typeof profileImage === "string") {
       user.profileImage = normalizeImageValue(profileImage, user.profileImage || "");
     }
@@ -463,8 +501,10 @@ exports.changeMyPassword = async (req, res) => {
     if (!currentPassword) {
       return res.status(400).json({ message: "Current password is required." });
     }
-    if (newPassword.length < 6) {
-      return res.status(400).json({ message: "New password must be at least 6 characters." });
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({
+        message: `New password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+      });
     }
 
     const user = await User.findById(req.user.id);
@@ -481,6 +521,7 @@ exports.changeMyPassword = async (req, res) => {
     }
 
     user.password = await bcrypt.hash(newPassword, 10);
+    user.refreshTokens = [];
     await user.save();
     return res.json({ message: "Password updated successfully." });
   } catch (error) {
@@ -493,6 +534,7 @@ exports.deleteMe = async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
+    await revokeAllRefreshTokens(user);
     await User.deleteOne({ _id: req.user.id });
     res.json({ message: "Account deleted successfully" });
   } catch (error) {
@@ -581,22 +623,17 @@ exports.listMyContactRequests = async (req, res) => {
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: "User id is required." });
     }
-    if (req.user?.role === "seller") {
-      const approval = await ensureApprovedSeller(userId);
-      if (!approval.ok) {
-        return res.status(approval.status).json({ message: approval.message });
-      }
-    } else if (req.user?.role !== "customer") {
+    if (!["customer", "seller", "admin"].includes(req.user?.role)) {
       return res.status(403).json({ message: "Forbidden" });
     }
 
     const limit = parsePositiveInt(req.query?.limit, CONTACT_FETCH_LIMIT, 20);
     const [items, total] = await Promise.all([
-      ContactRequest.find({ seller: sellerId })
+      ContactRequest.find({ seller: userId })
         .sort({ createdAt: -1 })
         .limit(limit)
         .lean(),
-      ContactRequest.countDocuments({ seller: sellerId }),
+      ContactRequest.countDocuments({ seller: userId }),
     ]);
 
     return res.json({
@@ -620,12 +657,7 @@ exports.listMyNotifications = async (req, res) => {
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: "User id is required." });
     }
-    if (req.user?.role === "seller") {
-      const approval = await ensureApprovedSeller(userId);
-      if (!approval.ok) {
-        return res.status(approval.status).json({ message: approval.message });
-      }
-    } else if (req.user?.role !== "customer") {
+    if (!["customer", "seller", "admin"].includes(req.user?.role)) {
       return res.status(403).json({ message: "Forbidden" });
     }
 
@@ -652,11 +684,61 @@ exports.listMyNotifications = async (req, res) => {
   }
 };
 
+exports.streamMyNotifications = async (req, res) => {
+  try {
+    const userId = String(req.user?.id || "").trim();
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "User id is required." });
+    }
+    if (!["customer", "seller", "admin"].includes(req.user?.role)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    if (typeof res.flushHeaders === "function") {
+      res.flushHeaders();
+    }
+
+    const writeEvent = (event, payload = {}) => {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    const unreadCount = await Notification.countDocuments({
+      seller: userId,
+      isRead: false,
+    });
+    writeEvent("notification", {
+      reason: "connected",
+      unreadCount,
+    });
+
+    const unsubscribe = subscribeNotificationStream(userId, (payload) => {
+      writeEvent("notification", payload);
+    });
+    const heartbeatId = setInterval(() => {
+      writeEvent("ping", { sentAt: new Date().toISOString() });
+    }, 25000);
+
+    req.on("close", () => {
+      clearInterval(heartbeatId);
+      unsubscribe();
+      res.end();
+    });
+
+    return undefined;
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
 exports.markMyNotificationsRead = async (req, res) => {
   try {
-    const sellerId = String(req.user?.id || "").trim();
-    if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
-      return res.status(400).json({ message: "Seller id is required." });
+    const userId = String(req.user?.id || "").trim();
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "User id is required." });
     }
 
     const markAll = parseBoolean(req.body?.all, false);
@@ -685,6 +767,11 @@ exports.markMyNotificationsRead = async (req, res) => {
     const unreadCount = await Notification.countDocuments({
       seller: userId,
       isRead: false,
+    });
+
+    publishNotificationUpdate(userId, {
+      reason: "read",
+      unreadCount,
     });
 
     return res.json({ unreadCount });

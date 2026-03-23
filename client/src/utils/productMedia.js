@@ -50,12 +50,26 @@ const getStockPhoto = (product = {}) => {
 export const getCategoryImage = (category) =>
   CATEGORY_IMAGE_MAP[pickCategoryKey(category)] || CATEGORY_IMAGE_MAP.default;
 
-export const getProductImage = (product = {}) => {
-  if (product.image) return product.image;
-  if (Array.isArray(product.images) && product.images[0]) {
-    return product.images[0];
+export const getProductImages = (product = {}) => {
+  const images = [];
+  const addImage = (value) => {
+    const src = String(value || "").trim();
+    if (!src || images.includes(src)) return;
+    images.push(src);
+  };
+
+  addImage(product.image);
+  if (Array.isArray(product.images)) {
+    product.images.forEach(addImage);
   }
-  return getStockPhoto(product);
+
+  if (images.length === 0) {
+    addImage(getStockPhoto(product));
+  }
+
+  return images;
 };
+
+export const getProductImage = (product = {}) => getProductImages(product)[0];
 
 export const fallbackProductImage = CATEGORY_IMAGE_MAP.default;

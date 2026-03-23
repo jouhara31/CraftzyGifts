@@ -2,25 +2,102 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
+const toNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const STATUS_ICONS = {
+  pending_payment: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.2v5l3.2 1.9" />
+    </svg>
+  ),
+  placed: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M8.2 12.2l2.4 2.4 5.2-5.2" />
+    </svg>
+  ),
+  processing: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7.5 7.5a6 6 0 0 1 9 1.2" />
+      <path d="M16.5 5.5v3.8h-3.8" />
+      <path d="M16.5 16.5a6 6 0 0 1-9-1.2" />
+      <path d="M7.5 18.5v-3.8h3.8" />
+    </svg>
+  ),
+  shipped: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4.5 7.5h9.5v9H4.5z" />
+      <path d="M14 12h6" />
+      <path d="M17 9.5l3 2.5-3 2.5" />
+    </svg>
+  ),
+  delivered: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 7.5h14v9H5z" />
+      <path d="M8.5 12.5l2.3 2.3 4.7-4.7" />
+    </svg>
+  ),
+  return_requested: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 7.5H6.5L9 5" />
+      <path d="M6.5 7.5h7a4.5 4.5 0 0 1 0 9H7" />
+    </svg>
+  ),
+  return_rejected: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M9.2 9.2l5.6 5.6" />
+      <path d="M14.8 9.2l-5.6 5.6" />
+    </svg>
+  ),
+  refunded: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="5" y="7.5" width="14" height="9" rx="2" />
+      <circle cx="12" cy="12" r="2.4" />
+      <path d="M8 10.5h.01M16 13.5h.01" />
+    </svg>
+  ),
+  cancelled: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M8.5 15.5l7-7" />
+    </svg>
+  ),
+  unknown: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M9.2 10.2a3 3 0 0 1 5.6 1.4c0 1.8-2 2.2-2 3.6" />
+      <path d="M12 17.2h.01" />
+    </svg>
+  ),
+};
+
+const getStatusIcon = (statusKey) => STATUS_ICONS[statusKey] || STATUS_ICONS.unknown;
 
 export default function AdminDashboard() {
   const [overview, setOverview] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [actingSellerId, setActingSellerId] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const loadOverview = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-
     setError("");
+    setLoading(true);
     try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        navigate("/login");
+        return;
+      }
+
       const res = await fetch(`${API_URL}/api/admin/overview`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -32,6 +109,8 @@ export default function AdminDashboard() {
       setOverview(data);
     } catch {
       setError("Unable to load admin overview.");
+    } finally {
+      setLoading(false);
     }
   }, [navigate]);
 
@@ -73,10 +152,15 @@ export default function AdminDashboard() {
   };
 
   const cards = overview?.cards || {};
+  const totalCustomers = toNumber(overview?.totalCustomers, 0);
+  const topCategories = Array.isArray(overview?.topCategories) ? overview.topCategories : [];
+  const lowStock = overview?.lowStock || {};
+  const lowStockItems = Array.isArray(lowStock.items) ? lowStock.items : [];
+  const lowStockThreshold = toNumber(lowStock.threshold, 0);
   const categoriesPanel = (
     <div className="seller-panel admin-categories-panel">
       <div className="card-head">
-        <h3 className="card-title">Categories</h3>
+        <h3 className="card-title">Top categories</h3>
         <button
           className="btn ghost"
           type="button"
@@ -86,14 +170,14 @@ export default function AdminDashboard() {
         </button>
       </div>
       <div className="seller-meta">
-        {(overview?.categories || []).map((category) => (
-          <span key={category} className="seller-chip">
-            {category}
+        {topCategories.map((category) => (
+          <span key={category.label} className="seller-chip">
+            {category.label} · {category.value}
           </span>
         ))}
       </div>
-      {!error && (overview?.categories || []).length === 0 && (
-        <p className="field-hint">No categories found.</p>
+      {!error && !loading && topCategories.length === 0 && (
+        <p className="field-hint">No category data yet.</p>
       )}
     </div>
   );
@@ -102,6 +186,7 @@ export default function AdminDashboard() {
     <AdminSidebarLayout
       title="Dashboard"
       description="Overview with stats, recent orders, and activity."
+      pageClassName="admin-dashboard-page"
       actions={
         <button className="admin-text-action" type="button" onClick={loadOverview}>
           Refresh
@@ -113,15 +198,20 @@ export default function AdminDashboard() {
       {notice && <p className="field-hint">{notice}</p>}
 
       <div className="seller-main">
-        <div className="seller-panel">
+        <div className="seller-panel admin-platform-panel">
           <div className="card-head">
             <h3 className="card-title">Platform summary</h3>
           </div>
           <div className="stat-grid">
             <div className="stat-card">
-              <p className="stat-label">Total sellers</p>
-              <p className="stat-value">{cards.totalSellers || 0}</p>
-              <p className="stat-delta">{cards.pendingSellers || 0} pending approvals</p>
+              <p className="stat-label">Total orders</p>
+              <p className="stat-value">{cards.totalOrders || 0}</p>
+              <p className="stat-delta">{cards.activeOrders || 0} active orders</p>
+            </div>
+            <div className="stat-card">
+              <p className="stat-label">Total revenue</p>
+              <p className="stat-value">{money(cards.paidRevenue)}</p>
+              <p className="stat-delta">Refunds: {money(cards.refundedAmount)}</p>
             </div>
             <div className="stat-card">
               <p className="stat-label">Total products</p>
@@ -129,16 +219,57 @@ export default function AdminDashboard() {
               <p className="stat-delta">{cards.activeProducts || 0} active listings</p>
             </div>
             <div className="stat-card">
-              <p className="stat-label">Total orders</p>
-              <p className="stat-value">{cards.totalOrders || 0}</p>
-              <p className="stat-delta">{cards.activeOrders || 0} active orders</p>
-            </div>
-            <div className="stat-card">
-              <p className="stat-label">Paid revenue</p>
-              <p className="stat-value">{money(cards.paidRevenue)}</p>
-              <p className="stat-delta">Refunds: {money(cards.refundedAmount)}</p>
+              <p className="stat-label">Total customers</p>
+              <p className="stat-value">{totalCustomers}</p>
+              <p className="stat-delta">Unique customers</p>
             </div>
           </div>
+        </div>
+
+        <div className="seller-panel">
+          <div className="card-head">
+            <h3 className="card-title">Quick actions</h3>
+          </div>
+          <div className="seller-toolbar">
+            <button className="btn primary" type="button" onClick={() => navigate("/admin/products")}>
+              Add Product
+            </button>
+            <button className="btn ghost" type="button" onClick={() => navigate("/admin/categories")}>
+              Manage Categories
+            </button>
+          </div>
+        </div>
+
+        <div className="seller-panel">
+          <div className="card-head">
+            <h3 className="card-title">Low stock alert</h3>
+            <button className="btn ghost" type="button" onClick={() => navigate("/admin/inventory")}>
+              View inventory
+            </button>
+          </div>
+          <p className="field-hint">Threshold: {lowStockThreshold} units</p>
+          <div className="admin-list">
+            {lowStockItems.map((item) => {
+              const stockValue = toNumber(item.stock, 0);
+              const isOut = stockValue <= 0;
+              return (
+                <div key={item._id} className="admin-list-item">
+                  <div>
+                    <p className="admin-list-title">{item.name || "Product"}</p>
+                    <p className="admin-list-sub">
+                      {item.seller?.storeName || item.seller?.name || "Seller"}
+                    </p>
+                  </div>
+                  <span className={`status-pill ${isOut ? "locked" : "warning"}`}>
+                    {isOut ? "Out of stock" : "Low stock"} · {stockValue}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {!error && !loading && lowStockItems.length === 0 && (
+            <p className="field-hint">No low stock items right now.</p>
+          )}
         </div>
 
         {categoriesPanel}
@@ -195,18 +326,39 @@ export default function AdminDashboard() {
                 View all
               </button>
             </div>
-            <div className="admin-list">
-              {(overview?.recentOrders || []).map((order) => (
-                <div key={order._id} className="admin-list-item">
-                  <div>
-                    <p className="admin-list-title">{order._id?.slice(-8).toUpperCase()}</p>
-                    <p className="admin-list-sub">
-                      {new Date(order.createdAt).toLocaleDateString("en-IN")} • {order.status}
-                    </p>
+            <div className="admin-list admin-recent-orders-list">
+              {(overview?.recentOrders || []).map((order) => {
+                const statusLabel = order.status || "Unknown";
+                const statusKey = String(statusLabel).trim().toLowerCase();
+                const knownStatuses = [
+                  "pending_payment",
+                  "placed",
+                  "processing",
+                  "shipped",
+                  "delivered",
+                  "return_requested",
+                  "return_rejected",
+                  "refunded",
+                  "cancelled",
+                ];
+                const statusClass = knownStatuses.includes(statusKey) ? statusKey : "unknown";
+
+                return (
+                  <div key={order._id} className="admin-list-item">
+                    <div>
+                      <p className="admin-list-title">{order._id?.slice(-8).toUpperCase()}</p>
+                      <p className="admin-list-sub">
+                        {new Date(order.createdAt).toLocaleDateString("en-IN")} •{" "}
+                        <span className={`status-pill admin-order-status ${statusClass}`.trim()}>
+                          <span className="admin-order-status-icon">{getStatusIcon(statusClass)}</span>
+                          <span>{statusLabel}</span>
+                        </span>
+                      </p>
+                    </div>
+                    <p className="admin-list-value">{money(order.total)}</p>
                   </div>
-                  <p className="admin-list-value">{money(order.total)}</p>
-                </div>
-              ))}
+                );
+              })}
               {!error && (overview?.recentOrders || []).length === 0 && (
                 <p className="field-hint">No orders yet.</p>
               )}
@@ -217,3 +369,4 @@ export default function AdminDashboard() {
     </AdminSidebarLayout>
   );
 }
+

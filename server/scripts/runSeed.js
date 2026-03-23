@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
-require("dotenv").config();
+const path = require("path");
+
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 const { seedSampleData } = require("../seed");
 
 const MONGO_URL = process.env.MONGO_URL || "mongodb://127.0.0.1:27017/craftzygifts";

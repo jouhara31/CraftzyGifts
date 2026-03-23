@@ -8,6 +8,10 @@ const { maybeCreateInventoryNotifications } = require("../utils/sellerNotificati
 const MAX_SELLING_PRICE = 200000;
 const MAX_MRP = 500000;
 const MAX_SURCHARGE = 50000;
+const MAX_PRODUCT_NAME_LENGTH = 120;
+const MAX_PRODUCT_DESCRIPTION_LENGTH = 2000;
+const MAX_CATEGORY_NAME_LENGTH = 60;
+const MAX_SUBCATEGORY_NAME_LENGTH = 60;
 const RATING_PRIOR_COUNT = 8;
 const GLOBAL_RATING_CACHE_TTL_MS = 5 * 60 * 1000;
 let globalRatingSummaryCache = {
@@ -219,13 +223,10 @@ const parsePackagingStyles = (value, fallback = []) => {
     .slice(0, 12);
 };
 
-const validatePackagingStylesInput = (value, { isCustomizable = true } = {}) => {
+const validatePackagingStylesInput = (value) => {
   if (value === undefined || value === null) return "";
   if (!Array.isArray(value)) return "Packaging styles must be a valid array.";
   if (value.length > 12) return "You can add up to 12 packaging styles only.";
-  if (!isCustomizable && value.length > 0) {
-    return "Packaging styles are allowed only for customizable products.";
-  }
 
   const seenTitles = new Set();
   for (let index = 0; index < value.length; index += 1) {
@@ -320,6 +321,31 @@ const parseImageSource = (value, fallback = "") => {
   const text = String(value || "").trim();
   if (!text) return fallback;
   return isAcceptedImageSource(text) ? text : fallback;
+};
+
+const validateProductTextFields = ({ name, description, category, subcategory }) => {
+  const normalizedName = String(name || "").trim();
+  const normalizedDescription = String(description || "").trim();
+  const normalizedCategory = String(category || "").trim();
+  const normalizedSubcategory = String(subcategory || "").trim();
+
+  if (!normalizedName || normalizedName.length < 3 || normalizedName.length > MAX_PRODUCT_NAME_LENGTH) {
+    return `Product name must be between 3 and ${MAX_PRODUCT_NAME_LENGTH} characters.`;
+  }
+  if (!normalizedCategory || normalizedCategory.length > MAX_CATEGORY_NAME_LENGTH) {
+    return `Category is required and must be at most ${MAX_CATEGORY_NAME_LENGTH} characters.`;
+  }
+  if (
+    normalizedDescription &&
+    normalizedDescription.length > MAX_PRODUCT_DESCRIPTION_LENGTH
+  ) {
+    return `Description cannot exceed ${MAX_PRODUCT_DESCRIPTION_LENGTH} characters.`;
+  }
+  if (normalizedSubcategory.length > MAX_SUBCATEGORY_NAME_LENGTH) {
+    return `Subcategory cannot exceed ${MAX_SUBCATEGORY_NAME_LENGTH} characters.`;
+  }
+
+  return "";
 };
 
 const parseCustomizationCatalog = (value, fallback = []) => {
@@ -889,8 +915,8 @@ exports.getPublicSellerStore = async (req, res) => {
     const seller = await User.findOne(sellerFilter)
       .select(
         isOwner
-          ? "name storeName profileImage storeCoverImage about supportEmail phone pickupAddress createdAt"
-          : "name storeName profileImage storeCoverImage about pickupAddress createdAt"
+          ? "name storeName profileImage storeCoverImage about supportEmail phone instagramUrl pickupAddress createdAt"
+          : "name storeName profileImage storeCoverImage about instagramUrl pickupAddress createdAt"
       )
       .lean();
     if (!seller) {
@@ -1109,6 +1135,20 @@ exports.getCustomizationMasterOptions = async (req, res) => {
 
 exports.createProduct = async (req, res) => {
   try {
+    const name = String(req.body?.name || "").trim();
+    const description = String(req.body?.description || "").trim();
+    const category = String(req.body?.category || "").trim();
+    const subcategory = String(req.body?.subcategory || "").trim();
+    const textValidationError = validateProductTextFields({
+      name,
+      description,
+      category,
+      subcategory,
+    });
+    if (textValidationError) {
+      return res.status(400).json({ message: textValidationError });
+    }
+
     const price = parseMoneyInput(req.body.price, 0);
     if (!Number.isFinite(price)) {
       return res.status(400).json({ message: "Price must be a valid number." });
@@ -1174,27 +1214,25 @@ exports.createProduct = async (req, res) => {
     const occasions = parseStringList(req.body.occasions, [], 8);
     const includedItems = parseStringList(req.body.includedItems, [], 20);
     const highlights = parseStringList(req.body.highlights, [], 20);
-    const packagingValidationError = validatePackagingStylesInput(
-      req.body.packagingStyles,
-      { isCustomizable }
-    );
+    const packagingValidationError = validatePackagingStylesInput(req.body.packagingStyles);
     if (packagingValidationError) {
       return res.status(400).json({ message: packagingValidationError });
     }
-    const packagingStyles = isCustomizable
-      ? parsePackagingStyles(req.body.packagingStyles, [])
-      : [];
+    const packagingStyles = parsePackagingStyles(req.body.packagingStyles, []);
     const images = parseImageUrls(req.body.images, []);
+    if (images.length < 3) {
+      return res.status(400).json({ message: "Upload at least 3 product images." });
+    }
     const status = parseProductStatus(req.body.status, "active");
     const customizationCatalog = isCustomizable
       ? parseCustomizationCatalog(req.body.customizationCatalog, [])
       : [];
     const moderation = await deriveAutoModeration({
       candidate: {
-        name: req.body?.name,
-        description: req.body?.description,
-        category: req.body?.category,
-        subcategory: req.body?.subcategory,
+        name,
+        description,
+        category,
+        subcategory,
         price,
         images,
       },
@@ -1203,10 +1241,10 @@ exports.createProduct = async (req, res) => {
 
     const product = new Product({
       ...req.body,
-      name: String(req.body.name || "").trim(),
-      description: String(req.body.description || "").trim(),
-      category: String(req.body.category || "").trim(),
-      subcategory: String(req.body.subcategory || "").trim(),
+      name,
+      description,
+      category,
+      subcategory,
       price,
       mrp,
       occasions,
@@ -1264,6 +1302,17 @@ exports.updateProduct = async (req, res) => {
     }
     if (has("subcategory")) {
       updates.subcategory = String(updates.subcategory || "").trim();
+    }
+    if (has("name") || has("description") || has("category") || has("subcategory")) {
+      const textValidationError = validateProductTextFields({
+        name: has("name") ? updates.name : product.name,
+        description: has("description") ? updates.description : product.description,
+        category: has("category") ? updates.category : product.category,
+        subcategory: has("subcategory") ? updates.subcategory : product.subcategory,
+      });
+      if (textValidationError) {
+        return res.status(400).json({ message: textValidationError });
+      }
     }
     if (has("price")) {
       const nextPrice = parseMoneyInput(updates.price, 0);
@@ -1332,10 +1381,7 @@ exports.updateProduct = async (req, res) => {
       );
     }
     if (has("packagingStyles")) {
-      const packagingValidationError = validatePackagingStylesInput(
-        updates.packagingStyles,
-        { isCustomizable: nextCustomizable }
-      );
+      const packagingValidationError = validatePackagingStylesInput(updates.packagingStyles);
       if (packagingValidationError) {
         return res.status(400).json({ message: packagingValidationError });
       }
@@ -1343,9 +1389,6 @@ exports.updateProduct = async (req, res) => {
         updates.packagingStyles,
         product.packagingStyles || []
       );
-      if (!nextCustomizable) {
-        updates.packagingStyles = [];
-      }
     }
     if (has("deliveryMinDays") || has("deliveryMaxDays")) {
       const nextMin = has("deliveryMinDays")
@@ -1404,7 +1447,6 @@ exports.updateProduct = async (req, res) => {
     if (!nextCustomizable) {
       updates.makingCharge = 0;
       updates.customizationCatalog = [];
-      updates.packagingStyles = [];
     }
 
     const shouldReModerate = ["name", "description", "category", "subcategory", "images", "price"].some((field) =>

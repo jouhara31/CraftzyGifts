@@ -69,5 +69,12 @@ const productSchema = new mongoose.Schema(
 
 productSchema.index({ seller: 1, createdAt: -1 });
 productSchema.index({ seller: 1, status: 1, moderationStatus: 1, createdAt: -1 });
+productSchema.index({
+  category: 1,
+  subcategory: 1,
+  status: 1,
+  moderationStatus: 1,
+  createdAt: -1,
+});
 
 module.exports = mongoose.model("Product", productSchema);

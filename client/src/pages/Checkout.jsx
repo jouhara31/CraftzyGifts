@@ -3,8 +3,20 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import { clearCart, getCart } from "../utils/cart";
 import { getProductImage } from "../utils/productMedia";
+import { addPendingPaymentGroup } from "../utils/paymentTracking";
+import { buildPaymentStatusPath } from "../utils/paymentStatusRoute";
+import {
+  fallbackPathForRole,
+  getPurchaseBlockedMessage,
+  isPurchaseBlockedRole,
+  readStoredSessionClaims,
+} from "../utils/authRoute";
+import {
+  openRazorpayCheckout,
+  readStoredUserProfile,
+} from "../utils/razorpayCheckout";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const isGenericHamperItem = (item) =>
   Boolean(String(item?.customization?.catalogSellerId || "").trim());
 const getCustomizationCharge = (item) =>
@@ -26,23 +38,22 @@ const hasReferenceImages = (customization) => {
 };
 const formatPrice = (value) => Number(value || 0).toLocaleString("en-IN");
 const ONLINE_PAYMENT_MODES = new Set(["upi", "card"]);
-const toSafeNumber = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+const PAYMENT_MODE_LABELS = {
+  cod: "Cash on delivery",
+  upi: "UPI",
+  card: "Card",
 };
 const buildStockErrorMessage = (item, details, fallbackMessage) => {
   const type = String(details?.type || "").trim().toLowerCase();
-  const requestedQty = Math.max(0, toSafeNumber(details?.requestedQty));
-  const availableQty = Math.max(0, toSafeNumber(details?.availableQty));
 
   if (type === "customization_stock") {
     const itemName = String(details?.itemName || "").trim() || "customization item";
-    return `${item?.name || "This product"} - ${itemName} stock is low (needed ${requestedQty}, available ${availableQty}).`;
+    return `${item?.name || "This product"} - ${itemName} is currently unavailable.`;
   }
 
   if (type === "product_stock") {
     const productName = String(details?.productName || item?.name || "This product").trim();
-    return `${productName} stock is low (needed ${requestedQty}, available ${availableQty}).`;
+    return `${productName} is currently unavailable.`;
   }
 
   const fallback = String(fallbackMessage || "").trim();
@@ -52,21 +63,10 @@ const buildStockErrorMessage = (item, details, fallbackMessage) => {
   }
   if (fallback.toLowerCase().includes("insufficient stock")) {
     const productName = String(item?.name || "Selected item").trim();
-    return `${productName} stock is low. ${fallback}`;
+    return `${productName} is currently unavailable.`;
   }
 
   return fallbackMessage;
-};
-
-const readStoredUserRole = () => {
-  try {
-    const raw = localStorage.getItem("user");
-    if (!raw) return "";
-    const parsed = JSON.parse(raw);
-    return String(parsed?.role || "").trim().toLowerCase();
-  } catch {
-    return "";
-  }
 };
 
 const normalizeCheckoutItem = (item = {}) => {
@@ -100,7 +100,12 @@ export default function Checkout() {
     products: [],
     stats: null,
   });
-  const [userRole, setUserRole] = useState(() => readStoredUserRole());
+  const [sessionClaims, setSessionClaims] = useState(() => readStoredSessionClaims());
+  const [paymentConfig, setPaymentConfig] = useState({
+    onlinePaymentsEnabled: false,
+    supportedModes: ["cod"],
+    isLoading: true,
+  });
   const location = useLocation();
   const navigate = useNavigate();
   const cartItems = getCart();
@@ -126,8 +131,16 @@ export default function Checkout() {
   );
   const deliveryCharge = subtotal + customizationTotal >= 999 ? 0 : 99;
   const total = subtotal + customizationTotal + deliveryCharge;
-  const isOnlinePayment = ONLINE_PAYMENT_MODES.has(form.paymentMode);
-  const isSellerAccount = userRole === "seller";
+  const userRole = sessionClaims.role;
+  const sellerStatus = sessionClaims.sellerStatus;
+  const isPurchaseBlocked = isPurchaseBlockedRole(userRole);
+  const purchaseBlockedMessage = getPurchaseBlockedMessage(userRole);
+  const isOnlinePayment =
+    paymentConfig.onlinePaymentsEnabled && ONLINE_PAYMENT_MODES.has(form.paymentMode);
+  const storedUserProfile = readStoredUserProfile();
+  const supportedPaymentModes = paymentConfig.supportedModes.filter(
+    (mode) => PAYMENT_MODE_LABELS[mode]
+  );
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -135,16 +148,66 @@ export default function Checkout() {
 
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!token || sessionClaims.isExpired) {
+      navigate("/login", { replace: true });
+      return;
     }
-  }, [navigate]);
+    if (isPurchaseBlocked) {
+      navigate(fallbackPathForRole(userRole, sellerStatus), { replace: true });
+    }
+  }, [
+    isPurchaseBlocked,
+    navigate,
+    sellerStatus,
+    sessionClaims.isExpired,
+    userRole,
+  ]);
 
   useEffect(() => {
-    const syncUserRole = () => setUserRole(readStoredUserRole());
-    window.addEventListener("user:updated", syncUserRole);
-    return () => window.removeEventListener("user:updated", syncUserRole);
+    const syncSessionClaims = () => setSessionClaims(readStoredSessionClaims());
+    window.addEventListener("user:updated", syncSessionClaims);
+    return () => window.removeEventListener("user:updated", syncSessionClaims);
   }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const loadPaymentConfig = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/orders/payment/config`);
+        const data = await res.json();
+        if (ignore) return;
+        const supportedModes = Array.isArray(data?.supportedModes)
+          ? data.supportedModes.filter((mode) => PAYMENT_MODE_LABELS[mode])
+          : ["cod"];
+        const normalizedModes = supportedModes.includes("cod")
+          ? supportedModes
+          : ["cod", ...supportedModes];
+        setPaymentConfig({
+          onlinePaymentsEnabled: Boolean(data?.onlinePaymentsEnabled),
+          supportedModes: normalizedModes.length > 0 ? normalizedModes : ["cod"],
+          isLoading: false,
+        });
+      } catch {
+        if (ignore) return;
+        setPaymentConfig({
+          onlinePaymentsEnabled: false,
+          supportedModes: ["cod"],
+          isLoading: false,
+        });
+      }
+    };
+
+    loadPaymentConfig();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (paymentConfig.supportedModes.includes(form.paymentMode)) return;
+    setForm((current) => ({ ...current, paymentMode: "cod" }));
+  }, [form.paymentMode, paymentConfig.supportedModes]);
 
   useEffect(() => {
     let ignore = false;
@@ -213,14 +276,22 @@ export default function Checkout() {
 
   const placeOrder = async () => {
     setError("");
-    if (isSellerAccount) {
-      setError("Seller account cannot place orders. Use a customer account.");
+    if (isPurchaseBlocked) {
+      setError(purchaseBlockedMessage);
       return;
     }
     const token = localStorage.getItem("token");
-    if (!token) {
+    if (!token || sessionClaims.isExpired) {
       setError("Please login to place your order.");
       navigate("/login");
+      return;
+    }
+    if (
+      ONLINE_PAYMENT_MODES.has(form.paymentMode) &&
+      !paymentConfig.onlinePaymentsEnabled
+    ) {
+      setForm((current) => ({ ...current, paymentMode: "cod" }));
+      setError("Online payments are not available right now. Please use cash on delivery.");
       return;
     }
 
@@ -235,83 +306,148 @@ export default function Checkout() {
     }
 
     setLoading(true);
+    let onlineSessionCreated = false;
+    let paymentGroupId = "";
     try {
-      const createdOrders = [];
-      for (const item of items) {
-        const res = await fetch(`${API_URL}/api/orders`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
+      const res = await fetch(`${API_URL}/api/orders/checkout-session`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          items: items.map((item) => ({
             productId: item.id,
             quantity: item.quantity,
             customization: item.customization,
-            shippingAddress: {
-              name: form.name,
-              phone: form.phone,
-              line1: form.line1,
-              line2: form.line2,
-              city: form.city,
-              state: form.state,
-              pincode: form.pincode,
-            },
-            paymentMode: form.paymentMode,
-          }),
+          })),
+          shippingAddress: {
+            name: form.name,
+            phone: form.phone,
+            line1: form.line1,
+            line2: form.line2,
+            city: form.city,
+            state: form.state,
+            pincode: form.pincode,
+          },
+          paymentMode: form.paymentMode,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(
+          buildStockErrorMessage(primaryItem, data?.details, data?.message || "Order failed")
+        );
+      }
+
+      if (data?.mode === "cod") {
+        if (!buyNowItem) {
+          clearCart();
+        }
+        navigate("/orders", {
+          state: {
+            notice: "Order placed successfully.",
+          },
         });
-
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(
-            buildStockErrorMessage(item, data?.details, data?.message || "Order failed")
-          );
-        }
-
-        const created = await res.json();
-        createdOrders.push(created);
+        return;
       }
 
-      if (isOnlinePayment) {
-        for (const created of createdOrders) {
-          const payRes = await fetch(`${API_URL}/api/orders/${created._id}/pay`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ result: "success" }),
-          });
-
-          const payData = await payRes.json();
-          if (!payRes.ok) {
-            throw new Error(
-              buildStockErrorMessage(
-                items.find((entry) => String(entry.id) === String(created?.product?._id)) || null,
-                payData?.details,
-                payData.message || "Payment verification failed"
-              )
-            );
-          }
-        }
+      if (!data?.checkout?.orderId || !data?.checkout?.paymentGroupId) {
+        throw new Error("Payment checkout is unavailable right now. Please try again.");
       }
 
+      onlineSessionCreated = true;
+      paymentGroupId = String(data.checkout.paymentGroupId || "").trim();
       if (!buyNowItem) {
         clearCart();
       }
-      navigate("/orders", {
-        state: {
-          notice: isOnlinePayment
-            ? "Order placed and payment verified."
-            : "Order placed successfully.",
+
+      const prefill = {
+        name: form.name || storedUserProfile.name,
+        email: storedUserProfile.email,
+        contact: form.phone || storedUserProfile.contact,
+      };
+
+      const paymentResult = await openRazorpayCheckout({
+        checkout: data.checkout,
+        prefill,
+        notes: {
+          paymentGroupId,
+        },
+        onDismiss: () => {
+          navigate(
+            buildPaymentStatusPath({
+              paymentGroupId,
+              outcome: "cancelled",
+            }),
+            {
+              state: {
+                paymentGroupId,
+                outcome: "cancelled",
+                notice:
+                  "Payment cancelled. Your order is still saved as pending payment and can be retried safely.",
+              },
+            }
+          );
+        },
+        onSuccess: async (response) => {
+          addPendingPaymentGroup(paymentGroupId);
+          navigate(
+            buildPaymentStatusPath({
+              paymentGroupId,
+              outcome: "pending",
+            }),
+            {
+              state: {
+                paymentGroupId,
+                outcome: "pending",
+                notice:
+                  "Payment submitted. We are waiting for gateway confirmation. Orders will update automatically.",
+              },
+            }
+          );
+          return response;
         },
       });
+
+      if (paymentResult?.dismissed) {
+        return;
+      }
     } catch (err) {
-      setError(err.message || "Order failed");
+      if (onlineSessionCreated) {
+        if (paymentGroupId) {
+          addPendingPaymentGroup(paymentGroupId);
+        }
+        navigate(
+          buildPaymentStatusPath({
+            paymentGroupId,
+            outcome: "failed",
+          }),
+          {
+            state: {
+              paymentGroupId,
+              outcome: "failed",
+              error:
+                err?.message ||
+                "Payment could not be completed. Retry safely from your orders page.",
+            },
+          }
+        );
+      } else {
+        setError(err.message || "Order failed");
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  if (
+    typeof localStorage !== "undefined" &&
+    (!localStorage.getItem("token") || sessionClaims.isExpired || isPurchaseBlocked)
+  ) {
+    return null;
+  }
 
   return (
     <div className="page">
@@ -330,11 +466,6 @@ export default function Checkout() {
         <div className="form-card">
           <h3>Delivery details</h3>
           {error && <p className="field-hint">{error}</p>}
-          {isSellerAccount && (
-            <p className="field-hint">
-              Seller account cannot place orders. Login with a customer account.
-            </p>
-          )}
           {items.length === 0 && (
             <p className="field-hint">Your cart is empty.</p>
           )}
@@ -376,13 +507,21 @@ export default function Checkout() {
           <div className="field">
             <label>Payment mode</label>
             <select name="paymentMode" value={form.paymentMode} onChange={handleChange}>
-              <option value="cod">Cash on delivery</option>
-              <option value="upi">UPI</option>
-              <option value="card">Card</option>
+              {supportedPaymentModes.map((mode) => (
+                <option key={mode} value={mode}>
+                  {PAYMENT_MODE_LABELS[mode]}
+                </option>
+              ))}
             </select>
             {isOnlinePayment && (
               <p className="field-hint">
-                You will complete payment now and order will be marked paid instantly.
+                Payment opens in Razorpay checkout. Your order stays pending until the gateway
+                webhook confirms it securely.
+              </p>
+            )}
+            {!paymentConfig.isLoading && !paymentConfig.onlinePaymentsEnabled && (
+              <p className="field-hint">
+                Online payments are not enabled right now. Cash on delivery is available.
               </p>
             )}
           </div>
@@ -423,17 +562,18 @@ export default function Checkout() {
             className="btn primary"
             type="button"
             onClick={placeOrder}
-            disabled={loading || items.length === 0 || isSellerAccount}
+            disabled={loading || items.length === 0 || isPurchaseBlocked}
           >
             {loading ? "Placing..." : "Place order"}
           </button>
 
           {buyNowItem && sellerDisplayName && primarySellerId && (
             <section className="checkout-seller-panel">
-              <div className="card-head">
-                <p className="card-title">Seller details</p>
-                <span className="chip">{sellerPanel?.stats?.totalProducts || 0} products</span>
-              </div>
+              {(sellerPanel?.stats?.totalProducts || 0) > 0 ? (
+                <div className="card-head">
+                  <span className="chip">{sellerPanel?.stats?.totalProducts || 0} products</span>
+                </div>
+              ) : null}
               <div className="checkout-seller-row">
                 <span className="checkout-mini-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24">
@@ -511,3 +651,4 @@ export default function Checkout() {
     </div>
   );
 }
+

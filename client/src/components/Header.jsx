@@ -1,17 +1,19 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
 import logoPng from "../assets/logo.png";
 import logoCartPng from "../assets/logo-cart.png";
 import { getCart } from "../utils/cart";
 import { getWishlist } from "../utils/wishlist";
+import { logoutSession } from "../utils/authSession";
+import { openNotificationStream } from "../utils/notificationStream";
 import {
   DEFAULT_CATEGORY_TREE,
   buildCategoryPath,
   loadCategoryTree,
 } from "../utils/categoryMaster";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
 
 const readStoredProfileImage = () => {
@@ -289,7 +291,6 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const categoryLinksRef = useRef(null);
   const isAuthNav = variant === "auth";
   const isSellerNav = variant === "seller";
-  const isAdminNav = variant === "admin";
   const isCartRoute = location.pathname === "/cart";
   const brandLogo = isCartRoute ? logoCartPng : logoPng;
   const brandLabel = isCartRoute ? "Your Cart" : "Craftzy Gifts";
@@ -464,13 +465,10 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     setNotificationUnreadCount(Math.max(0, Number(unreadCount || 0)));
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
+  const handleLogout = async () => {
+    await logoutSession();
     setUser(null);
     closeAccount();
-    window.dispatchEvent(new Event("user:updated"));
     navigate("/");
   };
 
@@ -495,7 +493,6 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
 
   const toAuthPath = (path) => (user ? path : "/login");
   const sellerActive = (path) => location.pathname.startsWith(path);
-  const adminActive = (path) => location.pathname.startsWith(path);
   const showCategoryToggle =
     typeof onFilterClick === "function" && location.pathname === "/products";
   const isHomeRoute = location.pathname === "/";
@@ -556,8 +553,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     { label: "Contact", href: "/#support" },
   ];
   const isCustomerUser = Boolean(user) && (!user.role || user.role === "customer");
-  const showCustomerNotification =
-    isCustomerUser && !isSellerNav && !isAdminNav && !isAuthNav;
+  const showCustomerNotification = isCustomerUser && !isSellerNav && !isAuthNav;
   const showNotificationMenu = isSellerNav || showCustomerNotification;
   const customerBottomNavItems = [
     { label: "Home", to: "/", icon: "home", active: location.pathname === "/" },
@@ -686,11 +682,17 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     fetchNotifications();
     intervalId = window.setInterval(fetchNotifications, 60000);
     window.addEventListener(eventName, fetchNotifications);
+    const closeStream = openNotificationStream({
+      onUpdate: () => {
+        window.dispatchEvent(new Event(eventName));
+      },
+    });
 
     return () => {
       active = false;
       if (intervalId) window.clearInterval(intervalId);
       window.removeEventListener(eventName, fetchNotifications);
+      closeStream();
     };
   }, [isSellerNav, navigate, showNotificationMenu, user]);
 
@@ -1180,82 +1182,14 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           >
             Payments
           </Link>
-        </nav>
-      </header>
-    );
-  }
-
-  if (isAdminNav) {
-    return (
-      <header className="main-header seller-header">
-        <Link className="brand" to="/">
-          <img src={brandLogo} alt="Craftzy Gifts logo" className="brand-logo-head" />
-          <span className="brand-head-copy">
-            <span className="brand-head-text">{brandLabel}</span>
-            {brandSubtext && <span className="brand-head-sub">{brandSubtext}</span>}
-          </span>
-        </Link>
-
-        <nav className="nav-links">
           <Link
-            className={`nav-link ${adminActive("/admin/dashboard") ? "active" : ""}`}
-            to="/admin/dashboard"
+            className={`nav-link ${sellerActive("/seller/messages") ? "active" : ""}`}
+            to="/seller/messages"
+            onClick={closeMobileMenu}
           >
-            Dashboard
-          </Link>
-          <Link
-            className={`nav-link ${adminActive("/admin/sellers") ? "active" : ""}`}
-            to="/admin/sellers"
-          >
-            Sellers
-          </Link>
-          <Link
-            className={`nav-link ${adminActive("/admin/products") ? "active" : ""}`}
-            to="/admin/products"
-          >
-            Products
-          </Link>
-          <Link
-            className={`nav-link ${adminActive("/admin/categories") ? "active" : ""}`}
-            to="/admin/categories"
-          >
-            Categories
-          </Link>
-          <Link
-            className={`nav-link ${adminActive("/admin/orders") ? "active" : ""}`}
-            to="/admin/orders"
-          >
-            Orders
-          </Link>
-          <Link
-            className={`nav-link ${adminActive("/admin/reports") ? "active" : ""}`}
-            to="/admin/reports"
-          >
-            Reports
+            Messages
           </Link>
         </nav>
-
-          <div className="header-right">
-            <form className="search wide" onSubmit={handleCatalogSearch}>
-              <input
-              className="search-input"
-              type="search"
-              placeholder="Search products..."
-              value={searchText}
-              onChange={(event) => setSearchText(event.target.value)}
-            />
-            </form>
-            <div className="seller-toolbar">
-            <button className="btn ghost" type="button" onClick={() => navigate("/profile")}>
-              <HeaderMenuIcon kind="profile" />
-              Profile
-            </button>
-            <button className="btn ghost" type="button" onClick={handleLogout}>
-              <HeaderMenuIcon kind="logout" />
-              Logout
-            </button>
-            </div>
-        </div>
       </header>
     );
   }
@@ -1796,4 +1730,5 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     </>
   );
 }
+
 

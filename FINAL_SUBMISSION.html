@@ -1,0 +1,573 @@
+<!doctype html><html><head><meta charset="utf-8" /><title>FINAL_SUBMISSION</title><style>
+  body {
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    color: #1f2937;
+    line-height: 1.6;
+    margin: 40px;
+  }
+  h1, h2, h3 { color: #111827; }
+  h1 { font-size: 26px; margin-bottom: 10px; }
+  h2 { font-size: 20px; margin-top: 24px; }
+  h3 { font-size: 16px; margin-top: 20px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  table, th, td { border: 1px solid #d1d5db; }
+  th, td { padding: 8px; text-align: left; }
+  code { background: #f3f4f6; padding: 2px 4px; border-radius: 4px; }
+  pre { background: #f3f4f6; padding: 12px; border-radius: 6px; overflow-x: auto; }
+  img { max-width: 100%; height: auto; margin: 12px 0; }
+  .page-break { page-break-before: always; }
+</style></head><body><p>CraftzyGifts - Project Synopsis (BCSP-064)</p>
+<p>Project Title
+CraftzyGifts - An Online Gifts and Custom Hamper System</p>
+<ol>
+<li>Introduction and Objectives
+Introduction:
+CraftzyGifts is a web-based multi-vendor marketplace for handmade gifts, curated hampers, and custom gifting. Customers can purchase ready-made hampers or build personalized gift boxes. Sellers manage their own product listings and orders. The admin panel provides approval, moderation, and monitoring.</li>
+</ol>
+<p>Objectives:</p>
+<ul>
+<li>Allow customers to buy ready-made products or build fully customized hampers.</li>
+<li>Provide home-based crafters an easy platform to sell handmade products.</li>
+<li>Include making and decoration charges for custom hampers.</li>
+<li>Enable reference image upload to guide sellers in designing hampers.</li>
+<li>Provide admin control for monitoring sellers, products, and orders.</li>
+<li>Deliver a responsive, user-friendly web application for seamless browsing and ordering.</li>
+</ul>
+<ol start="2">
+<li>Project Category</li>
+</ol>
+<ul>
+<li>Category: Web-based multi-vendor e-commerce system with database management.</li>
+<li>Technologies: MERN stack (MongoDB, Express.js, React.js, Node.js).</li>
+</ul>
+<ol start="3">
+<li>Analysis
+3.1 DFD Level 0
+<img src="docs/diagrams/dfd-level-0.svg" alt="Diagram"></li>
+</ol>
+<p>3.2 DFD Level 1
+<img src="docs/diagrams/dfd-level-1.svg" alt="Diagram"></p>
+<p>3.3 DFD Level 2 (Order and Custom Hamper Flow)
+<img src="docs/diagrams/dfd-level-2.svg" alt="Diagram"></p>
+<p>3.4 ER Diagram (High Level)
+<img src="docs/diagrams/er-diagram.svg" alt="Diagram"></p>
+<p>3.5 Database Design Summary</p>
+<ul>
+<li>User stores customer, seller, and admin accounts with role-based access.</li>
+<li>Product stores listing data, pricing, images, and customization options.</li>
+<li>Order stores purchase, payment, and delivery status.</li>
+<li>CategoryMaster and CustomizationMaster store shared metadata.</li>
+<li>PlatformSettings stores global configuration.</li>
+</ul>
+<ol start="4">
+<li>Project Structure
+Modules:</li>
+</ol>
+<ul>
+<li>Authentication module: registration, login, JWT-based access.</li>
+<li>Admin module: seller approvals, category management, platform settings.</li>
+<li>Seller module: product CRUD, order status updates.</li>
+<li>Customer module: browsing, cart, checkout, order tracking.</li>
+<li>Custom hamper module: selection of items, reference images, and making charges.</li>
+</ul>
+<p>Data Structures:</p>
+<ul>
+<li>Cart items stored in client-side arrays and persisted in local storage.</li>
+<li>Customization selections stored as lists and key-value maps.</li>
+<li>MongoDB collections for persistent storage.</li>
+</ul>
+<p>Process Logic:</p>
+<ul>
+<li>Customer registration and login -&gt; browse or customize -&gt; add to cart -&gt; checkout -&gt; order created.</li>
+<li>Seller updates product inventory and order status.</li>
+<li>Admin reviews sellers and monitors orders and products.</li>
+</ul>
+<p>Testing Details:</p>
+<ul>
+<li>Unit testing for modules such as login, add product, cart operations.</li>
+<li>Integration testing for customer -&gt; order -&gt; seller -&gt; admin workflow.</li>
+</ul>
+<p>Reports Generation:</p>
+<ul>
+<li>Admin reports for sellers, products, orders, and analytics.</li>
+<li>Seller reports for orders received and earnings.</li>
+<li>Customer order history and customization details.</li>
+</ul>
+<ol start="5">
+<li>Tools / Platform / Hardware / Software Requirements
+Software:</li>
+</ol>
+<ul>
+<li>Node.js, npm, MongoDB, React.js, Express.js, VS Code.
+Hardware:</li>
+<li>Processor: Intel i5 or equivalent.</li>
+<li>RAM: 16 GB.</li>
+<li>Storage: 238 GB or higher.
+Platform:</li>
+<li>Web-based system, responsive across desktop and mobile.</li>
+</ul>
+<ol start="6">
+<li><p>Industry / Client Details
+This project is developed as an academic project. It can be adapted for small-scale craft businesses or local gift shops.</p>
+</li>
+<li><p>Future Scope and Enhancements</p>
+</li>
+</ol>
+<ul>
+<li>Mobile apps, international shipping, and multi-language support.</li>
+<li>AI-based recommendations and AR previews for customized hampers.</li>
+<li>Subscription services, advanced seller analytics, and marketing tools.</li>
+<li>AI chatbots, blockchain authenticity, and social integrations.</li>
+</ul>
+<div class="page-break"></div><p>CraftzyGifts - Project Report (BCSP-064)</p>
+<p>Student Name: [Fill]
+Enrolment No: [Fill]
+Regional Centre: [Fill]
+Study Centre: [Fill]
+Project Guide: [Fill]</p>
+<ol>
+<li><p>Introduction
+CraftzyGifts is a web-based multi-vendor marketplace for handmade gifts and custom hampers. Customers can purchase ready-made products or build personalized hampers. Sellers manage their products and orders, while admins approve sellers, manage categories, and monitor platform activity. The system is designed to demonstrate end-to-end software development following the SDLC.</p>
+</li>
+<li><p>Objectives</p>
+</li>
+</ol>
+<ul>
+<li>Provide a marketplace for handmade gifts and curated hampers.</li>
+<li>Allow customers to customize hampers with add-ons and reference images.</li>
+<li>Enable sellers to manage listings and order fulfillment.</li>
+<li>Provide admin controls for approval, monitoring, and reporting.</li>
+<li>Deliver a responsive and user-friendly web experience.</li>
+</ul>
+<ol start="3">
+<li>Tools and Environment
+Software:</li>
+</ol>
+<ul>
+<li>Node.js, npm</li>
+<li>MongoDB, Mongoose</li>
+<li>Express.js</li>
+<li>React.js, Vite</li>
+<li>Tailwind CSS</li>
+<li>VS Code, Chrome</li>
+</ul>
+<p>Hardware (suggested):</p>
+<ul>
+<li>Processor: Intel i5 or equivalent</li>
+<li>RAM: 16 GB</li>
+<li>Storage: 238 GB or higher</li>
+</ul>
+<ol start="4">
+<li>Analysis Document (SRS)
+4.1 Problem Statement
+Provide an online platform where multiple sellers can list handmade gifts and customers can purchase or customize hampers, with admin oversight for quality and operations.</li>
+</ol>
+<p>4.2 Stakeholders and User Classes</p>
+<ul>
+<li>Customer: Browse, customize, buy, and track orders.</li>
+<li>Seller: Create listings, manage inventory, and update order status.</li>
+<li>Admin: Approve sellers, manage categories, and monitor platform health.</li>
+</ul>
+<p>4.3 Functional Requirements</p>
+<ul>
+<li>FR1: User registration and login with role-based access.</li>
+<li>FR2: Customers can browse products by category and seller.</li>
+<li>FR3: Customers can add items to cart and place orders.</li>
+<li>FR4: Customers can create customized hampers with add-ons and reference images.</li>
+<li>FR5: Sellers can add, edit, and remove product listings.</li>
+<li>FR6: Sellers can view and update order status.</li>
+<li>FR7: Admin can approve or reject sellers.</li>
+<li>FR8: Admin can manage categories and monitor products.</li>
+<li>FR9: Admin can view reports for orders, sellers, and analytics.</li>
+<li>FR10: Users can manage profile and addresses.</li>
+</ul>
+<p>4.4 Non-Functional Requirements</p>
+<ul>
+<li>Security: Password hashing and JWT authentication.</li>
+<li>Performance: Fast browsing and responsive UI for mobile and desktop.</li>
+<li>Reliability: Data consistency using MongoDB and validations.</li>
+<li>Usability: Clear navigation and simple checkout.</li>
+<li>Maintainability: Modular code in client and server layers.</li>
+</ul>
+<p>4.5 Data Flow Diagram (Level 0)
+<img src="docs/diagrams/dfd-level-0.svg" alt="Diagram"></p>
+<p>4.6 Data Flow Diagram (Level 1)
+<img src="docs/diagrams/dfd-level-1.svg" alt="Diagram"></p>
+<p>4.7 Data Flow Diagram (Level 2 - Order and Custom Hamper Flow)
+<img src="docs/diagrams/dfd-level-2.svg" alt="Diagram"></p>
+<p>4.8 ER Diagram (High Level)
+<img src="docs/diagrams/er-diagram.svg" alt="Diagram"></p>
+<p>4.9 Data Dictionary (Summary)
+User</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>name</td>
+<td>String</td>
+<td>Full name</td>
+</tr>
+<tr>
+<td>email</td>
+<td>String</td>
+<td>Unique login email</td>
+</tr>
+<tr>
+<td>password</td>
+<td>String</td>
+<td>Hashed password</td>
+</tr>
+<tr>
+<td>role</td>
+<td>String</td>
+<td>customer, seller, admin</td>
+</tr>
+<tr>
+<td>sellerStatus</td>
+<td>String</td>
+<td>pending, approved, rejected</td>
+</tr>
+<tr>
+<td>storeName</td>
+<td>String</td>
+<td>Seller store name</td>
+</tr>
+<tr>
+<td>phone</td>
+<td>String</td>
+<td>Contact number</td>
+</tr>
+<tr>
+<td>profileImage</td>
+<td>String</td>
+<td>Profile image URL</td>
+</tr>
+<tr>
+<td>addresses</td>
+<td>Object</td>
+<td>Shipping and billing addresses</td>
+</tr>
+</tbody></table>
+<p>Product</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>name</td>
+<td>String</td>
+<td>Product name</td>
+</tr>
+<tr>
+<td>description</td>
+<td>String</td>
+<td>Product details</td>
+</tr>
+<tr>
+<td>price</td>
+<td>Number</td>
+<td>Selling price</td>
+</tr>
+<tr>
+<td>stock</td>
+<td>Number</td>
+<td>Inventory count</td>
+</tr>
+<tr>
+<td>category</td>
+<td>String</td>
+<td>Category label</td>
+</tr>
+<tr>
+<td>images</td>
+<td>[String]</td>
+<td>Image URLs</td>
+</tr>
+<tr>
+<td>seller</td>
+<td>ObjectId</td>
+<td>Reference to User</td>
+</tr>
+<tr>
+<td>isCustomizable</td>
+<td>Boolean</td>
+<td>Customizable or not</td>
+</tr>
+<tr>
+<td>customizationCatalog</td>
+<td>Array</td>
+<td>Customizable items</td>
+</tr>
+<tr>
+<td>makingCharge</td>
+<td>Number</td>
+<td>Additional charge</td>
+</tr>
+</tbody></table>
+<p>Order</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>customer</td>
+<td>ObjectId</td>
+<td>Buyer</td>
+</tr>
+<tr>
+<td>seller</td>
+<td>ObjectId</td>
+<td>Seller</td>
+</tr>
+<tr>
+<td>product</td>
+<td>ObjectId</td>
+<td>Product reference</td>
+</tr>
+<tr>
+<td>quantity</td>
+<td>Number</td>
+<td>Quantity ordered</td>
+</tr>
+<tr>
+<td>price</td>
+<td>Number</td>
+<td>Unit price</td>
+</tr>
+<tr>
+<td>makingCharge</td>
+<td>Number</td>
+<td>Customization charge</td>
+</tr>
+<tr>
+<td>total</td>
+<td>Number</td>
+<td>Total order amount</td>
+</tr>
+<tr>
+<td>status</td>
+<td>String</td>
+<td>Order state</td>
+</tr>
+<tr>
+<td>paymentStatus</td>
+<td>String</td>
+<td>Payment state</td>
+</tr>
+<tr>
+<td>customization</td>
+<td>Object</td>
+<td>Reference image, notes, selections</td>
+</tr>
+<tr>
+<td>shippingAddress</td>
+<td>Object</td>
+<td>Delivery address</td>
+</tr>
+</tbody></table>
+<p>PlatformSettings</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>platformName</td>
+<td>String</td>
+<td>Platform title</td>
+</tr>
+<tr>
+<td>currencyCode</td>
+<td>String</td>
+<td>Currency code</td>
+</tr>
+<tr>
+<td>lowStockThreshold</td>
+<td>Number</td>
+<td>Low stock limit</td>
+</tr>
+<tr>
+<td>autoApproveSellers</td>
+<td>Boolean</td>
+<td>Seller auto approval</td>
+</tr>
+</tbody></table>
+<p>Additional Collections</p>
+<ul>
+<li>CategoryMaster: category groups and subcategories.</li>
+<li>CustomizationMaster: reusable customization options.</li>
+<li>Notification: seller notifications.</li>
+<li>ContactRequest: customer to seller messages.</li>
+</ul>
+<ol start="5">
+<li>Design Document
+5.1 Modularization</li>
+</ol>
+<ul>
+<li>Authentication module: register, login, JWT validation.</li>
+<li>Customer module: browse, cart, checkout, orders.</li>
+<li>Seller module: product CRUD, order updates.</li>
+<li>Admin module: approvals, categories, analytics, settings.</li>
+<li>Customization module: selections, reference images, pricing.</li>
+</ul>
+<p>5.2 Data Integrity and Constraints</p>
+<ul>
+<li>Unique email for users.</li>
+<li>Enumerations for roles, seller status, order status.</li>
+<li>Required fields for core entities (user, product, order).</li>
+<li>Validation for stock and price to be non-negative.</li>
+</ul>
+<p>5.3 Procedural Design (Key Flows)</p>
+<ul>
+<li>Login flow: validate credentials -&gt; issue JWT -&gt; set user context.</li>
+<li>Product listing flow: seller submits product -&gt; stored in MongoDB.</li>
+<li>Order flow: cart -&gt; checkout -&gt; order creation -&gt; seller notification.</li>
+<li>Custom hamper flow: select items -&gt; compute making charge -&gt; submit order.</li>
+</ul>
+<p>5.4 User Interface Design
+Customer screens:</p>
+<ul>
+<li>Home, Products, Product Detail, Customization, Cart, Checkout, Orders.
+Seller screens:</li>
+<li>Dashboard, Products, Listed Items, Orders, Payments, Settings.
+Admin screens:</li>
+<li>Dashboard, Sellers, Products, Categories, Orders, Reports, Analytics, Settings.</li>
+</ul>
+<ol start="6">
+<li>Program Code
+Implementation follows a client-server architecture.</li>
+</ol>
+<ul>
+<li>Frontend: <code>client/src/</code> contains pages, components, and utilities.</li>
+<li>Backend: <code>server/</code> contains Express routes, controllers, and Mongoose models.</li>
+<li>API base URL: <code>http://localhost:5000/api</code>.</li>
+</ul>
+<ol start="7">
+<li><p>Testing
+Test Cases (Manual)</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Scenario</th>
+<th>Expected Result</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>TC01</td>
+<td>Register new customer</td>
+<td>Account created</td>
+<td>Pass</td>
+</tr>
+<tr>
+<td>TC02</td>
+<td>Login with valid credentials</td>
+<td>JWT issued</td>
+<td>Pass</td>
+</tr>
+<tr>
+<td>TC03</td>
+<td>Add product to cart</td>
+<td>Item appears in cart</td>
+<td>Pass</td>
+</tr>
+<tr>
+<td>TC04</td>
+<td>Place order</td>
+<td>Order created with status placed</td>
+<td>Pass</td>
+</tr>
+<tr>
+<td>TC05</td>
+<td>Seller updates order status</td>
+<td>Status visible to customer</td>
+<td>Pass</td>
+</tr>
+<tr>
+<td>TC06</td>
+<td>Admin approves seller</td>
+<td>Seller status approved</td>
+<td>Pass</td>
+</tr>
+</tbody></table>
+</li>
+<li><p>Input and Output Screens
+Input screens:</p>
+</li>
+</ol>
+<ul>
+<li>Register, Login, Profile, Manage Addresses, Add Product, Customization.
+Output screens:</li>
+<li>Product listings, Order history, Seller order list, Admin reports.</li>
+</ul>
+<ol start="9">
+<li>Security Implementation</li>
+</ol>
+<ul>
+<li>Passwords stored as hashes using bcrypt.</li>
+<li>JWT-based authentication with role-based authorization.</li>
+<li>Request body size limits to prevent oversized uploads.</li>
+<li>Protected routes for seller and admin dashboards.</li>
+</ul>
+<ol start="10">
+<li>Limitations</li>
+</ol>
+<ul>
+<li>Payment gateway is mock and not integrated with live providers.</li>
+<li>No automated email or SMS notifications.</li>
+<li>Limited analytics and reporting depth for large-scale usage.</li>
+</ul>
+<ol start="11">
+<li>Future Applications</li>
+</ol>
+<ul>
+<li>Mobile apps and multi-language support.</li>
+<li>AI-based recommendations and AR previews.</li>
+<li>Subscription services and corporate gifting workflows.</li>
+<li>Logistics and payment gateway integrations.</li>
+</ul>
+<ol start="12">
+<li>Bibliography</li>
+</ol>
+<ul>
+<li>React Documentation</li>
+<li>Node.js Documentation</li>
+<li>Express.js Documentation</li>
+<li>MongoDB Documentation</li>
+<li>Mongoose Documentation</li>
+<li>JSON Web Token (JWT) Documentation</li>
+</ul>
+<p>Appendix A - Project Proposal Proforma
+Attach the approved proforma with signatures and dates.</p>
+<p>Appendix B - Project Synopsis
+Attach the signed synopsis.</p>
+<p>Appendix C - Guide Bio-data
+Attach the guide bio-data with signature and date.</p>
+<p>Appendix D - Certificate of Originality (Template)
+This is to certify that the project report entitled __________________________
+submitted to Indira Gandhi National Open University in partial fulfilment of the requirements
+for the award of the degree of Bachelor of Computer Applications (BCA), is an original work
+carried out by Mr./Ms. __________________________, Enrolment No. __________, under the
+guidance of Mr./Ms. __________________________.</p>
+<p>The matter embodied in this project is a genuine work done by the student and has not been
+submitted to any other university or institute for the fulfilment of any course of study.</p>
+<p>Signature of Student: ____________________  Date: __________
+Signature of Guide: ______________________  Date: __________</p>
+</body></html>

@@ -28,6 +28,8 @@ const userSchema = new mongoose.Schema(
     timezone: { type: String },
     language: { type: String },
     about: { type: String },
+    instagramUrl: { type: String, default: "" },
+    returnWindowDays: { type: Number, min: 0, max: 30, default: 7 },
     apiKeys: [
       {
         name: { type: String },
@@ -81,8 +83,21 @@ const userSchema = new mongoose.Schema(
       pincode: { type: String },
       pickupWindow: { type: String, default: "10-6" },
     },
+    refreshTokens: [
+      {
+        tokenHash: { type: String },
+        createdAt: { type: Date, default: Date.now },
+        expiresAt: { type: Date },
+        lastUsedAt: { type: Date, default: Date.now },
+        userAgent: { type: String },
+        ipAddress: { type: String },
+      },
+    ],
   },
   { timestamps: true }
 );
+
+userSchema.index({ role: 1, createdAt: -1 });
+userSchema.index({ role: 1, sellerStatus: 1, createdAt: -1 });
 
 module.exports = mongoose.model("User", userSchema);

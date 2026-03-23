@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
+import ProductHoverImage from "../components/ProductHoverImage";
 import { getProductImage } from "../utils/productMedia";
 import { prefetchProductDetail } from "../utils/productDetailCache";
 import {
@@ -9,7 +10,7 @@ import {
   loadSellerStore,
 } from "../utils/sellerStoreCache";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
 const STORE_TABS = ["All Products", "Feedbacks", "Policy", "Description", "Extra Info"];
 const EMPTY_RATING_BREAKDOWN = {};
@@ -368,6 +369,7 @@ export default function SellerStore() {
           storeName: data.storeName,
           phone: data.phone,
           supportEmail: data.supportEmail,
+          instagramUrl: data.instagramUrl,
           profileImage: data.profileImage,
           storeCoverImage: data.storeCoverImage,
         });
@@ -491,6 +493,7 @@ export default function SellerStore() {
     "Handmade gifting collections with curated items and custom options.";
   const sellerInitial = sellerOwnerName.charAt(0).toUpperCase() || "S";
   const sellerEmail = String(seller?.supportEmail || "").trim();
+  const instagramUrl = String(seller?.instagramUrl || "").trim();
   const supportEmailConfigured = Boolean(sellerEmail);
   const joinedText = formatDate(seller?.createdAt);
   const locationText = getLocationText(seller?.pickupAddress) || "Location not shared";
@@ -524,10 +527,6 @@ export default function SellerStore() {
           .map((item) => String(item?.category || "").trim())
           .filter(Boolean)
       ).size,
-    [products]
-  );
-  const inStockCount = useMemo(
-    () => products.filter((item) => Number(item?.stock || 0) > 0).length,
     [products]
   );
   const avgPrice = useMemo(() => {
@@ -754,6 +753,7 @@ export default function SellerStore() {
         storeName: data.storeName,
         phone: data.phone,
         supportEmail: data.supportEmail,
+        instagramUrl: data.instagramUrl,
         profileImage:
           submittedProfileImage || data.profileImage || String(seller?.profileImage || "").trim(),
         storeCoverImage:
@@ -1204,6 +1204,21 @@ export default function SellerStore() {
                   <span>{sellerSupportChannelLabel}</span>
                 </div>
                 <p className="seller-store-owner-support-note">{sellerSupportMessage}</p>
+                {instagramUrl ? (
+                  <a
+                    className="seller-store-instagram-btn"
+                    href={instagramUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="4.5" y="4.5" width="15" height="15" rx="4.2" />
+                      <circle cx="12" cy="12" r="3.4" />
+                      <circle cx="17.2" cy="6.8" r="1.05" fill="currentColor" stroke="none" />
+                    </svg>
+                    {isOwnerSeller ? "Open your Instagram" : "View Instagram"}
+                  </a>
+                ) : null}
                 {contactNotice ? (
                   <p className="seller-store-owner-success" role="status" aria-live="polite">
                     {contactNotice}
@@ -1219,10 +1234,10 @@ export default function SellerStore() {
                     <button
                       className="btn seller-store-owner-email-btn"
                       type="button"
-                      onClick={() => navigate("/seller/dashboard")}
+                      onClick={() => navigate("/seller/messages")}
                     >
                       <StoreActionIcon name="view" />
-                      Open inbox
+                      Open support chat
                     </button>
                   </div>
                 ) : contactOpen ? (
@@ -1420,7 +1435,11 @@ export default function SellerStore() {
                               onFocus={prefetchCurrentProduct}
                               onTouchStart={prefetchCurrentProduct}
                             >
-                              <img src={getProductImage(item)} alt={item.name} loading="lazy" />
+                              <ProductHoverImage
+                                product={item}
+                                alt={item.name}
+                                loading="lazy"
+                              />
                             </Link>
                             <div className="seller-store-product-body">
                               <h4>
@@ -1545,9 +1564,9 @@ export default function SellerStore() {
                                 </div>
                               </div>
                               <div className="seller-store-product-foot">
-                                <span className={`status-pill ${stock > 0 ? "available" : "locked"}`}>
-                                  {stock > 0 ? `${stock} in stock` : "Out of stock"}
-                                </span>
+                                {stock <= 0 ? (
+                                  <span className="status-pill locked">Out of stock</span>
+                                ) : null}
                                 <Link
                                   className="btn ghost seller-store-link"
                                   to={productUrl}
@@ -1851,10 +1870,6 @@ export default function SellerStore() {
                     <strong>{categoryCount}</strong>
                   </p>
                   <p>
-                    <span>In stock</span>
-                    <strong>{inStockCount}</strong>
-                  </p>
-                  <p>
                     <span>Avg. price</span>
                     <strong>₹{formatPrice(avgPrice)}</strong>
                   </p>
@@ -1963,3 +1978,4 @@ export default function SellerStore() {
     </div>
   );
 }
+

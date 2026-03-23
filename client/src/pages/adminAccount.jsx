@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
 const EMPTY_PROFILE = {
   id: "",
@@ -118,6 +118,904 @@ const readFileAsDataUrl = (file) =>
     reader.readAsDataURL(file);
   });
 
+function AdminProfileOverviewTab({
+  quickInfoItems,
+  statusItems,
+  activityItems,
+  aboutText,
+  onExport,
+}) {
+  return (
+    <>
+      <div className="admin-profile-grid">
+        <section className="admin-profile-card">
+          <div className="admin-profile-card-head">
+            <div>
+              <h3>Quick Information</h3>
+              <p>Your account overview and key details.</p>
+            </div>
+          </div>
+          <div className="admin-profile-info-grid">
+            {quickInfoItems.map((item) => (
+              <div key={item.label} className="admin-profile-info-item">
+                <span className="admin-profile-info-label">
+                  <span className="admin-profile-info-icon">{item.icon}</span>
+                  {item.label}
+                </span>
+                <strong className="admin-profile-info-value">{item.value}</strong>
+              </div>
+            ))}
+          </div>
+          <div className="admin-profile-bio">
+            <span className="admin-profile-info-label">
+              <span className="admin-profile-info-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="8.2" r="3" />
+                  <path d="M5.5 19a6.5 6.5 0 0 1 13 0" />
+                </svg>
+              </span>
+              Bio
+            </span>
+            <p>{aboutText || "Add a short bio to personalize the admin profile."}</p>
+          </div>
+        </section>
+
+        <section className="admin-profile-card admin-profile-status-card">
+          <div className="admin-profile-card-head">
+            <div>
+              <h3>Account Status</h3>
+              <p>Security and verification highlights.</p>
+            </div>
+          </div>
+          <div className="admin-profile-status-list">
+            {statusItems.map((item) => (
+              <div key={item.label} className={`admin-profile-status-item ${item.tone}`.trim()}>
+                <span className="admin-profile-status-icon">{item.icon}</span>
+                <div>
+                  <strong>{item.label}</strong>
+                  <span>{item.value}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button className="btn primary admin-profile-export-btn" type="button" onClick={onExport}>
+            Export Account Data
+          </button>
+        </section>
+      </div>
+
+      <section className="admin-profile-card admin-profile-activity">
+        <div className="admin-profile-card-head">
+          <div>
+            <h3>Recent Activity</h3>
+            <p>Your recent actions and system updates.</p>
+          </div>
+        </div>
+        <div className="admin-profile-activity-list">
+          {activityItems.map((item) => (
+            <div key={item.label} className="admin-profile-activity-item">
+              <div className="admin-profile-activity-main">
+                <span className="admin-profile-activity-dot" />
+                <div>
+                  <strong>{item.label}</strong>
+                  <span>{item.time}</span>
+                </div>
+              </div>
+              <span className="admin-profile-activity-tag">{item.tag}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function AdminProfileDetailsTab({
+  isEditing,
+  profile,
+  addressDraft,
+  addressDisplay,
+  countryValue,
+  timezoneValue,
+  languageValue,
+  onProfileChange,
+  onAddressDraftChange,
+  onEditProfile,
+  onCancelEdit,
+  saving,
+  loading,
+}) {
+  return (
+    <div className="admin-profile-details-grid">
+      <section className="admin-profile-card admin-profile-details-card">
+        <div className="admin-profile-card-head">
+          <div>
+            <h3>Personal Information</h3>
+            <p>Update your personal details.</p>
+          </div>
+          {!isEditing && (
+            <button className="admin-profile-inline-edit" type="button" onClick={onEditProfile}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 16.5V20h3.5l9.6-9.6-3.5-3.5L4 16.5Z" />
+                <path d="M12.9 7.5l3.5 3.5" />
+              </svg>
+              Edit
+            </button>
+          )}
+        </div>
+        <div className="admin-profile-form-stack">
+          <div className="field">
+            <label htmlFor="adminName">Full Name</label>
+            <input
+              id="adminName"
+              type="text"
+              value={profile.name}
+              onChange={onProfileChange("name")}
+              disabled={!isEditing}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="adminStoreName">Business Name</label>
+            <input
+              id="adminStoreName"
+              type="text"
+              value={profile.storeName}
+              onChange={onProfileChange("storeName")}
+              disabled={!isEditing}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="adminEmail">Email Address</label>
+            <input
+              id="adminEmail"
+              type="email"
+              value={profile.email}
+              onChange={onProfileChange("email")}
+              disabled={!isEditing}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="adminPhone">Phone Number</label>
+            <input
+              id="adminPhone"
+              type="text"
+              value={profile.phone}
+              onChange={onProfileChange("phone")}
+              disabled={!isEditing}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="adminSupportEmail">Support Email</label>
+            <input
+              id="adminSupportEmail"
+              type="email"
+              value={profile.supportEmail}
+              onChange={onProfileChange("supportEmail")}
+              disabled={!isEditing}
+            />
+          </div>
+        </div>
+        {isEditing && (
+          <div className="admin-profile-action-row">
+            <button
+              className="btn primary"
+              type="button"
+              onClick={onEditProfile}
+              disabled={saving || loading}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 4.5h9l3 3v12H6z" />
+                <path d="M15 4.5V8h3" />
+                <path d="M8.5 15.5h7" />
+              </svg>
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+            <button className="btn ghost" type="button" onClick={onCancelEdit} disabled={saving}>
+              Cancel
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="admin-profile-card admin-profile-details-card">
+        <div className="admin-profile-card-head">
+          <div>
+            <h3>Additional Details</h3>
+            <p>Location and preferences.</p>
+          </div>
+        </div>
+        <div className="admin-profile-form-stack">
+          <div className="field">
+            <label htmlFor="adminAddress">Address</label>
+            <textarea
+              id="adminAddress"
+              rows={3}
+              value={isEditing ? addressDraft : addressDisplay}
+              onChange={onAddressDraftChange}
+              disabled={!isEditing}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="adminCountry">Country</label>
+            <input
+              id="adminCountry"
+              type="text"
+              value={countryValue}
+              onChange={onProfileChange("country")}
+              disabled={!isEditing}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="adminTimezone">Timezone</label>
+            <input
+              id="adminTimezone"
+              type="text"
+              value={timezoneValue}
+              onChange={onProfileChange("timezone")}
+              disabled={!isEditing}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="adminLanguage">Language</label>
+            <input
+              id="adminLanguage"
+              type="text"
+              value={languageValue}
+              onChange={onProfileChange("language")}
+              disabled={!isEditing}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="adminBio">Bio</label>
+            <textarea
+              id="adminBio"
+              rows={4}
+              value={profile.about || ""}
+              onChange={onProfileChange("about")}
+              disabled={!isEditing}
+            />
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AdminProfileSecurityTab({
+  passwordVisibility,
+  passwordForm,
+  onPasswordChange,
+  onTogglePasswordVisibility,
+  onSavePassword,
+  passwordSaving,
+  securityOptions,
+  securityPrefs,
+  onToggleSecurityPref,
+  onNotice,
+}) {
+  return (
+    <div className="admin-profile-security-grid">
+      <section className="admin-profile-card admin-profile-security-card">
+        <div className="admin-profile-card-head">
+          <div>
+            <h3>Change Password</h3>
+            <p>Ensure your account is using a strong password.</p>
+          </div>
+        </div>
+        <div className="admin-profile-form-stack">
+          <div className="field password-field">
+            <label htmlFor="currentPassword">Current Password</label>
+            <input
+              id="currentPassword"
+              type={passwordVisibility.current ? "text" : "password"}
+              value={passwordForm.currentPassword}
+              onChange={onPasswordChange("currentPassword")}
+              placeholder="Enter current password"
+            />
+            <button
+              className="password-toggle"
+              type="button"
+              aria-label={passwordVisibility.current ? "Hide password" : "Show password"}
+              aria-pressed={passwordVisibility.current}
+              onClick={() => onTogglePasswordVisibility("current")}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                {passwordVisibility.current ? (
+                  <>
+                    <path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </>
+                ) : (
+                  <>
+                    <path d="M4.5 5.5 19 19" />
+                    <path d="M9.2 9.4a3 3 0 0 0 4.2 4.2" />
+                    <path d="M6 7.3C4.4 8.7 3 10.6 3 12c0 0 3.6 6 9 6 1.6 0 3-.3 4.2-.9" />
+                    <path d="M14.8 8.1A9.7 9.7 0 0 0 12 6c-1.9 0-3.6.5-5 1.4" />
+                  </>
+                )}
+              </svg>
+            </button>
+          </div>
+          <div className="field password-field">
+            <label htmlFor="newPassword">New Password</label>
+            <input
+              id="newPassword"
+              type={passwordVisibility.next ? "text" : "password"}
+              value={passwordForm.newPassword}
+              onChange={onPasswordChange("newPassword")}
+              placeholder="Enter new password"
+            />
+            <button
+              className="password-toggle"
+              type="button"
+              aria-label={passwordVisibility.next ? "Hide password" : "Show password"}
+              aria-pressed={passwordVisibility.next}
+              onClick={() => onTogglePasswordVisibility("next")}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                {passwordVisibility.next ? (
+                  <>
+                    <path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </>
+                ) : (
+                  <>
+                    <path d="M4.5 5.5 19 19" />
+                    <path d="M9.2 9.4a3 3 0 0 0 4.2 4.2" />
+                    <path d="M6 7.3C4.4 8.7 3 10.6 3 12c0 0 3.6 6 9 6 1.6 0 3-.3 4.2-.9" />
+                    <path d="M14.8 8.1A9.7 9.7 0 0 0 12 6c-1.9 0-3.6.5-5 1.4" />
+                  </>
+                )}
+              </svg>
+            </button>
+          </div>
+          <div className="field password-field">
+            <label htmlFor="confirmPassword">Confirm New Password</label>
+            <input
+              id="confirmPassword"
+              type={passwordVisibility.confirm ? "text" : "password"}
+              value={passwordForm.confirmPassword}
+              onChange={onPasswordChange("confirmPassword")}
+              placeholder="Confirm new password"
+            />
+            <button
+              className="password-toggle"
+              type="button"
+              aria-label={passwordVisibility.confirm ? "Hide password" : "Show password"}
+              aria-pressed={passwordVisibility.confirm}
+              onClick={() => onTogglePasswordVisibility("confirm")}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                {passwordVisibility.confirm ? (
+                  <>
+                    <path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </>
+                ) : (
+                  <>
+                    <path d="M4.5 5.5 19 19" />
+                    <path d="M9.2 9.4a3 3 0 0 0 4.2 4.2" />
+                    <path d="M6 7.3C4.4 8.7 3 10.6 3 12c0 0 3.6 6 9 6 1.6 0 3-.3 4.2-.9" />
+                    <path d="M14.8 8.1A9.7 9.7 0 0 0 12 6c-1.9 0-3.6.5-5 1.4" />
+                  </>
+                )}
+              </svg>
+            </button>
+          </div>
+        </div>
+        <button
+          className="btn primary admin-security-save"
+          type="button"
+          onClick={onSavePassword}
+          disabled={passwordSaving}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="5" y="10.5" width="14" height="9" rx="2" />
+            <path d="M7.5 10.5V8a4.5 4.5 0 0 1 9 0v2.5" />
+          </svg>
+          {passwordSaving ? "Updating..." : "Update Password"}
+        </button>
+      </section>
+
+      <section className="admin-profile-card admin-profile-security-card">
+        <div className="admin-profile-card-head">
+          <div>
+            <h3>Security Preferences</h3>
+            <p>Manage your security settings.</p>
+          </div>
+        </div>
+        <div className="admin-security-preferences">
+          {securityOptions.map((item) => (
+            <div key={item.id} className="admin-security-preference">
+              <div>
+                <strong>{item.title}</strong>
+                <span>{item.description}</span>
+              </div>
+              <button
+                className={`admin-switch ${securityPrefs[item.id] ? "on" : ""}`.trim()}
+                type="button"
+                aria-pressed={securityPrefs[item.id]}
+                onClick={() => onToggleSecurityPref(item.id)}
+              >
+                <span />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="admin-security-actions">
+          <button
+            className="btn ghost admin-security-action"
+            type="button"
+            onClick={() => onNotice("Login history is coming soon.")}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 12h5l2.4-4.5L14.5 17l2-5H20" />
+            </svg>
+            View Login History
+          </button>
+          <button
+            className="btn ghost admin-security-action danger"
+            type="button"
+            onClick={() => onNotice("All sessions revoked.")}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M9 9l6 6M15 9l-6 6" />
+            </svg>
+            Revoke All Sessions
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AdminProfileNotificationsTab({
+  notificationOptions,
+  notificationPrefs,
+  onToggleNotificationPref,
+}) {
+  return (
+    <section className="admin-profile-card admin-profile-notifications-card">
+      <div className="admin-profile-card-head">
+        <div>
+          <h3>Notification Preferences</h3>
+          <p>Choose what notifications you want to receive.</p>
+        </div>
+      </div>
+      <div className="admin-notification-grid">
+        {notificationOptions.map((item) => (
+          <div key={item.id} className="admin-notification-card">
+            <div>
+              <strong>{item.title}</strong>
+              <span>{item.description}</span>
+            </div>
+            <button
+              className={`admin-switch ${notificationPrefs[item.id] ? "on" : ""}`.trim()}
+              type="button"
+              aria-pressed={notificationPrefs[item.id]}
+              onClick={() => onToggleNotificationPref(item.id)}
+            >
+              <span />
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AdminProfileApiTab({
+  apiError,
+  apiNotice,
+  apiKeyFormOpen,
+  apiKeyForm,
+  apiKeySaving,
+  apiLoading,
+  apiKeys,
+  apiKeySecrets,
+  apiKeyReveal,
+  webhookSecret,
+  webhookFormOpen,
+  webhookForm,
+  webhookSaving,
+  webhooks,
+  onToggleApiKeyForm,
+  onCloseApiKeyForm,
+  onApiKeyFormChange,
+  onCreateApiKey,
+  onCopyApiKey,
+  onRevokeApiKey,
+  onToggleApiKeyReveal,
+  onToggleWebhookForm,
+  onCloseWebhookForm,
+  onOpenWebhookForm,
+  onWebhookFormChange,
+  onCreateWebhook,
+  onDeleteWebhook,
+  onCopyWebhookSecret,
+}) {
+  return (
+    <div className="admin-profile-api-grid">
+      <section className="admin-profile-card admin-profile-api-card">
+        <div className="admin-profile-card-head">
+          <div>
+            <h3>API Keys</h3>
+            <p>Manage your API keys and integrations.</p>
+          </div>
+          <button className="btn primary admin-api-action" type="button" onClick={onToggleApiKeyForm}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="8" cy="12" r="3.5" />
+              <path d="M11.5 12H21" />
+              <path d="M17 12v2.5" />
+              <path d="M14.5 12v4.5" />
+            </svg>
+            Generate New Key
+          </button>
+        </div>
+
+        {(apiError || apiNotice) && (
+          <div className="admin-api-alerts">
+            {apiError && <p className="field-hint">{apiError}</p>}
+            {apiNotice && <p className="field-hint">{apiNotice}</p>}
+          </div>
+        )}
+
+        {apiKeyFormOpen && (
+          <div className="admin-api-form">
+            <div className="field">
+              <label htmlFor="apiKeyName">Key Name</label>
+              <input
+                id="apiKeyName"
+                type="text"
+                value={apiKeyForm.name}
+                onChange={onApiKeyFormChange("name")}
+                placeholder="e.g. Production API Key"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="apiKeyType">Environment</label>
+              <select
+                id="apiKeyType"
+                value={apiKeyForm.type}
+                onChange={onApiKeyFormChange("type")}
+              >
+                <option value="production">Production</option>
+                <option value="development">Development</option>
+              </select>
+            </div>
+            <div className="admin-api-form-actions">
+              <button className="btn ghost" type="button" onClick={onCloseApiKeyForm}>
+                Cancel
+              </button>
+              <button
+                className="btn primary"
+                type="button"
+                onClick={onCreateApiKey}
+                disabled={apiKeySaving}
+              >
+                {apiKeySaving ? "Creating..." : "Create Key"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {apiLoading ? (
+          <p className="field-hint">Loading API keys...</p>
+        ) : apiKeys.length ? (
+          <div className="admin-api-key-list">
+            {apiKeys.map((key) => {
+              const maskedKey = formatMaskedKey(key.prefix, key.last4);
+              const hasSecret = Boolean(apiKeySecrets[key.id]);
+              const isRevealed = Boolean(apiKeyReveal[key.id] && hasSecret);
+              const displayKey = isRevealed ? apiKeySecrets[key.id] : maskedKey;
+              const title =
+                key.name ||
+                (key.type === "production" ? "Production API Key" : "Development API Key");
+              const createdLabel = formatShortDate(key.createdAt);
+              const lastUsedLabel = key.lastUsedAt ? formatShortDate(key.lastUsedAt) : "Never";
+              const statusLabel = String(key.status || "active").toLowerCase();
+
+              return (
+                <div
+                  key={key.id}
+                  className={`admin-api-key ${statusLabel === "revoked" ? "revoked" : ""}`}
+                >
+                  <div className="admin-api-key-header">
+                    <strong>{title}</strong>
+                    <span
+                      className={`admin-api-status ${statusLabel === "revoked" ? "muted" : "active"}`}
+                    >
+                      {statusLabel}
+                    </span>
+                  </div>
+                  <div className="admin-api-key-row">
+                    <div className="admin-api-key-value">
+                      <code>{displayKey}</code>
+                    </div>
+                    <div className="admin-api-key-buttons">
+                      <button
+                        className="admin-icon-button"
+                        type="button"
+                        onClick={() => onToggleApiKeyReveal(key.id)}
+                        disabled={!hasSecret || statusLabel === "revoked"}
+                        aria-label={isRevealed ? "Hide API key" : "Show API key"}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          {isRevealed ? (
+                            <>
+                              <path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z" />
+                              <circle cx="12" cy="12" r="3" />
+                            </>
+                          ) : (
+                            <>
+                              <path d="M4.5 5.5 19 19" />
+                              <path d="M9.2 9.4a3 3 0 0 0 4.2 4.2" />
+                              <path d="M6 7.3C4.4 8.7 3 10.6 3 12c0 0 3.6 6 9 6 1.6 0 3-.3 4.2-.9" />
+                              <path d="M14.8 8.1A9.7 9.7 0 0 0 12 6c-1.9 0-3.6.5-5 1.4" />
+                            </>
+                          )}
+                        </svg>
+                      </button>
+                      <button
+                        className="admin-icon-button"
+                        type="button"
+                        onClick={() => onCopyApiKey(apiKeySecrets[key.id])}
+                        disabled={statusLabel === "revoked" || !hasSecret}
+                        aria-label="Copy API key"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <rect x="8" y="8" width="11" height="11" rx="2" />
+                          <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="admin-api-key-meta">
+                    <span>Created: {createdLabel}</span>
+                    <span>Last used: {lastUsedLabel}</span>
+                  </div>
+                  {statusLabel !== "revoked" && (
+                    <div className="admin-api-key-actions">
+                      <button
+                        className="admin-api-key-action danger"
+                        type="button"
+                        onClick={() => onRevokeApiKey(key.id)}
+                        disabled={apiKeySaving}
+                      >
+                        Revoke
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="admin-api-empty">No API keys created yet.</p>
+        )}
+        <p className="admin-api-note">
+          For security, full keys are shown only once after creation.
+        </p>
+      </section>
+
+      <section className="admin-profile-card admin-profile-webhooks-card">
+        <div className="admin-profile-card-head">
+          <div>
+            <h3>Webhooks</h3>
+            <p>Configure webhook endpoints for real-time updates.</p>
+          </div>
+          <button
+            className="btn ghost admin-api-action admin-api-secondary"
+            type="button"
+            onClick={onToggleWebhookForm}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10.5 13a4.5 4.5 0 0 0 6.4 0l2.1-2.1a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2" />
+              <path d="M13.5 11a4.5 4.5 0 0 0-6.4 0L5 13.1a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2" />
+            </svg>
+            Add Webhook
+          </button>
+        </div>
+
+        {webhookSecret && (
+          <div className="admin-api-secret">
+            <div>
+              <strong>Webhook signing secret</strong>
+              <span>Copy this secret now. You will not see it again.</span>
+            </div>
+            <div className="admin-api-secret-row">
+              <code>{webhookSecret}</code>
+              <button
+                className="admin-icon-button"
+                type="button"
+                onClick={onCopyWebhookSecret}
+                aria-label="Copy webhook secret"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="8" y="8" width="11" height="11" rx="2" />
+                  <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {webhookFormOpen && (
+          <div className="admin-api-form">
+            <div className="field full">
+              <label htmlFor="webhookUrl">Webhook URL</label>
+              <input
+                id="webhookUrl"
+                type="text"
+                value={webhookForm.url}
+                onChange={onWebhookFormChange("url")}
+                placeholder="https://example.com/webhooks/craftzy"
+              />
+            </div>
+            <div className="field full">
+              <label htmlFor="webhookEvents">Events (comma separated)</label>
+              <input
+                id="webhookEvents"
+                type="text"
+                value={webhookForm.events}
+                onChange={onWebhookFormChange("events")}
+                placeholder="order.created, payment.succeeded"
+              />
+            </div>
+            <div className="admin-api-form-actions">
+              <button className="btn ghost" type="button" onClick={onCloseWebhookForm}>
+                Cancel
+              </button>
+              <button
+                className="btn primary"
+                type="button"
+                onClick={onCreateWebhook}
+                disabled={webhookSaving}
+              >
+                {webhookSaving ? "Saving..." : "Save Webhook"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {apiLoading ? (
+          <p className="field-hint">Loading webhooks...</p>
+        ) : webhooks.length ? (
+          <div className="admin-webhook-list">
+            {webhooks.map((hook) => {
+              const createdLabel = formatShortDate(hook.createdAt);
+              const triggeredLabel = hook.lastTriggeredAt
+                ? formatShortDate(hook.lastTriggeredAt)
+                : "Never";
+              const events =
+                Array.isArray(hook.events) && hook.events.length ? hook.events : ["*"];
+              return (
+                <div key={hook.id} className="admin-webhook-item">
+                  <div>
+                    <strong>{hook.url}</strong>
+                    <div className="admin-webhook-meta">
+                      <span>Created: {createdLabel}</span>
+                      <span>Last triggered: {triggeredLabel}</span>
+                    </div>
+                    <div className="admin-webhook-tags">
+                      {events.map((eventName) => (
+                        <span key={eventName} className="admin-webhook-tag">
+                          {eventName}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="admin-webhook-actions">
+                    <span
+                      className={`admin-api-status ${hook.status === "active" ? "active" : "muted"}`}
+                    >
+                      {hook.status || "active"}
+                    </span>
+                    <button
+                      className="admin-icon-button"
+                      type="button"
+                      onClick={() => onDeleteWebhook(hook.id)}
+                      disabled={webhookSaving}
+                      aria-label="Delete webhook"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M6 7h12" />
+                        <path d="M9 7V5h6v2" />
+                        <path d="M8 7l1 12h6l1-12" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="admin-webhook-empty">
+            <p>No webhooks configured yet</p>
+            <button className="btn ghost" type="button" onClick={onOpenWebhookForm}>
+              Add Webhook
+            </button>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ProfileImageModal({
+  open,
+  onClose,
+  adminInitial,
+  profileImageDraft,
+  profileImageDraftName,
+  inputRef,
+  onUpload,
+  onOpenPicker,
+  onRemoveDraft,
+  onApply,
+  imageSaving,
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="profile-image-modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="profile-image-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit profile picture"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="profile-image-modal-head">
+          <h4>Update Profile Picture</h4>
+          <button
+            type="button"
+            className="profile-image-modal-close"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div className="profile-image-modal-body">
+          <div className="profile-image-modal-preview">
+            {profileImageDraft ? (
+              <img src={profileImageDraft} alt="Profile preview" />
+            ) : (
+              <span>{adminInitial}</span>
+            )}
+          </div>
+          {profileImageDraftName && <p className="field-hint">Selected: {profileImageDraftName}</p>}
+          <input
+            ref={inputRef}
+            className="profile-image-modal-input"
+            type="file"
+            accept="image/*"
+            onChange={onUpload}
+          />
+          <div className="profile-image-modal-actions">
+            <button type="button" className="btn ghost" onClick={onOpenPicker}>
+              Choose image
+            </button>
+            <button type="button" className="btn ghost" onClick={onRemoveDraft}>
+              Remove
+            </button>
+          </div>
+        </div>
+        <div className="profile-image-modal-foot">
+          <button type="button" className="btn ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn primary" onClick={onApply} disabled={imageSaving}>
+            {imageSaving ? "Saving..." : "Save picture"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminAccount() {
   const [profile, setProfile] = useState(EMPTY_PROFILE);
   const [loading, setLoading] = useState(true);
@@ -175,13 +1073,26 @@ export default function AdminAccount() {
   const tabsRef = useRef(null);
   const profileSnapshotRef = useRef(null);
   const navigate = useNavigate();
-
-  const loadProfile = useCallback(async () => {
+  const resetAlerts = useCallback(() => {
+    setError("");
+    setNotice("");
+  }, []);
+  const resetApiAlerts = useCallback(() => {
+    setApiError("");
+    setApiNotice("");
+  }, []);
+  const requireToken = useCallback(() => {
     const token = localStorage.getItem("token");
     if (!token) {
       navigate("/login");
-      return;
+      return null;
     }
+    return token;
+  }, [navigate]);
+
+  const loadProfile = useCallback(async () => {
+    const token = requireToken();
+    if (!token) return;
 
     setLoading(true);
     setError("");
@@ -202,18 +1113,14 @@ export default function AdminAccount() {
     } finally {
       setLoading(false);
     }
-  }, [navigate]);
+  }, [requireToken]);
 
   const loadApiIntegrations = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
+    const token = requireToken();
+    if (!token) return;
 
     setApiLoading(true);
-    setApiError("");
-    setApiNotice("");
+    resetApiAlerts();
     try {
       const [keysResponse, hooksResponse] = await Promise.all([
         fetch(`${API_URL}/api/users/me/api-keys`, {
@@ -244,7 +1151,7 @@ export default function AdminAccount() {
     } finally {
       setApiLoading(false);
     }
-  }, [navigate]);
+  }, [requireToken, resetApiAlerts]);
 
   useEffect(() => {
     loadProfile();
@@ -273,22 +1180,17 @@ export default function AdminAccount() {
 
   const onProfileChange = (field) => (event) => {
     setProfile((prev) => ({ ...prev, [field]: event.target.value }));
-    setError("");
-    setNotice("");
+    resetAlerts();
   };
 
   const onPasswordChange = (field) => (event) => {
     setPasswordForm((prev) => ({ ...prev, [field]: event.target.value }));
-    setError("");
-    setNotice("");
+    resetAlerts();
   };
 
   const saveProfile = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
-      return false;
-    }
+    const token = requireToken();
+    if (!token) return false;
 
     const nextShippingAddress = {
       ...(profile.shippingAddress || {}),
@@ -296,8 +1198,7 @@ export default function AdminAccount() {
     };
 
     setSaving(true);
-    setError("");
-    setNotice("");
+    resetAlerts();
     try {
       const response = await fetch(`${API_URL}/api/users/me`, {
         method: "PATCH",
@@ -336,11 +1237,8 @@ export default function AdminAccount() {
   };
 
   const savePassword = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
+    const token = requireToken();
+    if (!token) return;
 
     if (!passwordForm.currentPassword) {
       setError("Current password is required.");
@@ -356,8 +1254,7 @@ export default function AdminAccount() {
     }
 
     setPasswordSaving(true);
-    setError("");
-    setNotice("");
+    resetAlerts();
     try {
       const response = await fetch(`${API_URL}/api/users/me/password`, {
         method: "PATCH",
@@ -389,7 +1286,10 @@ export default function AdminAccount() {
   };
 
   const adminDisplayName = String(profile.name || "Admin").trim() || "Admin";
-  const adminInitial = adminDisplayName.slice(0, 1).toUpperCase();
+  const adminProfileName =
+    String(profile.storeName || adminDisplayName || "CraftzyGifts").trim() ||
+    "CraftzyGifts";
+  const adminInitial = adminProfileName.slice(0, 1).toUpperCase();
   const profileCompletionFields = [
     profile.name,
     profile.email,
@@ -441,13 +1341,7 @@ export default function AdminAccount() {
   const countryValue = profile.country || defaultCountry;
   const timezoneValue = profile.timezone || timezoneLabel;
   const languageValue = profile.language || defaultLanguage;
-  const createdAtLabel = profile?.createdAt
-    ? new Intl.DateTimeFormat("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }).format(new Date(profile.createdAt))
-    : "Not available";
+  const createdAtLabel = formatShortDate(profile?.createdAt);
   const aboutText = String(profile.about || "").trim();
   const metricCards = [
     {
@@ -658,17 +1552,22 @@ export default function AdminAccount() {
         </svg>
       ),
     },
+  ];
+  const securityOptions = [
     {
-      id: "team",
-      label: "Team",
-      icon: (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="8" cy="9" r="2.6" />
-          <circle cx="16.5" cy="10" r="2.1" />
-          <path d="M3.8 19a4.7 4.7 0 0 1 9.4 0" />
-          <path d="M14 19a3.7 3.7 0 0 1 6.2-2.7" />
-        </svg>
-      ),
+      id: "twoFactor",
+      title: "Two-Factor Authentication",
+      description: "Add an extra layer of security",
+    },
+    {
+      id: "loginAlerts",
+      title: "Login Alerts",
+      description: "Get notified of new logins",
+    },
+    {
+      id: "sessionTimeout",
+      title: "Session Timeout",
+      description: "Auto logout after 30 minutes",
     },
   ];
   const notificationOptions = [
@@ -717,8 +1616,7 @@ export default function AdminAccount() {
   const openProfileImageModal = () => {
     setProfileImageDraft(String(profile.profileImage || ""));
     setProfileImageDraftName("");
-    setError("");
-    setNotice("");
+    resetAlerts();
     setProfileImageModalOpen(true);
   };
 
@@ -756,15 +1654,11 @@ export default function AdminAccount() {
   };
 
   const applyProfileImage = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
+    const token = requireToken();
+    if (!token) return;
 
     setImageSaving(true);
-    setError("");
-    setNotice("");
+    resetAlerts();
     try {
       const response = await fetch(`${API_URL}/api/users/me`, {
         method: "PATCH",
@@ -809,8 +1703,7 @@ export default function AdminAccount() {
       }));
       setIsEditing(true);
       setActiveTab("details");
-      setError("");
-      setNotice("");
+      resetAlerts();
       setAddressDraft(addressDraftValue);
       return;
     }
@@ -832,8 +1725,7 @@ export default function AdminAccount() {
       setAddressDraft(addressDraftValue);
     }
     setIsEditing(false);
-    setError("");
-    setNotice("");
+    resetAlerts();
   };
 
   const toggleSecurityPref = (field) => {
@@ -856,6 +1748,41 @@ export default function AdminAccount() {
 
   const onWebhookFormChange = (field) => (event) => {
     setWebhookForm((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const onAddressDraftChange = (event) => {
+    setAddressDraft(event.target.value);
+  };
+
+  const togglePasswordVisibility = (field) => {
+    setPasswordVisibility((prev) => ({ ...prev, [field]: !prev[field] }));
+  };
+
+  const toggleApiKeyForm = () => {
+    setApiKeyFormOpen((prev) => !prev);
+    resetApiAlerts();
+  };
+
+  const closeApiKeyForm = () => {
+    setApiKeyFormOpen(false);
+  };
+
+  const toggleWebhookForm = () => {
+    setWebhookFormOpen((prev) => !prev);
+    setWebhookSecret("");
+    resetApiAlerts();
+  };
+
+  const openWebhookForm = () => {
+    setWebhookFormOpen(true);
+  };
+
+  const closeWebhookForm = () => {
+    setWebhookFormOpen(false);
+  };
+
+  const toggleApiKeyReveal = (keyId) => {
+    setApiKeyReveal((prev) => ({ ...prev, [keyId]: !prev[keyId] }));
   };
 
   const copyToClipboard = async (value) => {
@@ -885,16 +1812,21 @@ export default function AdminAccount() {
     }
   };
 
-  const handleCreateApiKey = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
-      return;
+  const handleCopyWebhookSecret = async () => {
+    const copied = await copyToClipboard(webhookSecret);
+    if (copied) {
+      setApiNotice("Webhook secret copied.");
+    } else {
+      setApiError("Unable to copy webhook secret.");
     }
+  };
+
+  const handleCreateApiKey = async () => {
+    const token = requireToken();
+    if (!token) return;
 
     setApiKeySaving(true);
-    setApiError("");
-    setApiNotice("");
+    resetApiAlerts();
     try {
       const response = await fetch(`${API_URL}/api/users/me/api-keys`, {
         method: "POST",
@@ -931,18 +1863,14 @@ export default function AdminAccount() {
   };
 
   const handleRevokeApiKey = async (keyId) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
+    const token = requireToken();
+    if (!token) return;
     if (!keyId) return;
     const proceed = window.confirm("Revoke this API key? This action cannot be undone.");
     if (!proceed) return;
 
     setApiKeySaving(true);
-    setApiError("");
-    setApiNotice("");
+    resetApiAlerts();
     try {
       const response = await fetch(`${API_URL}/api/users/me/api-keys/${keyId}/revoke`, {
         method: "PATCH",
@@ -982,11 +1910,8 @@ export default function AdminAccount() {
   };
 
   const handleCreateWebhook = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
+    const token = requireToken();
+    if (!token) return;
     if (!webhookForm.url.trim()) {
       setApiError("Webhook URL is required.");
       return;
@@ -998,8 +1923,7 @@ export default function AdminAccount() {
       .filter(Boolean);
 
     setWebhookSaving(true);
-    setApiError("");
-    setApiNotice("");
+    resetApiAlerts();
     try {
       const response = await fetch(`${API_URL}/api/users/me/webhooks`, {
         method: "POST",
@@ -1035,18 +1959,14 @@ export default function AdminAccount() {
   };
 
   const handleDeleteWebhook = async (webhookId) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
+    const token = requireToken();
+    if (!token) return;
     if (!webhookId) return;
     const proceed = window.confirm("Delete this webhook? This action cannot be undone.");
     if (!proceed) return;
 
     setWebhookSaving(true);
-    setApiError("");
-    setApiNotice("");
+    resetApiAlerts();
     try {
       const response = await fetch(`${API_URL}/api/users/me/webhooks/${webhookId}`, {
         method: "DELETE",
@@ -1084,7 +2004,7 @@ export default function AdminAccount() {
           <div className="admin-profile-mobile-avatar">{adminInitial}</div>
           <div className="admin-profile-mobile-copy">
             <span className="admin-profile-mobile-kicker">Administrator profile</span>
-            <strong>{profile.storeName || adminDisplayName || "Admin"}</strong>
+            <strong>{adminProfileName}</strong>
             <span className="admin-profile-mobile-email">
               {profile.email || "No email set"}
             </span>
@@ -1140,7 +2060,7 @@ export default function AdminAccount() {
         <div className="admin-profile-hero-main">
           <div className="admin-profile-avatar">
             {profile.profileImage ? (
-              <img src={profile.profileImage} alt={adminDisplayName} />
+              <img src={profile.profileImage} alt={adminProfileName} />
             ) : (
               <span>{adminInitial}</span>
             )}
@@ -1160,7 +2080,7 @@ export default function AdminAccount() {
           </div>
           <div className="admin-profile-hero-copy">
             <span className="admin-profile-hero-kicker">Administrator profile</span>
-            <h3>{adminDisplayName}</h3>
+            <h3>{adminProfileName}</h3>
             <p className="admin-profile-hero-email">{profile.email || "No email set"}</p>
             <div className="admin-profile-hero-meta">
               <span className="admin-profile-badge">
@@ -1233,919 +2153,103 @@ export default function AdminAccount() {
       </div>
 
       {activeTab === "overview" && (
-        <>
-          <div className="admin-profile-grid">
-            <section className="admin-profile-card">
-              <div className="admin-profile-card-head">
-                <div>
-                  <h3>Quick Information</h3>
-                  <p>Your account overview and key details.</p>
-                </div>
-              </div>
-              <div className="admin-profile-info-grid">
-                {quickInfoItems.map((item) => (
-                  <div key={item.label} className="admin-profile-info-item">
-                    <span className="admin-profile-info-label">
-                      <span className="admin-profile-info-icon">{item.icon}</span>
-                      {item.label}
-                    </span>
-                    <strong className="admin-profile-info-value">{item.value}</strong>
-                  </div>
-                ))}
-              </div>
-              <div className="admin-profile-bio">
-                <span className="admin-profile-info-label">
-                  <span className="admin-profile-info-icon">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <circle cx="12" cy="8.2" r="3" />
-                      <path d="M5.5 19a6.5 6.5 0 0 1 13 0" />
-                    </svg>
-                  </span>
-                  Bio
-                </span>
-                <p>{aboutText || "Add a short bio to personalize the admin profile."}</p>
-              </div>
-            </section>
-
-            <section className="admin-profile-card admin-profile-status-card">
-              <div className="admin-profile-card-head">
-                <div>
-                  <h3>Account Status</h3>
-                  <p>Security and verification highlights.</p>
-                </div>
-              </div>
-              <div className="admin-profile-status-list">
-                {statusItems.map((item) => (
-                  <div key={item.label} className={`admin-profile-status-item ${item.tone}`.trim()}>
-                    <span className="admin-profile-status-icon">{item.icon}</span>
-                    <div>
-                      <strong>{item.label}</strong>
-                      <span>{item.value}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <button
-                className="btn primary admin-profile-export-btn"
-                type="button"
-                onClick={() => setNotice("Export feature is coming soon.")}
-              >
-                Export Account Data
-              </button>
-            </section>
-          </div>
-
-          <section className="admin-profile-card admin-profile-activity">
-            <div className="admin-profile-card-head">
-              <div>
-                <h3>Recent Activity</h3>
-                <p>Your recent actions and system updates.</p>
-              </div>
-            </div>
-            <div className="admin-profile-activity-list">
-              {activityItems.map((item) => (
-                <div key={item.label} className="admin-profile-activity-item">
-                  <div className="admin-profile-activity-main">
-                    <span className="admin-profile-activity-dot" />
-                    <div>
-                      <strong>{item.label}</strong>
-                      <span>{item.time}</span>
-                    </div>
-                  </div>
-                  <span className="admin-profile-activity-tag">{item.tag}</span>
-                </div>
-              ))}
-            </div>
-          </section>
-        </>
+        <AdminProfileOverviewTab
+          quickInfoItems={quickInfoItems}
+          statusItems={statusItems}
+          activityItems={activityItems}
+          aboutText={aboutText}
+          onExport={() => setNotice("Export feature is coming soon.")}
+        />
       )}
 
       {activeTab === "details" && (
-        <div className="admin-profile-details-grid">
-          <section className="admin-profile-card admin-profile-details-card">
-            <div className="admin-profile-card-head">
-              <div>
-                <h3>Personal Information</h3>
-                <p>Update your personal details.</p>
-              </div>
-              {!isEditing && (
-                <button
-                  className="admin-profile-inline-edit"
-                  type="button"
-                  onClick={handleEditProfileAction}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M4 16.5V20h3.5l9.6-9.6-3.5-3.5L4 16.5Z" />
-                    <path d="M12.9 7.5l3.5 3.5" />
-                  </svg>
-                  Edit
-                </button>
-              )}
-            </div>
-            <div className="admin-profile-form-stack">
-              <div className="field">
-                <label htmlFor="adminName">Full Name</label>
-                <input
-                  id="adminName"
-                  type="text"
-                  value={profile.name}
-                  onChange={onProfileChange("name")}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="adminStoreName">Business Name</label>
-                <input
-                  id="adminStoreName"
-                  type="text"
-                  value={profile.storeName}
-                  onChange={onProfileChange("storeName")}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="adminEmail">Email Address</label>
-                <input
-                  id="adminEmail"
-                  type="email"
-                  value={profile.email}
-                  onChange={onProfileChange("email")}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="adminPhone">Phone Number</label>
-                <input
-                  id="adminPhone"
-                  type="text"
-                  value={profile.phone}
-                  onChange={onProfileChange("phone")}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="adminSupportEmail">Support Email</label>
-                <input
-                  id="adminSupportEmail"
-                  type="email"
-                  value={profile.supportEmail}
-                  onChange={onProfileChange("supportEmail")}
-                  disabled={!isEditing}
-                />
-              </div>
-            </div>
-            {isEditing && (
-              <div className="admin-profile-action-row">
-                <button
-                  className="btn primary"
-                  type="button"
-                  onClick={handleEditProfileAction}
-                  disabled={saving || loading}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M6 4.5h9l3 3v12H6z" />
-                    <path d="M15 4.5V8h3" />
-                    <path d="M8.5 15.5h7" />
-                  </svg>
-                  {saving ? "Saving..." : "Save Changes"}
-                </button>
-                <button
-                  className="btn ghost"
-                  type="button"
-                  onClick={handleCancelEdit}
-                  disabled={saving}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-          </section>
-
-          <section className="admin-profile-card admin-profile-details-card">
-            <div className="admin-profile-card-head">
-              <div>
-                <h3>Additional Details</h3>
-                <p>Location and preferences.</p>
-              </div>
-            </div>
-            <div className="admin-profile-form-stack">
-              <div className="field">
-                <label htmlFor="adminAddress">Address</label>
-                <textarea
-                  id="adminAddress"
-                  rows={3}
-                  value={isEditing ? addressDraft : addressDisplay}
-                  onChange={(event) => setAddressDraft(event.target.value)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="adminCountry">Country</label>
-                <input
-                  id="adminCountry"
-                  type="text"
-                  value={countryValue}
-                  onChange={onProfileChange("country")}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="adminTimezone">Timezone</label>
-                <input
-                  id="adminTimezone"
-                  type="text"
-                  value={timezoneValue}
-                  onChange={onProfileChange("timezone")}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="adminLanguage">Language</label>
-                <input
-                  id="adminLanguage"
-                  type="text"
-                  value={languageValue}
-                  onChange={onProfileChange("language")}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="adminBio">Bio</label>
-                <textarea
-                  id="adminBio"
-                  rows={4}
-                  value={profile.about || ""}
-                  onChange={onProfileChange("about")}
-                  disabled={!isEditing}
-                />
-              </div>
-            </div>
-          </section>
-        </div>
+        <AdminProfileDetailsTab
+          isEditing={isEditing}
+          profile={profile}
+          addressDraft={addressDraft}
+          addressDisplay={addressDisplay}
+          countryValue={countryValue}
+          timezoneValue={timezoneValue}
+          languageValue={languageValue}
+          onProfileChange={onProfileChange}
+          onAddressDraftChange={onAddressDraftChange}
+          onEditProfile={handleEditProfileAction}
+          onCancelEdit={handleCancelEdit}
+          saving={saving}
+          loading={loading}
+        />
       )}
 
       {activeTab === "security" && (
-        <div className="admin-profile-security-grid">
-          <section className="admin-profile-card admin-profile-security-card">
-            <div className="admin-profile-card-head">
-              <div>
-                <h3>Change Password</h3>
-                <p>Ensure your account is using a strong password.</p>
-              </div>
-            </div>
-            <div className="admin-profile-form-stack">
-              <div className="field password-field">
-                <label htmlFor="currentPassword">Current Password</label>
-                <input
-                  id="currentPassword"
-                  type={passwordVisibility.current ? "text" : "password"}
-                  value={passwordForm.currentPassword}
-                  onChange={onPasswordChange("currentPassword")}
-                  placeholder="Enter current password"
-                />
-                <button
-                  className="password-toggle"
-                  type="button"
-                  aria-label={passwordVisibility.current ? "Hide password" : "Show password"}
-                  aria-pressed={passwordVisibility.current}
-                  onClick={() =>
-                    setPasswordVisibility((prev) => ({ ...prev, current: !prev.current }))
-                  }
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    {passwordVisibility.current ? (
-                      <>
-                        <path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </>
-                    ) : (
-                      <>
-                        <path d="M4.5 5.5 19 19" />
-                        <path d="M9.2 9.4a3 3 0 0 0 4.2 4.2" />
-                        <path d="M6 7.3C4.4 8.7 3 10.6 3 12c0 0 3.6 6 9 6 1.6 0 3-.3 4.2-.9" />
-                        <path d="M14.8 8.1A9.7 9.7 0 0 0 12 6c-1.9 0-3.6.5-5 1.4" />
-                      </>
-                    )}
-                  </svg>
-                </button>
-              </div>
-              <div className="field password-field">
-                <label htmlFor="newPassword">New Password</label>
-                <input
-                  id="newPassword"
-                  type={passwordVisibility.next ? "text" : "password"}
-                  value={passwordForm.newPassword}
-                  onChange={onPasswordChange("newPassword")}
-                  placeholder="Enter new password"
-                />
-                <button
-                  className="password-toggle"
-                  type="button"
-                  aria-label={passwordVisibility.next ? "Hide password" : "Show password"}
-                  aria-pressed={passwordVisibility.next}
-                  onClick={() =>
-                    setPasswordVisibility((prev) => ({ ...prev, next: !prev.next }))
-                  }
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    {passwordVisibility.next ? (
-                      <>
-                        <path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </>
-                    ) : (
-                      <>
-                        <path d="M4.5 5.5 19 19" />
-                        <path d="M9.2 9.4a3 3 0 0 0 4.2 4.2" />
-                        <path d="M6 7.3C4.4 8.7 3 10.6 3 12c0 0 3.6 6 9 6 1.6 0 3-.3 4.2-.9" />
-                        <path d="M14.8 8.1A9.7 9.7 0 0 0 12 6c-1.9 0-3.6.5-5 1.4" />
-                      </>
-                    )}
-                  </svg>
-                </button>
-              </div>
-              <div className="field password-field">
-                <label htmlFor="confirmPassword">Confirm New Password</label>
-                <input
-                  id="confirmPassword"
-                  type={passwordVisibility.confirm ? "text" : "password"}
-                  value={passwordForm.confirmPassword}
-                  onChange={onPasswordChange("confirmPassword")}
-                  placeholder="Confirm new password"
-                />
-                <button
-                  className="password-toggle"
-                  type="button"
-                  aria-label={passwordVisibility.confirm ? "Hide password" : "Show password"}
-                  aria-pressed={passwordVisibility.confirm}
-                  onClick={() =>
-                    setPasswordVisibility((prev) => ({ ...prev, confirm: !prev.confirm }))
-                  }
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    {passwordVisibility.confirm ? (
-                      <>
-                        <path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </>
-                    ) : (
-                      <>
-                        <path d="M4.5 5.5 19 19" />
-                        <path d="M9.2 9.4a3 3 0 0 0 4.2 4.2" />
-                        <path d="M6 7.3C4.4 8.7 3 10.6 3 12c0 0 3.6 6 9 6 1.6 0 3-.3 4.2-.9" />
-                        <path d="M14.8 8.1A9.7 9.7 0 0 0 12 6c-1.9 0-3.6.5-5 1.4" />
-                      </>
-                    )}
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <button
-              className="btn primary admin-security-save"
-              type="button"
-              onClick={savePassword}
-              disabled={passwordSaving}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="5" y="10.5" width="14" height="9" rx="2" />
-                <path d="M7.5 10.5V8a4.5 4.5 0 0 1 9 0v2.5" />
-              </svg>
-              {passwordSaving ? "Updating..." : "Update Password"}
-            </button>
-          </section>
-
-          <section className="admin-profile-card admin-profile-security-card">
-            <div className="admin-profile-card-head">
-              <div>
-                <h3>Security Preferences</h3>
-                <p>Manage your security settings.</p>
-              </div>
-            </div>
-            <div className="admin-security-preferences">
-              <div className="admin-security-preference">
-                <div>
-                  <strong>Two-Factor Authentication</strong>
-                  <span>Add an extra layer of security</span>
-                </div>
-                <button
-                  className={`admin-switch ${securityPrefs.twoFactor ? "on" : ""}`.trim()}
-                  type="button"
-                  aria-pressed={securityPrefs.twoFactor}
-                  onClick={() => toggleSecurityPref("twoFactor")}
-                >
-                  <span />
-                </button>
-              </div>
-              <div className="admin-security-preference">
-                <div>
-                  <strong>Login Alerts</strong>
-                  <span>Get notified of new logins</span>
-                </div>
-                <button
-                  className={`admin-switch ${securityPrefs.loginAlerts ? "on" : ""}`.trim()}
-                  type="button"
-                  aria-pressed={securityPrefs.loginAlerts}
-                  onClick={() => toggleSecurityPref("loginAlerts")}
-                >
-                  <span />
-                </button>
-              </div>
-              <div className="admin-security-preference">
-                <div>
-                  <strong>Session Timeout</strong>
-                  <span>Auto logout after 30 minutes</span>
-                </div>
-                <button
-                  className={`admin-switch ${securityPrefs.sessionTimeout ? "on" : ""}`.trim()}
-                  type="button"
-                  aria-pressed={securityPrefs.sessionTimeout}
-                  onClick={() => toggleSecurityPref("sessionTimeout")}
-                >
-                  <span />
-                </button>
-              </div>
-            </div>
-            <div className="admin-security-actions">
-              <button
-                className="btn ghost admin-security-action"
-                type="button"
-                onClick={() => setNotice("Login history is coming soon.")}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M4 12h5l2.4-4.5L14.5 17l2-5H20" />
-                </svg>
-                View Login History
-              </button>
-              <button
-                className="btn ghost admin-security-action danger"
-                type="button"
-                onClick={() => setNotice("All sessions revoked.")}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M9 9l6 6M15 9l-6 6" />
-                </svg>
-                Revoke All Sessions
-              </button>
-            </div>
-          </section>
-        </div>
+        <AdminProfileSecurityTab
+          passwordVisibility={passwordVisibility}
+          passwordForm={passwordForm}
+          onPasswordChange={onPasswordChange}
+          onTogglePasswordVisibility={togglePasswordVisibility}
+          onSavePassword={savePassword}
+          passwordSaving={passwordSaving}
+          securityOptions={securityOptions}
+          securityPrefs={securityPrefs}
+          onToggleSecurityPref={toggleSecurityPref}
+          onNotice={setNotice}
+        />
       )}
 
       {activeTab === "notifications" && (
-        <section className="admin-profile-card admin-profile-notifications-card">
-          <div className="admin-profile-card-head">
-            <div>
-              <h3>Notification Preferences</h3>
-              <p>Choose what notifications you want to receive.</p>
-            </div>
-          </div>
-          <div className="admin-notification-grid">
-            {notificationOptions.map((item) => (
-              <div key={item.id} className="admin-notification-card">
-                <div>
-                  <strong>{item.title}</strong>
-                  <span>{item.description}</span>
-                </div>
-                <button
-                  className={`admin-switch ${notificationPrefs[item.id] ? "on" : ""}`.trim()}
-                  type="button"
-                  aria-pressed={notificationPrefs[item.id]}
-                  onClick={() => toggleNotificationPref(item.id)}
-                >
-                  <span />
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
+        <AdminProfileNotificationsTab
+          notificationOptions={notificationOptions}
+          notificationPrefs={notificationPrefs}
+          onToggleNotificationPref={toggleNotificationPref}
+        />
       )}
 
       {activeTab === "api" && (
-        <div className="admin-profile-api-grid">
-          <section className="admin-profile-card admin-profile-api-card">
-            <div className="admin-profile-card-head">
-              <div>
-                <h3>API Keys</h3>
-                <p>Manage your API keys and integrations.</p>
-              </div>
-              <button
-                className="btn primary admin-api-action"
-                type="button"
-                onClick={() => {
-                  setApiKeyFormOpen((prev) => !prev);
-                  setApiError("");
-                  setApiNotice("");
-                }}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="8" cy="12" r="3.5" />
-                  <path d="M11.5 12H21" />
-                  <path d="M17 12v2.5" />
-                  <path d="M14.5 12v4.5" />
-                </svg>
-                Generate New Key
-              </button>
-            </div>
-
-            {(apiError || apiNotice) && (
-              <div className="admin-api-alerts">
-                {apiError && <p className="field-hint">{apiError}</p>}
-                {apiNotice && <p className="field-hint">{apiNotice}</p>}
-              </div>
-            )}
-
-            {apiKeyFormOpen && (
-              <div className="admin-api-form">
-                <div className="field">
-                  <label htmlFor="apiKeyName">Key Name</label>
-                  <input
-                    id="apiKeyName"
-                    type="text"
-                    value={apiKeyForm.name}
-                    onChange={onApiKeyFormChange("name")}
-                    placeholder="e.g. Production API Key"
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="apiKeyType">Environment</label>
-                  <select
-                    id="apiKeyType"
-                    value={apiKeyForm.type}
-                    onChange={onApiKeyFormChange("type")}
-                  >
-                    <option value="production">Production</option>
-                    <option value="development">Development</option>
-                  </select>
-                </div>
-                <div className="admin-api-form-actions">
-                  <button
-                    className="btn ghost"
-                    type="button"
-                    onClick={() => setApiKeyFormOpen(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="btn primary"
-                    type="button"
-                    onClick={handleCreateApiKey}
-                    disabled={apiKeySaving}
-                  >
-                    {apiKeySaving ? "Creating..." : "Create Key"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {apiLoading ? (
-              <p className="field-hint">Loading API keys...</p>
-            ) : apiKeys.length ? (
-              <div className="admin-api-key-list">
-                {apiKeys.map((key) => {
-                  const maskedKey = formatMaskedKey(key.prefix, key.last4);
-                  const hasSecret = Boolean(apiKeySecrets[key.id]);
-                  const isRevealed = Boolean(apiKeyReveal[key.id] && hasSecret);
-                  const displayKey = isRevealed ? apiKeySecrets[key.id] : maskedKey;
-                  const title =
-                    key.name ||
-                    (key.type === "production" ? "Production API Key" : "Development API Key");
-                  const createdLabel = formatShortDate(key.createdAt);
-                  const lastUsedLabel = key.lastUsedAt
-                    ? formatShortDate(key.lastUsedAt)
-                    : "Never";
-                  const statusLabel = String(key.status || "active").toLowerCase();
-
-                  return (
-                    <div
-                      key={key.id}
-                      className={`admin-api-key ${statusLabel === "revoked" ? "revoked" : ""}`}
-                    >
-                      <div className="admin-api-key-header">
-                        <strong>{title}</strong>
-                        <span
-                          className={`admin-api-status ${statusLabel === "revoked" ? "muted" : "active"}`}
-                        >
-                          {statusLabel}
-                        </span>
-                      </div>
-                      <div className="admin-api-key-row">
-                        <div className="admin-api-key-value">
-                          <code>{displayKey}</code>
-                        </div>
-                        <div className="admin-api-key-buttons">
-                          <button
-                            className="admin-icon-button"
-                            type="button"
-                            onClick={() =>
-                              setApiKeyReveal((prev) => ({
-                                ...prev,
-                                [key.id]: !prev[key.id],
-                              }))
-                            }
-                            disabled={!hasSecret || statusLabel === "revoked"}
-                            aria-label={isRevealed ? "Hide API key" : "Show API key"}
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              {isRevealed ? (
-                                <>
-                                  <path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z" />
-                                  <circle cx="12" cy="12" r="3" />
-                                </>
-                              ) : (
-                                <>
-                                  <path d="M4.5 5.5 19 19" />
-                                  <path d="M9.2 9.4a3 3 0 0 0 4.2 4.2" />
-                                  <path d="M6 7.3C4.4 8.7 3 10.6 3 12c0 0 3.6 6 9 6 1.6 0 3-.3 4.2-.9" />
-                                  <path d="M14.8 8.1A9.7 9.7 0 0 0 12 6c-1.9 0-3.6.5-5 1.4" />
-                                </>
-                              )}
-                            </svg>
-                          </button>
-                          <button
-                            className="admin-icon-button"
-                            type="button"
-                            onClick={() => handleCopyApiKey(apiKeySecrets[key.id])}
-                            disabled={statusLabel === "revoked" || !hasSecret}
-                            aria-label="Copy API key"
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <rect x="8" y="8" width="11" height="11" rx="2" />
-                              <path d="M5 15V5a2 2 0 0 1 2-2h10" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                      <div className="admin-api-key-meta">
-                        <span>Created: {createdLabel}</span>
-                        <span>Last used: {lastUsedLabel}</span>
-                      </div>
-                      {statusLabel !== "revoked" && (
-                        <div className="admin-api-key-actions">
-                          <button
-                            className="admin-api-key-action danger"
-                            type="button"
-                            onClick={() => handleRevokeApiKey(key.id)}
-                            disabled={apiKeySaving}
-                          >
-                            Revoke
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="admin-api-empty">No API keys created yet.</p>
-            )}
-            <p className="admin-api-note">
-              For security, full keys are shown only once after creation.
-            </p>
-          </section>
-
-          <section className="admin-profile-card admin-profile-webhooks-card">
-            <div className="admin-profile-card-head">
-              <div>
-                <h3>Webhooks</h3>
-                <p>Configure webhook endpoints for real-time updates.</p>
-              </div>
-              <button
-                className="btn ghost admin-api-action admin-api-secondary"
-                type="button"
-                onClick={() => {
-                  setWebhookFormOpen((prev) => !prev);
-                  setWebhookSecret("");
-                  setApiError("");
-                  setApiNotice("");
-                }}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M10.5 13a4.5 4.5 0 0 0 6.4 0l2.1-2.1a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2" />
-                  <path d="M13.5 11a4.5 4.5 0 0 0-6.4 0L5 13.1a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2" />
-                </svg>
-                Add Webhook
-              </button>
-            </div>
-
-            {webhookSecret && (
-              <div className="admin-api-secret">
-                <div>
-                  <strong>Webhook signing secret</strong>
-                  <span>Copy this secret now. You will not see it again.</span>
-                </div>
-                <div className="admin-api-secret-row">
-                  <code>{webhookSecret}</code>
-                  <button
-                    className="admin-icon-button"
-                    type="button"
-                    onClick={async () => {
-                      const copied = await copyToClipboard(webhookSecret);
-                      if (copied) {
-                        setApiNotice("Webhook secret copied.");
-                      } else {
-                        setApiError("Unable to copy webhook secret.");
-                      }
-                    }}
-                    aria-label="Copy webhook secret"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <rect x="8" y="8" width="11" height="11" rx="2" />
-                      <path d="M5 15V5a2 2 0 0 1 2-2h10" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {webhookFormOpen && (
-              <div className="admin-api-form">
-                <div className="field full">
-                  <label htmlFor="webhookUrl">Webhook URL</label>
-                  <input
-                    id="webhookUrl"
-                    type="text"
-                    value={webhookForm.url}
-                    onChange={onWebhookFormChange("url")}
-                    placeholder="https://example.com/webhooks/craftzy"
-                  />
-                </div>
-                <div className="field full">
-                  <label htmlFor="webhookEvents">Events (comma separated)</label>
-                  <input
-                    id="webhookEvents"
-                    type="text"
-                    value={webhookForm.events}
-                    onChange={onWebhookFormChange("events")}
-                    placeholder="order.created, payment.succeeded"
-                  />
-                </div>
-                <div className="admin-api-form-actions">
-                  <button
-                    className="btn ghost"
-                    type="button"
-                    onClick={() => setWebhookFormOpen(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="btn primary"
-                    type="button"
-                    onClick={handleCreateWebhook}
-                    disabled={webhookSaving}
-                  >
-                    {webhookSaving ? "Saving..." : "Save Webhook"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {apiLoading ? (
-              <p className="field-hint">Loading webhooks...</p>
-            ) : webhooks.length ? (
-              <div className="admin-webhook-list">
-                {webhooks.map((hook) => {
-                  const createdLabel = formatShortDate(hook.createdAt);
-                  const triggeredLabel = hook.lastTriggeredAt
-                    ? formatShortDate(hook.lastTriggeredAt)
-                    : "Never";
-                  const events = Array.isArray(hook.events) && hook.events.length
-                    ? hook.events
-                    : ["*"];
-                  return (
-                    <div key={hook.id} className="admin-webhook-item">
-                      <div>
-                        <strong>{hook.url}</strong>
-                        <div className="admin-webhook-meta">
-                          <span>Created: {createdLabel}</span>
-                          <span>Last triggered: {triggeredLabel}</span>
-                        </div>
-                        <div className="admin-webhook-tags">
-                          {events.map((eventName) => (
-                            <span key={eventName} className="admin-webhook-tag">
-                              {eventName}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="admin-webhook-actions">
-                        <span
-                          className={`admin-api-status ${hook.status === "active" ? "active" : "muted"}`}
-                        >
-                          {hook.status || "active"}
-                        </span>
-                        <button
-                          className="admin-icon-button"
-                          type="button"
-                          onClick={() => handleDeleteWebhook(hook.id)}
-                          disabled={webhookSaving}
-                          aria-label="Delete webhook"
-                        >
-                          <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M6 7h12" />
-                            <path d="M9 7V5h6v2" />
-                            <path d="M8 7l1 12h6l1-12" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="admin-webhook-empty">
-                <p>No webhooks configured yet</p>
-                <button
-                  className="btn ghost"
-                  type="button"
-                  onClick={() => setWebhookFormOpen(true)}
-                >
-                  Add Webhook
-                </button>
-              </div>
-            )}
-          </section>
-        </div>
+        <AdminProfileApiTab
+          apiError={apiError}
+          apiNotice={apiNotice}
+          apiKeyFormOpen={apiKeyFormOpen}
+          apiKeyForm={apiKeyForm}
+          apiKeySaving={apiKeySaving}
+          apiLoading={apiLoading}
+          apiKeys={apiKeys}
+          apiKeySecrets={apiKeySecrets}
+          apiKeyReveal={apiKeyReveal}
+          webhookSecret={webhookSecret}
+          webhookFormOpen={webhookFormOpen}
+          webhookForm={webhookForm}
+          webhookSaving={webhookSaving}
+          webhooks={webhooks}
+          onToggleApiKeyForm={toggleApiKeyForm}
+          onCloseApiKeyForm={closeApiKeyForm}
+          onApiKeyFormChange={onApiKeyFormChange}
+          onCreateApiKey={handleCreateApiKey}
+          onCopyApiKey={handleCopyApiKey}
+          onRevokeApiKey={handleRevokeApiKey}
+          onToggleApiKeyReveal={toggleApiKeyReveal}
+          onToggleWebhookForm={toggleWebhookForm}
+          onCloseWebhookForm={closeWebhookForm}
+          onOpenWebhookForm={openWebhookForm}
+          onWebhookFormChange={onWebhookFormChange}
+          onCreateWebhook={handleCreateWebhook}
+          onDeleteWebhook={handleDeleteWebhook}
+          onCopyWebhookSecret={handleCopyWebhookSecret}
+        />
       )}
 
-      {activeTab === "team" && (
-        <section className="admin-profile-card admin-profile-empty">
-          <div className="admin-profile-card-head">
-            <div>
-              <h3>Coming Soon</h3>
-              <p>We are building this section now. Check back soon.</p>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {profileImageModalOpen && (
-        <div
-          className="profile-image-modal-backdrop"
-          role="presentation"
-          onClick={closeProfileImageModal}
-        >
-          <div
-            className="profile-image-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Edit profile picture"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="profile-image-modal-head">
-              <h4>Update Profile Picture</h4>
-              <button
-                type="button"
-                className="profile-image-modal-close"
-                onClick={closeProfileImageModal}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            <div className="profile-image-modal-body">
-              <div className="profile-image-modal-preview">
-                {profileImageDraft ? (
-                  <img src={profileImageDraft} alt="Profile preview" />
-                ) : (
-                  <span>{adminInitial}</span>
-                )}
-              </div>
-              {profileImageDraftName && (
-                <p className="field-hint">Selected: {profileImageDraftName}</p>
-              )}
-              <input
-                ref={profileImageInputRef}
-                className="profile-image-modal-input"
-                type="file"
-                accept="image/*"
-                onChange={handleProfileImageUpload}
-              />
-              <div className="profile-image-modal-actions">
-                <button type="button" className="btn ghost" onClick={openProfileImagePicker}>
-                  Choose image
-                </button>
-                <button type="button" className="btn ghost" onClick={removeProfileImageDraft}>
-                  Remove
-                </button>
-              </div>
-            </div>
-            <div className="profile-image-modal-foot">
-              <button type="button" className="btn ghost" onClick={closeProfileImageModal}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn primary"
-                onClick={applyProfileImage}
-                disabled={imageSaving}
-              >
-                {imageSaving ? "Saving..." : "Save picture"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ProfileImageModal
+        open={profileImageModalOpen}
+        onClose={closeProfileImageModal}
+        adminInitial={adminInitial}
+        profileImageDraft={profileImageDraft}
+        profileImageDraftName={profileImageDraftName}
+        inputRef={profileImageInputRef}
+        onUpload={handleProfileImageUpload}
+        onOpenPicker={openProfileImagePicker}
+        onRemoveDraft={removeProfileImageDraft}
+        onApply={applyProfileImage}
+        imageSaving={imageSaving}
+      />
     </AdminSidebarLayout>
   );
 }
+

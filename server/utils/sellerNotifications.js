@@ -1,4 +1,6 @@
 const Notification = require("../models/Notification");
+const User = require("../models/User");
+const { publishNotificationUpdate } = require("./notificationStream");
 
 const LOW_STOCK_THRESHOLD = 5;
 
@@ -20,8 +22,8 @@ const normalizeNotification = (entry) => ({
   readAt: entry?.readAt || null,
 });
 
-const createSellerNotification = async ({
-  sellerId,
+const createUserNotification = async ({
+  userId,
   type,
   title,
   message,
@@ -30,11 +32,11 @@ const createSellerNotification = async ({
   entityId = "",
   key = "",
 }) => {
-  const seller = normalizeText(sellerId);
-  if (!seller) return null;
+  const targetUserId = normalizeText(userId);
+  if (!targetUserId) return null;
 
   const payload = {
-    seller,
+    seller: targetUserId,
     type: normalizeText(type),
     title: normalizeText(title),
     message: normalizeText(message),
@@ -44,30 +46,56 @@ const createSellerNotification = async ({
     isRead: false,
     readAt: null,
   };
+  const updatePayload = {
+    type: payload.type,
+    title: payload.title,
+    message: payload.message,
+    link: payload.link,
+    entityType: payload.entityType,
+    entityId: payload.entityId,
+    isRead: payload.isRead,
+    readAt: payload.readAt,
+  };
 
   const notificationKey = normalizeText(key);
   if (!notificationKey) {
-    return Notification.create(payload);
+    const notification = await Notification.create(payload);
+    publishNotificationUpdate(targetUserId, {
+      reason: "created",
+      notification: normalizeNotification(notification),
+    });
+    return notification;
   }
 
-  return Notification.findOneAndUpdate(
-    { seller, key: notificationKey },
+  const notification = await Notification.findOneAndUpdate(
+    { seller: targetUserId, key: notificationKey },
     {
       $set: {
-        ...payload,
+        ...updatePayload,
         key: notificationKey,
       },
       $setOnInsert: {
-        seller,
+        seller: targetUserId,
       },
     },
     {
       upsert: true,
-      new: true,
+      returnDocument: "after",
       setDefaultsOnInsert: true,
     }
   );
+  publishNotificationUpdate(targetUserId, {
+    reason: "updated",
+    notification: normalizeNotification(notification),
+  });
+  return notification;
 };
+
+const createSellerNotification = async ({ sellerId, ...rest }) =>
+  createUserNotification({
+    userId: sellerId,
+    ...rest,
+  });
 
 const createCustomerNotification = async ({
   customerId,
@@ -79,8 +107,8 @@ const createCustomerNotification = async ({
   entityId = "",
   key = "",
 }) =>
-  createSellerNotification({
-    sellerId: customerId,
+  createUserNotification({
+    userId: customerId,
     type,
     title,
     message,
@@ -89,6 +117,60 @@ const createCustomerNotification = async ({
     entityId,
     key,
   });
+
+const createAdminNotification = async ({
+  adminId,
+  type,
+  title,
+  message,
+  link = "",
+  entityType = "",
+  entityId = "",
+  key = "",
+}) =>
+  createUserNotification({
+    userId: adminId,
+    type,
+    title,
+    message,
+    link,
+    entityType,
+    entityId,
+    key,
+  });
+
+const createNotificationsForAdmins = async ({
+  type,
+  title,
+  message,
+  link = "",
+  entityType = "",
+  entityId = "",
+  key = "",
+}) => {
+  const admins = await User.find({ role: "admin" }).select("_id").lean();
+  if (!Array.isArray(admins) || admins.length === 0) return [];
+
+  return Promise.all(
+    admins.map((admin) => {
+      const adminId = normalizeText(admin?._id);
+      if (!adminId) return null;
+      const notificationKey = normalizeText(key)
+        ? `${normalizeText(key)}_${adminId}`
+        : "";
+      return createAdminNotification({
+        adminId,
+        type,
+        title,
+        message,
+        link,
+        entityType,
+        entityId,
+        key: notificationKey,
+      });
+    })
+  );
+};
 
 const maybeCreateInventoryNotifications = async ({
   sellerId,
@@ -139,8 +221,11 @@ const maybeCreateInventoryNotifications = async ({
 
 module.exports = {
   LOW_STOCK_THRESHOLD,
+  createUserNotification,
   createSellerNotification,
   createCustomerNotification,
+  createAdminNotification,
+  createNotificationsForAdmins,
   maybeCreateInventoryNotifications,
   normalizeNotification,
 };

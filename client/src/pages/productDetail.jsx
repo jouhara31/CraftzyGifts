@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Header from "../components/Header";
+import ProductHoverImage from "../components/ProductHoverImage";
 import { addToCart } from "../utils/cart";
 import { getWishlist, toggleWishlist } from "../utils/wishlist";
-import { getProductImage } from "../utils/productMedia";
+import { getProductImage, getProductImages } from "../utils/productMedia";
 import { getCachedProductDetail, loadProductDetail } from "../utils/productDetailCache";
+import {
+  getPurchaseBlockedMessage,
+  isPurchaseBlockedRole,
+  readStoredSessionClaims,
+} from "../utils/authRoute";
 import {
   loadSellerStore as loadCachedSellerStore,
   prefetchSellerStore,
 } from "../utils/sellerStoreCache";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const SELLER_STORE_SUMMARY_OPTIONS = {
   includeProducts: false,
   includeFeedbacks: false,
@@ -55,17 +61,6 @@ const normalizeReviewImages = (value = []) =>
         )
     )
   ).slice(0, 4);
-
-const readStoredUserRole = () => {
-  try {
-    const raw = localStorage.getItem("user");
-    if (!raw) return "";
-    const parsed = JSON.parse(raw);
-    return String(parsed?.role || "").trim().toLowerCase();
-  } catch {
-    return "";
-  }
-};
 
 const cleanTextList = (value = [], maxItems = 20) =>
   Array.from(
@@ -136,12 +131,15 @@ export default function ProductDetail() {
   const [notice, setNotice] = useState("");
   const [wishlistNotice, setWishlistNotice] = useState("");
   const [isWishlisted, setIsWishlisted] = useState(false);
-  const [userRole, setUserRole] = useState(() => readStoredUserRole());
+  const [sessionClaims, setSessionClaims] = useState(() => readStoredSessionClaims());
   const navigate = useNavigate();
+  const userRole = sessionClaims.role;
+  const isPurchaseBlocked = isPurchaseBlockedRole(userRole);
+  const purchaseBlockedMessage = getPurchaseBlockedMessage(userRole);
 
   const requireLogin = () => {
     const token = localStorage.getItem("token");
-    if (!token) {
+    if (!token || sessionClaims.isExpired) {
       navigate("/login");
       return false;
     }
@@ -222,9 +220,9 @@ export default function ProductDetail() {
   }, []);
 
   useEffect(() => {
-    const syncUserRole = () => setUserRole(readStoredUserRole());
-    window.addEventListener("user:updated", syncUserRole);
-    return () => window.removeEventListener("user:updated", syncUserRole);
+    const syncSessionClaims = () => setSessionClaims(readStoredSessionClaims());
+    window.addEventListener("user:updated", syncSessionClaims);
+    return () => window.removeEventListener("user:updated", syncSessionClaims);
   }, []);
 
   useEffect(() => {
@@ -256,30 +254,14 @@ export default function ProductDetail() {
   const baseMakingCharge = Number(product?.makingCharge || 0);
   const availableStock = Math.max(0, Number(product?.stock || 0));
   const isOutOfStock = availableStock <= 0;
-  const isSellerAccount = userRole === "seller";
   const maxQuantity = Math.max(1, availableStock);
-  const purchaseDisabled = isOutOfStock || isSellerAccount;
+  const purchaseDisabled = isOutOfStock || isPurchaseBlocked;
 
   useEffect(() => {
     setQuantity((prev) => Math.max(1, Math.min(prev, maxQuantity)));
   }, [maxQuantity]);
 
-  const galleryImages = useMemo(() => {
-    const unique = [];
-    const add = (value) => {
-      const src = String(value || "").trim();
-      if (!src || unique.includes(src)) return;
-      unique.push(src);
-    };
-
-    add(product?.image);
-    if (Array.isArray(product?.images)) {
-      product.images.forEach(add);
-    }
-    add(getProductImage(product || {}));
-
-    return unique;
-  }, [product]);
+  const galleryImages = useMemo(() => getProductImages(product || {}), [product]);
 
   const safeImageIndex =
     galleryImages.length > 0
@@ -292,6 +274,10 @@ export default function ProductDetail() {
       setActiveImageIndex(safeImageIndex);
     }
   }, [activeImageIndex, safeImageIndex]);
+
+  useEffect(() => {
+    setActiveImageIndex(0);
+  }, [product?._id]);
 
   const quantityChoices = Array.from(
     { length: Math.min(Math.max(maxQuantity, 1), 10) },
@@ -311,6 +297,9 @@ export default function ProductDetail() {
   );
   const sellerRatingCount = Number(
     sellerStoreData?.stats?.verifiedFeedbacks || sellerStoreData?.stats?.totalFeedbacks || 0
+  );
+  const sellerProductCount = Number(
+    sellerStoreData?.stats?.totalProducts || sellerStoreData?.products?.length || 0
   );
   const productReviewStats =
     product?.reviewStats && typeof product.reviewStats === "object"
@@ -359,7 +348,7 @@ export default function ProductDetail() {
     const direct = cleanTextList(product?.occasions, 8);
     return direct;
   }, [product]);
-  const showInlineStockWithOccasion = isCustomizationEnabled && occasionOptions.length > 0;
+  const showInlineStockWithOccasion = occasionOptions.length > 0 && isOutOfStock;
 
   const packagingStyles = useMemo(
     () => normalizePackagingStyles(product?.packagingStyles),
@@ -372,18 +361,18 @@ export default function ProductDetail() {
     [packagingStyles, selectedPackagingId]
   );
   const normalizedGiftNote = giftNote.trim().slice(0, 180);
-  const hasCustomizationSelection =
-    isCustomizationEnabled &&
-    Boolean(selectedOccasion || selectedPackagingId || normalizedGiftNote.length > 0);
-  const selectedPackagingCharge = hasCustomizationSelection
-    ? Math.max(0, Number(selectedPackagingStyle?.extraCharge || 0))
-    : 0;
+  const hasOrderPreferences = Boolean(
+    selectedOccasion || selectedPackagingId || normalizedGiftNote.length > 0
+  );
+  const selectedPackagingCharge = Math.max(0, Number(selectedPackagingStyle?.extraCharge || 0));
   const hasChargeablePackagingStyle = selectedPackagingCharge > 0;
-  const effectiveCustomizationCharge = hasCustomizationSelection
-    ? hasChargeablePackagingStyle
-      ? selectedPackagingCharge
-      : Math.max(0, baseMakingCharge)
-    : 0;
+  const effectiveCustomizationCharge = isCustomizationEnabled
+    ? hasOrderPreferences
+      ? hasChargeablePackagingStyle
+        ? selectedPackagingCharge
+        : Math.max(0, baseMakingCharge)
+      : 0
+    : selectedPackagingCharge;
   const displayHamperPrice = unitPrice + selectedPackagingCharge;
 
   useEffect(() => {
@@ -551,21 +540,28 @@ export default function ProductDetail() {
 
   const buildCurrentCheckoutItem = () => {
     const preferenceNotes = [];
-    if (hasCustomizationSelection && selectedOccasion) {
+    if (selectedOccasion) {
       preferenceNotes.push(`Occasion: ${selectedOccasion}`);
     }
-    if (hasCustomizationSelection && selectedPackagingStyle?.title) {
+    if (selectedPackagingStyle?.title) {
       preferenceNotes.push(`Packaging: ${selectedPackagingStyle.title}`);
     }
     const customizationPreferenceNote = preferenceNotes.join(" | ");
 
     const totalCustomizationCharge = effectiveCustomizationCharge;
 
-    const customizationPayload = hasCustomizationSelection
+    const customizationPayload = hasOrderPreferences
       ? {
           ...(normalizedGiftNote ? { wishCardText: normalizedGiftNote } : {}),
           ...(customizationPreferenceNote
             ? { specialNote: customizationPreferenceNote }
+            : {}),
+          ...(selectedOccasion ? { selectedOccasion } : {}),
+          ...(selectedPackagingStyle?.id
+            ? { packagingStyleId: selectedPackagingStyle.id }
+            : {}),
+          ...(selectedPackagingStyle?.title
+            ? { packagingStyleTitle: selectedPackagingStyle.title }
             : {}),
           ...(totalCustomizationCharge > 0
             ? { makingCharge: totalCustomizationCharge }
@@ -598,6 +594,40 @@ export default function ProductDetail() {
 
   const addCurrentItemToCart = () => {
     addToCart(buildCurrentCheckoutItem());
+  };
+
+  const handleAddCurrentItemToCart = () => {
+    if (!guardPurchaseAction()) return;
+    addCurrentItemToCart();
+    setNotice("Added to cart");
+  };
+
+  const handleGiftNow = () => {
+    if (!guardPurchaseAction()) return;
+    navigate("/checkout", {
+      state: { buyNowItem: buildCurrentCheckoutItem() },
+    });
+  };
+
+  const handleOpenCustomization = () => {
+    if (isPurchaseBlocked) {
+      setNotice(purchaseBlockedMessage);
+      return;
+    }
+    if (!sellerId) {
+      setNotice("Seller info missing. Unable to open customization.");
+      return;
+    }
+    navigate(`/customize/seller/${sellerId}?productId=${product._id}`);
+  };
+
+  const guardPurchaseAction = () => {
+    if (isPurchaseBlocked) {
+      setNotice(purchaseBlockedMessage);
+      return false;
+    }
+    if (!requireLogin()) return false;
+    return true;
   };
 
   const toRecommendationCartItem = (item) => ({
@@ -705,16 +735,14 @@ export default function ProductDetail() {
                     <p className="pdp-mrp-discount-line">M.R.P. ₹{formatPrice(unitPrice)}</p>
                   )}
                   {isCustomizationEnabled &&
-                  hasCustomizationSelection &&
+                  hasOrderPreferences &&
                   baseMakingCharge > 0 &&
                   !hasChargeablePackagingStyle ? (
                     <p>+ ₹{formatPrice(baseMakingCharge)} customization charge</p>
                   ) : (
                     <p>Inclusive of all taxes</p>
                   )}
-                  {isCustomizationEnabled &&
-                    hasCustomizationSelection &&
-                    selectedPackagingCharge > 0 && (
+                  {selectedPackagingCharge > 0 && (
                     <p>+ ₹{formatPrice(selectedPackagingCharge)} packaging style</p>
                   )}
                   <p className="pdp-price-meta-sub">
@@ -725,111 +753,129 @@ export default function ProductDetail() {
                 </div>
               </div>
 
-              <figure className="pdp-side-preview" aria-label="Product preview">
-                <img src={activeImage} alt={`${product.name} small preview`} loading="lazy" />
-                <button
-                  className={`pdp-wishlist-icon ${isWishlisted ? "active" : ""}`}
-                  type="button"
-                  aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
-                  aria-pressed={isWishlisted}
-                  onClick={() => {
-                    if (!requireLogin()) return;
-                    const nextList = toggleWishlist({
-                      id: product._id,
-                      name: product.name,
-                      price: product.price,
-                      category: product.category,
-                      image: getProductImage(product),
-                    });
-                    const activeProductId = String(product?._id || "").trim();
-                    const added = nextList.some(
-                      (entry) =>
-                        String(entry?.id || entry?._id || "").trim() === activeProductId
-                    );
-                    setIsWishlisted(added);
-                    setWishlistNotice(added ? "Added to wishlist" : "Removed from wishlist");
-                  }}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M12 20.5 4.8 13.6a4.8 4.8 0 0 1 6.8-6.8L12 7.2l.4-.4a4.8 4.8 0 0 1 6.8 6.8L12 20.5Z"
-                      fill={isWishlisted ? "currentColor" : "none"}
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-                {wishlistNotice && (
-                  <span className="pdp-wishlist-note" role="status" aria-live="polite">
-                    {wishlistNotice}
-                  </span>
-                )}
+              <figure
+                className={`pdp-side-preview ${
+                  galleryImages.length > 1 ? "has-gallery-thumbs" : ""
+                }`}
+                aria-label="Product preview"
+              >
+                <div className="pdp-side-preview-main">
+                  <img src={activeImage} alt={`${product.name} preview`} loading="lazy" />
+                  <button
+                    className={`pdp-wishlist-icon ${isWishlisted ? "active" : ""}`}
+                    type="button"
+                    aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+                    aria-pressed={isWishlisted}
+                    onClick={() => {
+                      if (!requireLogin()) return;
+                      const nextList = toggleWishlist({
+                        id: product._id,
+                        name: product.name,
+                        price: product.price,
+                        category: product.category,
+                        image: getProductImage(product),
+                      });
+                      const activeProductId = String(product?._id || "").trim();
+                      const added = nextList.some(
+                        (entry) =>
+                          String(entry?.id || entry?._id || "").trim() === activeProductId
+                      );
+                      setIsWishlisted(added);
+                      setWishlistNotice(added ? "Added to wishlist" : "Removed from wishlist");
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M12 20.5 4.8 13.6a4.8 4.8 0 0 1 6.8-6.8L12 7.2l.4-.4a4.8 4.8 0 0 1 6.8 6.8L12 20.5Z"
+                        fill={isWishlisted ? "currentColor" : "none"}
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  {wishlistNotice && (
+                    <span className="pdp-wishlist-note" role="status" aria-live="polite">
+                      {wishlistNotice}
+                    </span>
+                  )}
+                </div>
+                {galleryImages.length > 1 ? (
+                  <div className="pdp-side-preview-thumbs" aria-label="Product image thumbnails">
+                    {galleryImages.map((image, index) => (
+                      <button
+                        key={`${image}-${index}`}
+                        type="button"
+                        className={`pdp-thumb-btn ${safeImageIndex === index ? "active" : ""}`}
+                        onClick={() => setActiveImageIndex(index)}
+                        aria-label={`Show image ${index + 1}`}
+                        aria-pressed={safeImageIndex === index}
+                      >
+                        <img src={image} alt={`${product.name} thumbnail ${index + 1}`} />
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </figure>
             </div>
 
             <div className="pdp-divider" />
 
-          {isCustomizationEnabled && (
-            <div className="pdp-top-options">
-              <div className="pdp-option-group">
-                <div className="pdp-option-head">
-                  <p className="pdp-option-label">Best for occasion</p>
-                  <span
-                    className={`status-pill ${
-                      isOutOfStock ? "locked" : "available"
-                    } pdp-stock-inline`}
-                  >
-                    {isOutOfStock ? "Out of stock" : `${availableStock} in stock`}
-                  </span>
-                </div>
-                {occasionOptions.length > 0 ? (
-                  <div className="pdp-chip-row">
-                    {occasionOptions.map((occasion) => (
-                      <button
-                        key={occasion}
-                        type="button"
-                        className={`pdp-choice-chip ${
-                          selectedOccasion === occasion ? "active" : ""
-                        }`}
+          <div className="pdp-top-options">
+            <div className="pdp-option-group">
+              <div className="pdp-option-head">
+                <p className="pdp-option-label">Best for occasion</p>
+                {isOutOfStock ? (
+                  <span className="status-pill locked pdp-stock-inline">Out of stock</span>
+                ) : null}
+              </div>
+              {occasionOptions.length > 0 ? (
+                <div className="pdp-chip-row">
+                  {occasionOptions.map((occasion) => (
+                    <button
+                      key={occasion}
+                      type="button"
+                      className={`pdp-choice-chip ${
+                        selectedOccasion === occasion ? "active" : ""
+                      }`}
                       onClick={() =>
                         setSelectedOccasion((prev) => (prev === occasion ? "" : occasion))
                       }
-                      >
-                        {occasion}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="field-hint">Seller has not added occasion tags yet.</p>
-                )}
-              </div>
-
-              <div className="pdp-option-group pdp-gift-note-inline">
-                <div className="pdp-option-head">
-                  <p className="pdp-option-label">Gift message</p>
-                  <span className="pdp-size-help">{normalizedGiftNote.length}/180</span>
+                    >
+                      {occasion}
+                    </button>
+                  ))}
                 </div>
-                <textarea
-                  className="pdp-note-input"
-                  placeholder="Add a short message for the wish card"
-                  maxLength={180}
-                  value={giftNote}
-                  onChange={(event) => setGiftNote(event.target.value)}
-                />
-              </div>
+              ) : (
+                <p className="field-hint">Seller has not added occasion tags yet.</p>
+              )}
+            </div>
 
-              <div className="pdp-option-group pdp-pack-inline">
-                <div className="pdp-option-head pdp-pack-head">
-                  <p className="pdp-option-label">Packaging style</p>
-                </div>
-                {packagingStyles.length > 0 ? (
-                  <div className="pdp-wrap-grid pdp-wrap-grid-inline">
-                    {packagingStyles.map((style) => (
-                      <button
-                        key={style.id}
-                        type="button"
+            <div className="pdp-option-group pdp-gift-note-inline">
+              <div className="pdp-option-head">
+                <p className="pdp-option-label">Gift message</p>
+                <span className="pdp-size-help">{normalizedGiftNote.length}/180</span>
+              </div>
+              <textarea
+                className="pdp-note-input"
+                placeholder="Add a short message for the wish card"
+                maxLength={180}
+                value={giftNote}
+                onChange={(event) => setGiftNote(event.target.value)}
+              />
+            </div>
+
+            <div className="pdp-option-group pdp-pack-inline">
+              <div className="pdp-option-head pdp-pack-head">
+                <p className="pdp-option-label">Packaging style</p>
+              </div>
+              {packagingStyles.length > 0 ? (
+                <div className="pdp-wrap-grid pdp-wrap-grid-inline">
+                  {packagingStyles.map((style) => (
+                    <button
+                      key={style.id}
+                      type="button"
                       className={`pdp-wrap-card ${
                         selectedPackagingId === style.id ? "active" : ""
                       }`}
@@ -837,53 +883,196 @@ export default function ProductDetail() {
                         setSelectedPackagingId((prev) => (prev === style.id ? "" : style.id))
                       }
                     >
-                        <span
-                          className={`pdp-wrap-radio ${
-                            selectedPackagingId === style.id ? "active" : ""
-                          }`}
-                          aria-hidden="true"
-                        />
-                        <strong>{style.title}</strong>
-                        {style.detail ? <span>{style.detail}</span> : null}
-                        {Number(style.extraCharge || 0) > 0 && (
-                          <span>+₹{formatPrice(style.extraCharge)}</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="field-hint">Seller has not added packaging styles yet.</p>
-                )}
-              </div>
+                      <span
+                        className={`pdp-wrap-radio ${
+                          selectedPackagingId === style.id ? "active" : ""
+                        }`}
+                        aria-hidden="true"
+                      />
+                      <strong>{style.title}</strong>
+                      {style.detail ? <span>{style.detail}</span> : null}
+                      {Number(style.extraCharge || 0) > 0 && (
+                        <span>+₹{formatPrice(style.extraCharge)}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="field-hint">Seller has not added packaging styles yet.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="pdp-divider" />
+
+          {!showInlineStockWithOccasion && isOutOfStock && (
+            <div className="pdp-price-row">
+              <span className="status-pill locked">Out of stock</span>
             </div>
           )}
 
           <div className="pdp-divider" />
 
-          {isCustomizationEnabled && (
-            <div className="pdp-action-row-right">
-              <div className="pdp-inline-seller">
-                <div className="pdp-inline-seller-top">
-                  <div className="pdp-inline-seller-identity">
-                    <div className="pdp-inline-seller-avatar" aria-hidden="true">
-                      {sellerProfileImage ? (
-                        <img src={sellerProfileImage} alt="" />
-                      ) : (
-                        String(sellerDisplayName || "S").trim().charAt(0).toUpperCase() || "S"
-                      )}
-                    </div>
-                    <p className="pdp-inline-seller-name">{sellerDisplayName}</p>
+          <div className="pdp-lower-grid">
+            <section className="pdp-product-review-block" aria-label="Customer reviews">
+              <div className="card-head">
+                <p className="card-title">Customer reviews</p>
+                <span className="chip">{productReviewCount} ratings</span>
+              </div>
+              {productReviewCount > 0 ? (
+                <>
+                  <p className="pdp-product-review-rating">
+                    <span
+                      className="rating-stars"
+                      role="img"
+                      aria-label={`${productReviewDisplayRating.toFixed(1)} out of 5`}
+                    >
+                      {toStarText(productReviewDisplayRating)}
+                    </span>
+                    <strong>{productReviewDisplayRating.toFixed(1)}/5</strong>
+                    <span>{productReviewCount} verified ratings</span>
+                  </p>
+                  <div className="pdp-product-review-breakdown">
+                    {[5, 4, 3, 2, 1].map((star) => {
+                      const row =
+                        productRatingBreakdown?.[star] ||
+                        productRatingBreakdown?.[String(star)] ||
+                        {};
+                      const count = Number(typeof row === "number" ? row : row?.count || 0);
+                      const share = Number(typeof row === "number" ? 0 : row?.share || 0);
+                      return (
+                        <p key={`pdp-rating-${star}`}>
+                          <strong>{star}★:</strong> {count}{" "}
+                          {Number.isFinite(share) && share > 0 ? `(${share.toFixed(1)}%)` : ""}
+                        </p>
+                      );
+                    })}
                   </div>
+                  {productFeedbackRows.length > 0 ? (
+                    <div className="pdp-product-review-list">
+                      {productFeedbackRows.map((entry, index) => {
+                        const reviewImages = normalizeReviewImages(entry?.images);
+                        return (
+                          <article
+                            key={entry?.id || `${entry?.customerName || "customer"}-${index}`}
+                            className="pdp-product-review-item"
+                          >
+                            <p className="pdp-product-review-head">
+                              <strong>{entry?.customerName || "Customer"}</strong>
+                              <span
+                                className="rating-stars"
+                                role="img"
+                                aria-label={`${Number(entry?.rating || 0)} out of 5`}
+                              >
+                                {toStarText(entry?.rating)}
+                              </span>
+                            </p>
+                            <p className="field-hint">
+                              Verified purchase • {formatReviewDate(entry?.createdAt)}
+                            </p>
+                            {entry?.comment ? (
+                              <p>{entry.comment}</p>
+                            ) : (
+                              <p className="field-hint">No written review.</p>
+                            )}
+                            {reviewImages.length > 0 ? (
+                              <div className="pdp-product-review-images">
+                                {reviewImages.map((image, imageIndex) => (
+                                  <img
+                                    key={`${entry?.id || index}-review-image-${imageIndex}`}
+                                    src={image}
+                                    alt={`Customer review image ${imageIndex + 1}`}
+                                    loading="lazy"
+                                  />
+                                ))}
+                              </div>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <p className="field-hint">No reviews for this product yet.</p>
+              )}
+            </section>
+
+            <aside className="pdp-side-rail" aria-label="Purchase actions and store details">
+              <div className="pdp-side-card pdp-side-action-card">
+                <div className="pdp-action-row-buttons-stack">
                   <button
-                    className="pdp-inline-seller-link"
+                    className="pdp-btn pdp-btn-primary"
                     type="button"
-                    onClick={() => navigate(`/store/${sellerId}`)}
-                    onMouseEnter={prefetchSellerStorePage}
-                    onFocus={prefetchSellerStorePage}
-                    onTouchStart={prefetchSellerStorePage}
-                    disabled={!sellerId}
+                    disabled={purchaseDisabled}
+                    onClick={handleAddCurrentItemToCart}
                   >
-                    <span aria-hidden="true">
+                    {isOutOfStock
+                      ? "Out of stock"
+                      : isCustomizationEnabled
+                        ? "Add to cart"
+                        : "Add hamper to cart"}
+                  </button>
+                  <button
+                    className="pdp-btn pdp-btn-outline"
+                    type="button"
+                    disabled={purchaseDisabled}
+                    onClick={handleGiftNow}
+                  >
+                    Gift now
+                  </button>
+                  {isCustomizationEnabled && (
+                    <button
+                      className="pdp-btn pdp-btn-outline"
+                      type="button"
+                      disabled={isPurchaseBlocked || !sellerId}
+                      onClick={handleOpenCustomization}
+                    >
+                      Customize
+                    </button>
+                  )}
+                </div>
+                {isPurchaseBlocked && (
+                  <p className="pdp-note">{purchaseBlockedMessage}</p>
+                )}
+                {notice && (
+                  <p className="pdp-notice" role="status" aria-live="polite">
+                    {notice}
+                  </p>
+                )}
+              </div>
+
+              <section className="pdp-seller-card" aria-label="Store details">
+                {sellerProductCount > 0 ? (
+                  <div className="card-head">
+                    <span className="chip">{sellerProductCount} products</span>
+                  </div>
+                ) : null}
+                <div className="pdp-seller-head">
+                  <div className="pdp-seller-avatar" aria-hidden="true">
+                    {sellerProfileImage ? (
+                      <img src={sellerProfileImage} alt="" />
+                    ) : (
+                      String(sellerDisplayName || "S").trim().charAt(0).toUpperCase() || "S"
+                    )}
+                  </div>
+                  <div>
+                    <h3>{sellerDisplayName}</h3>
+                    <p className="field-hint">
+                      {sellerRatingCount > 0
+                        ? `${sellerDisplayRating.toFixed(1)}★ from ${sellerRatingCount} ratings`
+                        : "No seller ratings yet"}
+                    </p>
+                  </div>
+                </div>
+                {sellerAbout ? (
+                  <p className="pdp-seller-about">{sellerAbout}</p>
+                ) : (
+                  <p className="pdp-seller-about">Curated gifting store on CraftyGifts.</p>
+                )}
+                <div className="pdp-seller-meta">
+                  <p>
+                    <span className="pdp-mini-icon" aria-hidden="true">
                       <svg viewBox="0 0 24 24">
                         <path
                           d="M4 7h16M6 7l1 12h10l1-12M9 11h6"
@@ -894,205 +1083,42 @@ export default function ProductDetail() {
                         />
                       </svg>
                     </span>
-                    Visit store
-                  </button>
+                    {sellerProductCount > 0
+                      ? `${sellerProductCount} products in this store`
+                      : "Store products available"}
+                  </p>
+                  <p>
+                    <span className="pdp-mini-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path
+                          d="M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    {deliveryWindowText
+                      ? `Delivery in ${deliveryWindowText}`
+                      : "Delivery timeline by seller"}
+                  </p>
                 </div>
-                {sellerAbout ? (
-                  <p className="pdp-inline-seller-about">{sellerAbout}</p>
-                ) : null}
-              </div>
-
-              <div className="pdp-action-row-buttons">
                 <button
-                  className="pdp-btn pdp-btn-primary"
+                  className="pdp-btn pdp-btn-outline pdp-store-visit-btn"
                   type="button"
-                  disabled={purchaseDisabled}
-                  onClick={() => {
-                    if (isSellerAccount) {
-                      setNotice("Seller account cannot place orders.");
-                      return;
-                    }
-                    if (!requireLogin()) return;
-                    addCurrentItemToCart();
-                    setNotice("Added to cart");
-                  }}
+                  onClick={() => navigate(`/store/${sellerId}`)}
+                  onMouseEnter={prefetchSellerStorePage}
+                  onFocus={prefetchSellerStorePage}
+                  onTouchStart={prefetchSellerStorePage}
+                  disabled={!sellerId}
                 >
-                  {isOutOfStock ? "Out of stock" : "Add to cart"}
+                  View store
                 </button>
-                <button
-                  className="pdp-btn pdp-btn-outline"
-                  type="button"
-                  disabled={purchaseDisabled}
-                  onClick={() => {
-                    if (isSellerAccount) {
-                      setNotice("Seller account cannot place orders.");
-                      return;
-                    }
-                    if (!requireLogin()) return;
-                    navigate("/checkout", {
-                      state: { buyNowItem: buildCurrentCheckoutItem() },
-                    });
-                  }}
-                >
-                  Gift now
-                </button>
-                <button
-                  className="pdp-btn pdp-btn-outline"
-                  type="button"
-                  onClick={() => {
-                    if (!sellerId) {
-                      setNotice("Seller info missing. Unable to open customization.");
-                      return;
-                    }
-                    navigate(`/customize/seller/${sellerId}?productId=${product._id}`);
-                  }}
-                >
-                  Customize
-                </button>
-              </div>
-            </div>
-          )}
-
-          {!showInlineStockWithOccasion && (
-            <div className="pdp-price-row">
-              <span className={`status-pill ${isOutOfStock ? "locked" : "available"}`}>
-                {isOutOfStock ? "Out of stock" : `${availableStock} in stock`}
-              </span>
-            </div>
-          )}
-          {isSellerAccount && (
-            <p className="pdp-note">Seller account cannot place orders. Use a customer account.</p>
-          )}
-
-          {!isCustomizationEnabled && (
-            <div className="pdp-action-stack tight">
-              <button
-                className="pdp-btn pdp-btn-primary"
-                type="button"
-                disabled={purchaseDisabled}
-                onClick={() => {
-                  if (isSellerAccount) {
-                    setNotice("Seller account cannot place orders.");
-                    return;
-                  }
-                  if (!requireLogin()) return;
-                  addCurrentItemToCart();
-                  setNotice("Added to cart");
-                }}
-              >
-                {isOutOfStock ? "Out of stock" : "Add hamper to cart"}
-              </button>
-              <button
-                className="pdp-btn pdp-btn-outline"
-                type="button"
-                disabled={purchaseDisabled}
-                onClick={() => {
-                  if (isSellerAccount) {
-                    setNotice("Seller account cannot place orders.");
-                    return;
-                  }
-                  if (!requireLogin()) return;
-                  navigate("/checkout", {
-                    state: { buyNowItem: buildCurrentCheckoutItem() },
-                  });
-                }}
-              >
-                Gift now
-              </button>
-            </div>
-          )}
-
-          {notice && (
-            <p className="pdp-notice" role="status" aria-live="polite">
-              {notice}
-            </p>
-          )}
-
-          <div className="pdp-divider" />
-
-          <section className="pdp-product-review-block" aria-label="Customer reviews">
-            <div className="card-head">
-              <p className="card-title">Customer reviews</p>
-              <span className="chip">{productReviewCount} ratings</span>
-            </div>
-            {productReviewCount > 0 ? (
-              <>
-                <p className="pdp-product-review-rating">
-                  <span
-                    className="rating-stars"
-                    role="img"
-                    aria-label={`${productReviewDisplayRating.toFixed(1)} out of 5`}
-                  >
-                    {toStarText(productReviewDisplayRating)}
-                  </span>
-                  <strong>{productReviewDisplayRating.toFixed(1)}/5</strong>
-                  <span>{productReviewCount} verified ratings</span>
-                </p>
-                <div className="pdp-product-review-breakdown">
-                  {[5, 4, 3, 2, 1].map((star) => {
-                    const row =
-                      productRatingBreakdown?.[star] ||
-                      productRatingBreakdown?.[String(star)] ||
-                      {};
-                    const count = Number(typeof row === "number" ? row : row?.count || 0);
-                    const share = Number(typeof row === "number" ? 0 : row?.share || 0);
-                    return (
-                      <p key={`pdp-rating-${star}`}>
-                        <strong>{star}★:</strong> {count}{" "}
-                        {Number.isFinite(share) && share > 0 ? `(${share.toFixed(1)}%)` : ""}
-                      </p>
-                    );
-                  })}
-                </div>
-                {productFeedbackRows.length > 0 ? (
-                  <div className="pdp-product-review-list">
-                    {productFeedbackRows.map((entry, index) => {
-                      const reviewImages = normalizeReviewImages(entry?.images);
-                      return (
-                        <article
-                          key={entry?.id || `${entry?.customerName || "customer"}-${index}`}
-                          className="pdp-product-review-item"
-                        >
-                          <p className="pdp-product-review-head">
-                            <strong>{entry?.customerName || "Customer"}</strong>
-                            <span
-                              className="rating-stars"
-                              role="img"
-                              aria-label={`${Number(entry?.rating || 0)} out of 5`}
-                            >
-                              {toStarText(entry?.rating)}
-                            </span>
-                          </p>
-                          <p className="field-hint">
-                            Verified purchase • {formatReviewDate(entry?.createdAt)}
-                          </p>
-                          {entry?.comment ? (
-                            <p>{entry.comment}</p>
-                          ) : (
-                            <p className="field-hint">No written review.</p>
-                          )}
-                          {reviewImages.length > 0 ? (
-                            <div className="pdp-product-review-images">
-                              {reviewImages.map((image, imageIndex) => (
-                                <img
-                                  key={`${entry?.id || index}-review-image-${imageIndex}`}
-                                  src={image}
-                                  alt={`Customer review image ${imageIndex + 1}`}
-                                  loading="lazy"
-                                />
-                              ))}
-                            </div>
-                          ) : null}
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <p className="field-hint">No reviews for this product yet.</p>
-            )}
-          </section>
+              </section>
+            </aside>
+          </div>
 
           </aside>
         </div>
@@ -1123,9 +1149,9 @@ export default function ProductDetail() {
                           navigate(item?._id ? `/products/${item._id}` : "/products")
                         }
                       >
-                        <img
+                        <ProductHoverImage
                           className="cart-reco-thumb"
-                          src={getProductImage(item)}
+                          product={item}
                           alt={item?.name}
                           loading="lazy"
                         />
@@ -1136,16 +1162,11 @@ export default function ProductDetail() {
                         className="cart-reco-add-btn"
                         type="button"
                         onClick={() => {
-                          if (isSellerAccount) {
-                            setNotice(
-                              "Seller account cannot place orders. Use a customer account."
-                            );
-                            return;
-                          }
+                          if (!guardPurchaseAction()) return;
                           addToCart(toRecommendationCartItem(item));
                           setNotice("Added to cart");
                         }}
-                        disabled={isSellerAccount}
+                        disabled={isPurchaseBlocked}
                       >
                         Add to cart
                       </button>
@@ -1170,3 +1191,4 @@ export default function ProductDetail() {
     </div>
   );
 }
+

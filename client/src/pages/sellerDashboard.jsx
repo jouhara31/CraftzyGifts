@@ -3,8 +3,9 @@ import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import { getProductImage } from "../utils/productMedia";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
+const DASHBOARD_REFRESH_INTERVAL_MS = 60000;
 
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 
@@ -195,14 +196,16 @@ export default function SellerDashboard() {
     navigate("/login");
   }, [navigate]);
 
-  const loadDashboard = useCallback(async () => {
+  const loadDashboard = useCallback(async ({ silent = false } = {}) => {
     const token = localStorage.getItem("token");
     if (!token) {
       clearSessionAndRedirect();
       return;
     }
 
-    setLoading(true);
+    if (!silent) {
+      setLoading(true);
+    }
     setError("");
     try {
       const headers = { Authorization: `Bearer ${token}` };
@@ -282,16 +285,36 @@ export default function SellerDashboard() {
         sellerPendingOrders: pendingOrders,
       });
       window.dispatchEvent(new Event("user:updated"));
-      window.dispatchEvent(new Event("seller:notifications-updated"));
     } catch {
       setError("Unable to load seller dashboard.");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [clearSessionAndRedirect]);
 
   useEffect(() => {
     loadDashboard();
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      loadDashboard({ silent: true });
+    }, DASHBOARD_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    const handleNotificationSync = () => {
+      loadDashboard({ silent: true });
+    };
+
+    window.addEventListener("seller:notifications-updated", handleNotificationSync);
+    return () => {
+      window.removeEventListener("seller:notifications-updated", handleNotificationSync);
+    };
   }, [loadDashboard]);
 
   const sellerName = sellerProfile?.name || "Seller";
@@ -311,7 +334,7 @@ export default function SellerDashboard() {
 
   const orderStatusClass = (status) => {
     if (["placed", "pending_payment", "return_requested"].includes(status)) return "warning";
-    if (["processing", "shipped", "refund_initiated"].includes(status)) return "info";
+    if (["processing", "shipped"].includes(status)) return "info";
     if (["delivered", "refunded"].includes(status)) return "success";
     return "locked";
   };
@@ -368,9 +391,7 @@ export default function SellerDashboard() {
     ];
 
     const inProgressOrders = orders.filter((order) =>
-      ["placed", "processing", "shipped", "return_requested", "refund_initiated"].includes(
-        order.status
-      )
+      ["placed", "processing", "shipped", "return_requested"].includes(order.status)
     );
 
     const soldByProductId = orders.reduce((acc, order) => {
@@ -954,3 +975,4 @@ export default function SellerDashboard() {
     </div>
   );
 }
+

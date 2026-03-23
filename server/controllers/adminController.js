@@ -25,6 +25,16 @@ const PRODUCT_MODERATION_STATUS_SET = new Set([
   "rejected",
 ]);
 const CATEGORY_SUBCATEGORY_LIMIT = 60;
+const MAX_CATEGORY_NAME_LENGTH = 60;
+const MAX_CATEGORY_LABEL_LENGTH = 80;
+const MAX_MODERATION_NOTE_LENGTH = 240;
+const ADMIN_OVERVIEW_CACHE_TTL_SECONDS = 45;
+const ADMIN_OVERVIEW_CACHE_TTL_MS = ADMIN_OVERVIEW_CACHE_TTL_SECONDS * 1000;
+const adminOverviewCache = {
+  expiresAt: 0,
+  payload: null,
+  inflight: null,
+};
 
 const approvedModerationFilter = {
   $or: [{ moderationStatus: "approved" }, { moderationStatus: { $exists: false } }],
@@ -50,10 +60,163 @@ const normalizeSubcategories = (values = [], maxItems = CATEGORY_SUBCATEGORY_LIM
     })
     .slice(0, maxItems);
 };
+const validateCategoryText = (
+  value,
+  label,
+  { required = false, maxLength = MAX_CATEGORY_NAME_LENGTH } = {}
+) => {
+  const text = normalizeText(value);
+  if (required && !text) {
+    return `${label} is required.`;
+  }
+  if (text.length > maxLength) {
+    return `${label} cannot exceed ${maxLength} characters.`;
+  }
+  return "";
+};
+const validateSubcategoryList = (values = []) => {
+  const tooLong = (Array.isArray(values) ? values : []).find(
+    (value) => normalizeText(value).length > MAX_CATEGORY_NAME_LENGTH
+  );
+  if (tooLong) {
+    return `Subcategory "${normalizeText(tooLong)}" cannot exceed ${MAX_CATEGORY_NAME_LENGTH} characters.`;
+  }
+  return "";
+};
 const toCategoryMasterPayload = (config) => ({
   groups: Array.isArray(config?.groups) ? config.groups : [],
   updatedAt: config?.updatedAt || null,
 });
+
+const buildAdminOverviewPayload = async () => {
+  const settings = await ensurePlatformSettings();
+  const lowStockThreshold = Math.max(Number(settings?.lowStockThreshold ?? 5), 0);
+
+  const [
+    totalSellers,
+    pendingSellers,
+    approvedSellers,
+    rejectedSellers,
+    totalCustomers,
+    totalProducts,
+    activeProducts,
+    totalOrders,
+    activeOrders,
+    revenueTotals,
+    categories,
+    recentSellers,
+    recentOrders,
+    topCategories,
+    lowStockItems,
+  ] = await Promise.all([
+    User.countDocuments({ role: "seller" }),
+    User.countDocuments({ role: "seller", sellerStatus: "pending" }),
+    User.countDocuments({ role: "seller", sellerStatus: "approved" }),
+    User.countDocuments({ role: "seller", sellerStatus: "rejected" }),
+    User.countDocuments({ role: "customer" }),
+    Product.countDocuments(),
+    Product.countDocuments({
+      $and: [{ status: "active" }, approvedModerationFilter],
+    }),
+    Order.countDocuments(),
+    Order.countDocuments({
+      status: {
+        $in: [
+          "pending_payment",
+          "placed",
+          "processing",
+          "shipped",
+          "return_requested",
+        ],
+      },
+    }),
+    Order.aggregate([
+      { $match: { paymentStatus: { $in: ["paid", "refunded"] } } },
+      { $group: { _id: "$paymentStatus", total: { $sum: "$total" } } },
+    ]),
+    Product.distinct("category", { category: { $exists: true, $ne: "" } }),
+    User.find({ role: "seller" })
+      .select("name email storeName sellerStatus createdAt")
+      .sort({ createdAt: -1 })
+      .limit(6)
+      .lean(),
+    Order.find()
+      .select("status total createdAt")
+      .sort({ createdAt: -1 })
+      .limit(6)
+      .lean(),
+    Product.aggregate([
+      { $match: { category: { $exists: true, $ne: "" } } },
+      { $group: { _id: "$category", value: { $sum: 1 } } },
+      { $sort: { value: -1, _id: 1 } },
+      { $limit: 6 },
+      { $project: { _id: 0, label: "$_id", value: 1 } },
+    ]),
+    Product.find({ stock: { $lte: lowStockThreshold } })
+      .select("name stock seller")
+      .populate("seller", "name storeName")
+      .sort({ stock: 1 })
+      .limit(6)
+      .lean(),
+  ]);
+
+  const revenueMap = new Map(
+    (Array.isArray(revenueTotals) ? revenueTotals : []).map((entry) => [
+      entry._id,
+      Number(entry.total || 0),
+    ])
+  );
+  const paidRevenue = revenueMap.get("paid") || 0;
+  const refundedAmount = revenueMap.get("refunded") || 0;
+
+  return {
+    cards: {
+      totalSellers,
+      pendingSellers,
+      approvedSellers,
+      rejectedSellers,
+      totalProducts,
+      activeProducts,
+      totalOrders,
+      activeOrders,
+      paidRevenue,
+      refundedAmount,
+      categoryCount: categories.length,
+    },
+    categories: categories.filter(Boolean).sort((a, b) => a.localeCompare(b)),
+    recentSellers,
+    recentOrders,
+    totalCustomers,
+    topCategories,
+    lowStock: {
+      threshold: lowStockThreshold,
+      items: lowStockItems,
+    },
+  };
+};
+
+const getCachedAdminOverviewPayload = async () => {
+  const now = Date.now();
+  if (adminOverviewCache.payload && adminOverviewCache.expiresAt > now) {
+    return adminOverviewCache.payload;
+  }
+  if (adminOverviewCache.inflight) {
+    return adminOverviewCache.inflight;
+  }
+
+  adminOverviewCache.inflight = (async () => {
+    try {
+      const payload = await buildAdminOverviewPayload();
+      adminOverviewCache.payload = payload;
+      adminOverviewCache.expiresAt = Date.now() + ADMIN_OVERVIEW_CACHE_TTL_MS;
+      return payload;
+    } finally {
+      adminOverviewCache.inflight = null;
+    }
+  })();
+
+  return adminOverviewCache.inflight;
+};
 
 exports.getSellers = async (req, res) => {
   try {
@@ -65,7 +228,8 @@ exports.getSellers = async (req, res) => {
 
     const sellers = await User.find(filter)
       .select("name email phone storeName sellerStatus createdAt")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
     res.json(sellers);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -104,7 +268,8 @@ exports.getAdminProducts = async (req, res) => {
   try {
     const products = await Product.find()
       .populate("seller", "name email storeName sellerStatus")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
     res.json(products);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -120,10 +285,21 @@ exports.updateAdminProduct = async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(updates, "category")) {
       const category = String(updates.category || "").trim();
+      const categoryError = validateCategoryText(category, "Category", {
+        required: true,
+      });
+      if (categoryError) {
+        return res.status(400).json({ message: categoryError });
+      }
       product.category = category;
     }
     if (Object.prototype.hasOwnProperty.call(updates, "subcategory")) {
-      product.subcategory = String(updates.subcategory || "").trim();
+      const subcategory = String(updates.subcategory || "").trim();
+      const subcategoryError = validateCategoryText(subcategory, "Subcategory");
+      if (subcategoryError) {
+        return res.status(400).json({ message: subcategoryError });
+      }
+      product.subcategory = subcategory;
     }
 
     if (Object.prototype.hasOwnProperty.call(updates, "status")) {
@@ -151,6 +327,15 @@ exports.updateAdminProduct = async (req, res) => {
       if (!Array.isArray(updates.moderationNotes)) {
         return res.status(400).json({ message: "Invalid moderation notes format" });
       }
+      if (
+        updates.moderationNotes.some(
+          (entry) => String(entry || "").trim().length > MAX_MODERATION_NOTE_LENGTH
+        )
+      ) {
+        return res.status(400).json({
+          message: `Moderation notes cannot exceed ${MAX_MODERATION_NOTE_LENGTH} characters.`,
+        });
+      }
       product.moderationNotes = updates.moderationNotes
         .map((entry) => String(entry || "").trim())
         .filter(Boolean)
@@ -175,7 +360,8 @@ exports.getAdminOrders = async (req, res) => {
       .populate("product", "name category price status")
       .populate("seller", "name email storeName")
       .populate("customer", "name email phone")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
     res.json(orders);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -184,72 +370,12 @@ exports.getAdminOrders = async (req, res) => {
 
 exports.getAdminOverview = async (req, res) => {
   try {
-    const [
-      totalSellers,
-      pendingSellers,
-      approvedSellers,
-      rejectedSellers,
-      totalProducts,
-      activeProducts,
-      totalOrders,
-      activeOrders,
-      paidOrders,
-      refundedOrders,
-      categories,
-      recentSellers,
-      recentOrders,
-    ] = await Promise.all([
-      User.countDocuments({ role: "seller" }),
-      User.countDocuments({ role: "seller", sellerStatus: "pending" }),
-      User.countDocuments({ role: "seller", sellerStatus: "approved" }),
-      User.countDocuments({ role: "seller", sellerStatus: "rejected" }),
-      Product.countDocuments(),
-      Product.countDocuments({
-        $and: [{ status: "active" }, approvedModerationFilter],
-      }),
-      Order.countDocuments(),
-      Order.countDocuments({
-        status: {
-          $in: ["pending_payment", "placed", "processing", "shipped", "return_requested", "refund_initiated"],
-        },
-      }),
-      Order.find({ paymentStatus: "paid" }).select("total"),
-      Order.find({ paymentStatus: "refunded" }).select("total"),
-      Product.distinct("category", { category: { $exists: true, $ne: "" } }),
-      User.find({ role: "seller" })
-        .select("name email storeName sellerStatus createdAt")
-        .sort({ createdAt: -1 })
-        .limit(6),
-      Order.find()
-        .select("status total createdAt")
-        .sort({ createdAt: -1 })
-        .limit(6),
-    ]);
-
-    const paidRevenue = paidOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
-    const refundedAmount = refundedOrders.reduce(
-      (sum, order) => sum + Number(order.total || 0),
-      0
+    res.set(
+      "Cache-Control",
+      `private, max-age=${ADMIN_OVERVIEW_CACHE_TTL_SECONDS}`
     );
-
-    res.json({
-      cards: {
-        totalSellers,
-        pendingSellers,
-        approvedSellers,
-        rejectedSellers,
-        totalProducts,
-        activeProducts,
-        totalOrders,
-        activeOrders,
-        paidRevenue,
-        refundedAmount,
-        categoryCount: categories.length,
-      },
-      categories: categories.filter(Boolean).sort((a, b) => a.localeCompare(b)),
-      recentSellers,
-      recentOrders,
-    });
+    const payload = await getCachedAdminOverviewPayload();
+    res.json(payload);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -309,6 +435,23 @@ exports.createAdminCategory = async (req, res) => {
     const category = normalizeText(req.body?.category);
     const label = normalizeText(req.body?.label) || category;
     const subcategories = normalizeSubcategories(req.body?.subcategories);
+    const categoryError = validateCategoryText(category, "Category", {
+      required: true,
+    });
+    if (categoryError) {
+      return res.status(400).json({ message: categoryError });
+    }
+    const labelError = validateCategoryText(label, "Category label", {
+      required: true,
+      maxLength: MAX_CATEGORY_LABEL_LENGTH,
+    });
+    if (labelError) {
+      return res.status(400).json({ message: labelError });
+    }
+    const subcategoryError = validateSubcategoryList(subcategories);
+    if (subcategoryError) {
+      return res.status(400).json({ message: subcategoryError });
+    }
 
     if (!category) {
       return res.status(400).json({ message: "Category name is required." });
@@ -357,6 +500,17 @@ exports.updateAdminCategory = async (req, res) => {
       req.body && Object.prototype.hasOwnProperty.call(req.body, "subcategories")
         ? normalizeSubcategories(req.body?.subcategories)
         : normalizeSubcategories(currentGroup.subcategories);
+    const labelError = validateCategoryText(nextLabel, "Category label", {
+      required: true,
+      maxLength: MAX_CATEGORY_LABEL_LENGTH,
+    });
+    if (labelError) {
+      return res.status(400).json({ message: labelError });
+    }
+    const subcategoryError = validateSubcategoryList(nextSubcategories);
+    if (subcategoryError) {
+      return res.status(400).json({ message: subcategoryError });
+    }
 
     const removedSubcategories = normalizeSubcategories(currentGroup.subcategories).filter(
       (item) => !nextSubcategories.some((value) => normalizeKey(value) === normalizeKey(item))

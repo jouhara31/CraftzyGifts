@@ -2,8 +2,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import { getProductImage } from "../utils/productMedia";
+import {
+  addPendingPaymentGroup,
+  readPendingPaymentGroups,
+  removePendingPaymentGroup,
+} from "../utils/paymentTracking";
+import {
+  openRazorpayCheckout,
+  readStoredUserProfile,
+} from "../utils/razorpayCheckout";
+import { buildPaymentStatusPath } from "../utils/paymentStatusRoute";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const ONLINE_PAYMENT_MODES = new Set(["upi", "card"]);
 const ACTIVE_ORDER_STATUSES = new Set(["placed", "processing", "shipped", "return_requested"]);
 const COMPLETED_ORDER_STATUSES = new Set(["delivered", "refunded"]);
@@ -22,7 +32,6 @@ const ORDER_STATUS_LABELS = {
   delivered: "Delivered",
   return_requested: "Return requested",
   return_rejected: "Return rejected",
-  refund_initiated: "Refund in progress",
   refunded: "Refunded",
   cancelled: "Cancelled",
 };
@@ -34,7 +43,6 @@ const ORDER_STATUS_TONES = {
   delivered: "success",
   return_requested: "warning",
   return_rejected: "locked",
-  refund_initiated: "warning",
   refunded: "success",
   cancelled: "locked",
 };
@@ -58,7 +66,6 @@ const ORDER_PROGRESS_INDEX = {
   delivered: 3,
   return_requested: 3,
   return_rejected: 3,
-  refund_initiated: 3,
   refunded: 3,
   cancelled: 0,
 };
@@ -67,6 +74,12 @@ const REVIEW_RATINGS = [5, 4, 3, 2, 1];
 const REVIEW_IMAGE_LIMIT = 4;
 const REVIEW_IMAGE_MAX_SIZE_BYTES = 3 * 1024 * 1024;
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
+const PAYMENT_STATUS_POLL_INTERVAL_MS = 5000;
+const HIDDEN_ORDER_OPTION_KEYS = new Set(["hamperBase", "hamperPackage"]);
+const DEFAULT_RETURN_WINDOW_DAYS = 7;
+const MIN_RETURN_REASON_LENGTH = 10;
+const RETURN_REASON_MAX_LENGTH = 500;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 const asText = (value) => String(value ?? "").trim();
 const asNumber = (value, fallback = 0) => {
@@ -92,6 +105,51 @@ const formatDate = (value) => {
   });
 };
 
+const normalizeReturnWindowDays = (order = {}) => {
+  const parsed = Number.parseInt(order?.seller?.returnWindowDays, 10);
+  if (!Number.isInteger(parsed) || parsed < 0) return DEFAULT_RETURN_WINDOW_DAYS;
+  return Math.min(parsed, 30);
+};
+
+const getDeliveredAt = (order = {}) => {
+  const candidate = order?.deliveredAt || order?.updatedAt || order?.createdAt || null;
+  if (!candidate) return null;
+  const date = new Date(candidate);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const getReturnWindowEndsAt = (order = {}) => {
+  const deliveredAt = getDeliveredAt(order);
+  if (!deliveredAt) return null;
+  return new Date(deliveredAt.getTime() + normalizeReturnWindowDays(order) * DAY_IN_MS);
+};
+
+const isReturnWindowExpired = (order = {}) => {
+  const returnWindowDays = normalizeReturnWindowDays(order);
+  if (returnWindowDays === 0) return true;
+  const returnWindowEndsAt = getReturnWindowEndsAt(order);
+  if (!(returnWindowEndsAt instanceof Date) || Number.isNaN(returnWindowEndsAt.getTime())) {
+    return false;
+  }
+  return Date.now() > returnWindowEndsAt.getTime();
+};
+
+const buildReturnWindowNote = (order = {}) => {
+  if (asText(order?.status) !== "delivered") return "";
+  const returnWindowDays = normalizeReturnWindowDays(order);
+  if (returnWindowDays === 0) {
+    return "This seller is not accepting returns for this order.";
+  }
+  if (isReturnWindowExpired(order)) {
+    return "Return days are over for this order.";
+  }
+  const returnWindowEndsAt = getReturnWindowEndsAt(order);
+  if (!(returnWindowEndsAt instanceof Date) || Number.isNaN(returnWindowEndsAt.getTime())) {
+    return `Returns can be requested within ${returnWindowDays} day${returnWindowDays === 1 ? "" : "s"} of delivery.`;
+  }
+  return `Returns open until ${formatDate(returnWindowEndsAt)}.`;
+};
+
 const formatStatusLabel = (status) =>
   ORDER_STATUS_LABELS[asText(status)] || toTitleCase(status) || "Unknown";
 
@@ -100,6 +158,11 @@ const formatPaymentMode = (mode) =>
 
 const formatPaymentStatus = (status) =>
   PAYMENT_STATUS_LABELS[asText(status)] || toTitleCase(status) || "Unknown";
+
+const isOnlinePendingPaymentOrder = (order = {}) =>
+  asText(order?.status) === "pending_payment" &&
+  asText(order?.paymentStatus) === "pending" &&
+  ONLINE_PAYMENT_MODES.has(asText(order?.paymentMode));
 
 const formatShortOrderCode = (value) => {
   const text = asText(value);
@@ -172,7 +235,9 @@ const buildOrderNote = (order = {}) => {
 
   switch (status) {
     case "pending_payment":
-      return "Waiting for payment confirmation.";
+      return ONLINE_PAYMENT_MODES.has(asText(order?.paymentMode))
+        ? "Waiting for secure gateway confirmation. If you already paid, this page updates shortly."
+        : "Waiting for payment confirmation.";
     case "placed":
       return `Seller has received your order. ${deliveryWindow}.`;
     case "processing":
@@ -185,8 +250,6 @@ const buildOrderNote = (order = {}) => {
       return "Your return request has been shared with the seller.";
     case "return_rejected":
       return "Return request was reviewed by the seller.";
-    case "refund_initiated":
-      return "Refund is being processed.";
     case "refunded":
       return "Refund completed for this order.";
     case "cancelled":
@@ -251,9 +314,36 @@ export default function Orders() {
   const [actingOrderId, setActingOrderId] = useState("");
   const [reviewingOrderId, setReviewingOrderId] = useState("");
   const [openReviewOrderId, setOpenReviewOrderId] = useState("");
+  const [openReturnOrderId, setOpenReturnOrderId] = useState("");
   const [reviewDrafts, setReviewDrafts] = useState({});
+  const [returnReasonDrafts, setReturnReasonDrafts] = useState({});
+  const [trackedPaymentGroups, setTrackedPaymentGroups] = useState(() =>
+    readPendingPaymentGroups()
+  );
   const navigate = useNavigate();
   const location = useLocation();
+
+  const syncTrackedPaymentGroups = useCallback((nextGroups) => {
+    setTrackedPaymentGroups(
+      Array.isArray(nextGroups) ? nextGroups : readPendingPaymentGroups()
+    );
+  }, []);
+
+  const trackPaymentGroup = useCallback(
+    (groupId) => {
+      const nextGroups = addPendingPaymentGroup(groupId);
+      syncTrackedPaymentGroups(nextGroups);
+    },
+    [syncTrackedPaymentGroups]
+  );
+
+  const untrackPaymentGroup = useCallback(
+    (groupId) => {
+      const nextGroups = removePendingPaymentGroup(groupId);
+      syncTrackedPaymentGroups(nextGroups);
+    },
+    [syncTrackedPaymentGroups]
+  );
 
   const handleUnauthorized = useCallback(() => {
     localStorage.removeItem("token");
@@ -266,7 +356,7 @@ export default function Orders() {
     });
   }, [navigate]);
 
-  const loadOrders = useCallback(async () => {
+  const loadOrders = useCallback(async ({ silent = false } = {}) => {
     const token = localStorage.getItem("token");
     if (!token) {
       navigate("/login");
@@ -283,7 +373,9 @@ export default function Orders() {
         return;
       }
       if (!res.ok) {
-        setError(data.message || "Unable to fetch orders.");
+        if (!silent) {
+          setError(data.message || "Unable to fetch orders.");
+        }
         return;
       }
       const nextOrders = Array.isArray(data) ? data : [];
@@ -291,7 +383,9 @@ export default function Orders() {
       setReviewDrafts(buildReviewDraftMap(nextOrders));
       setError("");
     } catch {
-      setError("Unable to fetch orders.");
+      if (!silent) {
+        setError("Unable to fetch orders.");
+      }
     }
   }, [handleUnauthorized, navigate]);
 
@@ -300,11 +394,70 @@ export default function Orders() {
   }, [loadOrders]);
 
   useEffect(() => {
+    const paymentGroupId = String(location.state?.paymentGroupId || "").trim();
+    if (paymentGroupId) {
+      trackPaymentGroup(paymentGroupId);
+    }
     if (location.state?.notice) {
       setNotice(location.state.notice);
       navigate(location.pathname, { replace: true, state: {} });
     }
-  }, [location.pathname, location.state, navigate]);
+  }, [location.pathname, location.state, navigate, trackPaymentGroup]);
+
+  useEffect(() => {
+    if (trackedPaymentGroups.length === 0) return;
+
+    let shouldPoll = false;
+
+    trackedPaymentGroups.forEach((groupId) => {
+      const groupOrders = orders.filter((order) => asText(order?.paymentGroupId) === groupId);
+      if (groupOrders.length === 0) {
+        shouldPoll = true;
+        return;
+      }
+
+      const hasPending = groupOrders.some((order) => isOnlinePendingPaymentOrder(order));
+      if (hasPending) {
+        shouldPoll = true;
+        return;
+      }
+
+      const allPaid = groupOrders.every((order) => asText(order?.paymentStatus) === "paid");
+      if (allPaid) {
+        setNotice("Payment confirmed by the gateway. Your order is now placed.");
+        setError("");
+        untrackPaymentGroup(groupId);
+        return;
+      }
+
+      const allFailed = groupOrders.every(
+        (order) =>
+          ["failed", "refunded"].includes(asText(order?.paymentStatus)) ||
+          ["cancelled", "refunded"].includes(asText(order?.status))
+      );
+      if (allFailed) {
+        setError("Payment was not confirmed. You can retry securely from this page.");
+        untrackPaymentGroup(groupId);
+        return;
+      }
+
+      shouldPoll = true;
+    });
+
+    if (!shouldPoll) return;
+
+    const intervalId = window.setInterval(() => {
+      loadOrders({ silent: true });
+    }, PAYMENT_STATUS_POLL_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [loadOrders, orders, trackedPaymentGroups, untrackPaymentGroup]);
+
+  const refreshPendingPayments = useCallback(async () => {
+    setError("");
+    await loadOrders({ silent: true });
+    setNotice("Payment status refreshed.");
+  }, [loadOrders]);
 
   const handlePayNow = async (orderId) => {
     const token = localStorage.getItem("token");
@@ -316,6 +469,7 @@ export default function Orders() {
     setActingOrderId(orderId);
     setError("");
     setNotice("");
+    let paymentGroupId = "";
     try {
       const res = await fetch(`${API_URL}/api/orders/${orderId}/pay`, {
         method: "POST",
@@ -323,7 +477,6 @@ export default function Orders() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ result: "success" }),
       });
       const data = await res.json();
       if (res.status === 401) {
@@ -331,13 +484,93 @@ export default function Orders() {
         return;
       }
       if (!res.ok) {
-        setError(data.message || "Unable to complete payment.");
+        setError(data.message || "Unable to start payment.");
         return;
       }
-      setNotice("Payment verified successfully.");
-      await loadOrders();
-    } catch {
-      setError("Unable to complete payment.");
+
+      const profile = readStoredUserProfile();
+      const currentOrder = orders.find((entry) => String(entry?._id || "") === String(orderId));
+      paymentGroupId =
+        asText(data?.checkout?.paymentGroupId) || asText(currentOrder?.paymentGroupId);
+      const prefill = {
+        name: currentOrder?.shippingAddress?.name || profile.name,
+        email: profile.email,
+        contact: currentOrder?.shippingAddress?.phone || profile.contact,
+      };
+
+      const result = await openRazorpayCheckout({
+        checkout: data.checkout,
+        prefill,
+        notes: {
+          orderId,
+        },
+        onDismiss: () => {
+          navigate(
+            buildPaymentStatusPath({
+              paymentGroupId,
+              orderId,
+              outcome: "cancelled",
+            }),
+            {
+              state: {
+                paymentGroupId,
+                orderId,
+                outcome: "cancelled",
+                notice: "Payment cancelled. Your order is still pending payment and can be retried.",
+              },
+            }
+          );
+        },
+        onSuccess: async (response) => {
+          if (paymentGroupId) {
+            trackPaymentGroup(paymentGroupId);
+          }
+          navigate(
+            buildPaymentStatusPath({
+              paymentGroupId,
+              orderId,
+              outcome: "pending",
+            }),
+            {
+              state: {
+                paymentGroupId,
+                orderId,
+                outcome: "pending",
+                notice:
+                  "Payment submitted. We are waiting for secure gateway confirmation.",
+              },
+            }
+          );
+          return response;
+        },
+      });
+
+      if (result?.dismissed) {
+        return;
+      }
+    } catch (error) {
+      if (!paymentGroupId) {
+        setError(error?.message || "Unable to complete payment.");
+        return;
+      }
+      if (paymentGroupId) {
+        trackPaymentGroup(paymentGroupId);
+      }
+      navigate(
+        buildPaymentStatusPath({
+          paymentGroupId,
+          orderId,
+          outcome: "failed",
+        }),
+        {
+          state: {
+            paymentGroupId,
+            orderId,
+            outcome: "failed",
+            error: error?.message || "Unable to complete payment.",
+          },
+        }
+      );
     } finally {
       setActingOrderId("");
     }
@@ -347,6 +580,11 @@ export default function Orders() {
     const token = localStorage.getItem("token");
     if (!token) {
       navigate("/login");
+      return;
+    }
+    const reason = String(returnReasonDrafts[orderId] || "").trim();
+    if (reason.length < MIN_RETURN_REASON_LENGTH) {
+      setError(`Please add a return reason with at least ${MIN_RETURN_REASON_LENGTH} characters.`);
       return;
     }
 
@@ -361,7 +599,7 @@ export default function Orders() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          reason: "Customer requested return from orders page",
+          reason,
         }),
       });
       const data = await res.json();
@@ -374,12 +612,50 @@ export default function Orders() {
         return;
       }
       setNotice("Return request submitted.");
+      setOpenReturnOrderId("");
+      setReturnReasonDrafts((prev) => {
+        const next = { ...prev };
+        delete next[orderId];
+        return next;
+      });
       await loadOrders();
     } catch {
       setError("Unable to request return.");
     } finally {
       setActingOrderId("");
     }
+  };
+
+  const handleReturnRequestStart = (order) => {
+    const orderId = String(order?._id || "").trim();
+    if (!orderId) return;
+
+    setError("");
+    setNotice("");
+
+    const returnWindowDays = normalizeReturnWindowDays(order);
+    if (returnWindowDays === 0) {
+      setError("This seller is not accepting returns for this order.");
+      return;
+    }
+    if (isReturnWindowExpired(order)) {
+      setError("Return days are over for this order.");
+      return;
+    }
+
+    setOpenReviewOrderId("");
+    setOpenReturnOrderId((prev) => (prev === orderId ? "" : orderId));
+    setReturnReasonDrafts((prev) => ({
+      ...prev,
+      [orderId]: typeof prev[orderId] === "string" ? prev[orderId] : "",
+    }));
+  };
+
+  const updateReturnReasonDraft = (orderId, value) => {
+    setReturnReasonDrafts((prev) => ({
+      ...prev,
+      [orderId]: String(value || "").slice(0, RETURN_REASON_MAX_LENGTH),
+    }));
   };
 
   const updateReviewDraft = (orderId, field, value) => {
@@ -603,9 +879,16 @@ export default function Orders() {
           const draftImages = normalizeReviewImages(draft.images);
           const savedReviewImages = normalizeReviewImages(order?.review?.images);
           const isBusy = actingOrderId === orderId || reviewingOrderId === orderId;
+          const isTrackingPayment =
+            isOnlinePendingPaymentOrder(order) &&
+            trackedPaymentGroups.includes(asText(order?.paymentGroupId));
+          const isReturnOpen = openReturnOrderId === orderId;
+          const returnReason = String(returnReasonDrafts[orderId] || "");
+          const returnWindowNote = buildReturnWindowNote(order);
           const selectedOptionEntries = Object.entries(
             toPlainObject(order.customization?.selectedOptions)
           )
+            .filter(([key]) => !HIDDEN_ORDER_OPTION_KEYS.has(asText(key)))
             .filter(([, value]) => Boolean(String(value || "").trim()))
             .map(([key, value]) => resolveOptionSelection(order.product, key, value))
             .filter((entry) => entry.value);
@@ -808,14 +1091,24 @@ export default function Orders() {
                 {order.status === "pending_payment" &&
                 order.paymentStatus === "pending" &&
                 ONLINE_PAYMENT_MODES.has(order.paymentMode) ? (
-                  <button
-                    className="btn primary"
-                    type="button"
-                    disabled={isBusy}
-                    onClick={() => handlePayNow(orderId)}
-                  >
-                    {actingOrderId === orderId ? "Processing..." : "Pay now"}
-                  </button>
+                  <>
+                    <button
+                      className="btn primary"
+                      type="button"
+                      disabled={isBusy}
+                      onClick={() => handlePayNow(orderId)}
+                    >
+                      {actingOrderId === orderId ? "Processing..." : "Pay now"}
+                    </button>
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      disabled={isBusy}
+                      onClick={refreshPendingPayments}
+                    >
+                      Refresh status
+                    </button>
+                  </>
                 ) : null}
 
                 {order.status === "delivered" ? (
@@ -823,9 +1116,9 @@ export default function Orders() {
                     className="btn ghost"
                     type="button"
                     disabled={isBusy}
-                    onClick={() => handleReturnRequest(orderId)}
+                    onClick={() => handleReturnRequestStart(order)}
                   >
-                    {actingOrderId === orderId ? "Submitting..." : "Request return"}
+                    {isReturnOpen ? "Close return form" : "Request return"}
                   </button>
                 ) : null}
 
@@ -834,14 +1127,65 @@ export default function Orders() {
                     className="btn ghost"
                     type="button"
                     disabled={isBusy}
-                    onClick={() =>
-                      setOpenReviewOrderId((prev) => (prev === orderId ? "" : orderId))
-                    }
+                    onClick={() => {
+                      setOpenReturnOrderId("");
+                      setOpenReviewOrderId((prev) => (prev === orderId ? "" : orderId));
+                    }}
                   >
                     {reviewOpen ? "Close feedback" : hasSavedReview ? "Edit feedback" : "Rate & review"}
                   </button>
                 ) : null}
               </div>
+
+              {order.status === "delivered" && returnWindowNote ? (
+                <p className="field-hint">{returnWindowNote}</p>
+              ) : null}
+
+              {isTrackingPayment ? (
+                <p className="field-hint">
+                  Payment was submitted from checkout. We are waiting for the Razorpay webhook to
+                  confirm it.
+                </p>
+              ) : null}
+
+              {order.status === "delivered" && isReturnOpen ? (
+                <div className="customer-order-review-block">
+                  <p className="customer-order-section-title">Return request</p>
+                  <div className="order-feedback-card">
+                    <p className="order-feedback-heading">Tell the seller why you want to return this order</p>
+                    <textarea
+                      className="order-feedback-textarea"
+                      value={returnReason}
+                      maxLength={RETURN_REASON_MAX_LENGTH}
+                      placeholder="Explain the issue with the delivered order"
+                      onChange={(event) =>
+                        updateReturnReasonDraft(orderId, event.target.value)
+                      }
+                    />
+                    <p className="field-hint">
+                      {returnReason.length}/{RETURN_REASON_MAX_LENGTH}
+                    </p>
+                    <div className="order-feedback-actions">
+                      <button
+                        className="btn ghost"
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => setOpenReturnOrderId("")}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="btn primary"
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => handleReturnRequest(orderId)}
+                      >
+                        {actingOrderId === orderId ? "Submitting..." : "Send return request"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               {canSubmitReview && reviewOpen ? (
                 <div className="customer-order-review-block">
@@ -936,3 +1280,4 @@ export default function Orders() {
     </div>
   );
 }
+

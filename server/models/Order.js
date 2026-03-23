@@ -19,7 +19,6 @@ const orderSchema = new mongoose.Schema(
         "delivered",
         "return_requested",
         "return_rejected",
-        "refund_initiated",
         "refunded",
         "cancelled",
       ],
@@ -30,9 +29,13 @@ const orderSchema = new mongoose.Schema(
       enum: ["pending", "paid", "failed", "refunded"],
       default: "pending",
     },
+    paymentGroupId: { type: String },
+    paymentGatewayOrderId: { type: String },
     paymentReference: { type: String },
+    paymentGatewaySignature: { type: String },
     paymentFailureReason: { type: String },
     paidAt: { type: Date },
+    deliveredAt: { type: Date },
     refundedAt: { type: Date },
     returnReason: { type: String },
     review: {
@@ -52,7 +55,7 @@ const orderSchema = new mongoose.Schema(
       },
     ],
     metadata: {
-      paymentGateway: { type: String, default: "mock-gateway" },
+      paymentGateway: { type: String, default: "manual" },
       checkoutSource: { type: String, default: "web" },
     },
     customization: {
@@ -60,6 +63,9 @@ const orderSchema = new mongoose.Schema(
       referenceImageUrl: { type: String },
       referenceImageUrls: [{ type: String }],
       specialNote: { type: String },
+      selectedOccasion: { type: String },
+      packagingStyleId: { type: String },
+      packagingStyleTitle: { type: String },
       ideaDescription: { type: String },
       makingCharge: { type: Number, default: 0 },
       catalogSellerId: { type: String },
@@ -102,5 +108,10 @@ const orderSchema = new mongoose.Schema(
 
 orderSchema.index({ seller: 1, "review.rating": 1, "review.updatedAt": -1, createdAt: -1 });
 orderSchema.index({ product: 1, "review.rating": 1 });
+orderSchema.index({ paymentGroupId: 1, customer: 1, createdAt: -1 });
+orderSchema.index({ paymentGatewayOrderId: 1, createdAt: -1 });
+orderSchema.index({ customer: 1, createdAt: -1 });
+orderSchema.index({ seller: 1, createdAt: -1 });
+orderSchema.index({ status: 1, paymentStatus: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Order", orderSchema);

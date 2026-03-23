@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const LEGACY_OPTION_LABELS = {
   giftBoxes: "Gift box",
   chocolates: "Chocolates",
@@ -15,8 +15,7 @@ const SELLER_NEXT_STATUS = {
   placed: ["processing", "cancelled"],
   processing: ["shipped", "cancelled"],
   shipped: ["delivered"],
-  return_requested: ["return_rejected", "refund_initiated", "refunded"],
-  refund_initiated: ["refunded"],
+  return_requested: ["return_rejected", "refunded"],
 };
 
 const toPlainObject = (value) => {
@@ -262,7 +261,7 @@ export default function SellerOrders() {
 
   const orderStatusClass = (status) => {
     if (["placed", "pending_payment", "return_requested"].includes(status)) return "warning";
-    if (["processing", "shipped", "refund_initiated"].includes(status)) return "info";
+    if (["processing", "shipped"].includes(status)) return "info";
     if (["delivered", "refunded"].includes(status)) return "success";
     return "locked";
   };
@@ -584,3 +583,4 @@ export default function SellerOrders() {
     </div>
   );
 }
+

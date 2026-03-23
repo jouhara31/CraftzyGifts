@@ -1,0 +1,516 @@
+1
+BACHELOR OF COMPUTER APPLICATIONS
+(BCA-Revised Syllabus)
+BCA 6th Semester
+BCSP-064
+PROJECT GUIDELINES
+SCHOOL OF COMPUTER AND INFORMATION SCIENCES
+INDIRA GANDHI NATIONAL OPEN UNIVERSITY
+MAIDAN GARHI, NEW DELHI – 110 068
+BCSP-064
+
+-- 1 of 17 --
+
+2
+CONTENTS
+Sl.No. Topic
+Message from the Project Coordinator
+Page No.
+3
+I Calendar for the Project 4
+II Proforma for BCA (BCSP-064) Project Proposal
+(Project Title and Guide‟s Details)
+5
+III Guidelines for Project Formulation 7
+IV Project Proposal Submission and Approval 8
+V Project Report Formulation 9
+VI Important points while preparing the Project
+Report
+11
+VII List of Broad Areas of Application and Related
+Tools
+12
+VIII
+IX
+Remuneration Form for the BCA (BCSP-064)
+Project Guide
+Certificate of Originality
+13
+15
+X Project Trainee Letter 16
+
+-- 2 of 17 --
+
+3
+MESSAGE FROM THE PROJECT CO-ORDINATOR
+The Bachelor of Computer Applications (BCA) programme equips students with the skills
+necessary to pursue positions such as Programmers, Software Engineers, and Systems Designers
+in the fields of computer science, information technology, and IT-enabled services.
+Alternatively, students can choose to pursue higher studies in this area. In the BCA program, we
+have provided students with comprehensive knowledge that covers core areas of computer
+science, emphasizing both theory and practical application.
+In their final semester, BCA students are strongly encouraged to fully engage in project work. It
+is advised that students develop projects aimed at solving software industry problems or
+addressing challenges faced by research organizations. This practical experience exposes
+students to real-life project development issues and provides them with valuable exposure.
+The courses undertaken during the BCA programme provide students with a solid foundation to
+work across diverse application domains. The theoretical background acquired in various courses
+equips students with the necessary foundation, principles, and practices to develop effective
+solutions for computing problems. Practical courses provide hands-on experience, enabling
+students to work with different operating systems, programming languages, and software tools.
+The inclusion of project work in the BCA programme offers students an opportunity to develop
+high-quality software solutions. Throughout the project development process, students are
+expected to be involved in all stages of the software development life cycle (SDLC), including
+requirements analysis, systems design, software development/coding, testing, and
+documentation. The primary focus of the project work is to understand and apply the principles
+of software engineering practices and gain a thorough understanding of the SDLC.
+Students should approach the project work with utmost seriousness. The BCSP-064 project
+should be seen as an opportunity to develop software that exposes students to the SDLC. The
+selected topics should be complex and substantial enough to justify them as BCA projects. The
+projects should be genuine, original, and not copied from any other source. If any project is
+found to be copied, the project report will be forwarded to the Exam Discipline Committee of the
+University as an unfair means case, leading to appropriate action. Students are expected to
+strictly adhere to the guidelines provided for the BCSP-064 project.
+I wish you all the success.
+BCA COORDINATOR
+Email: bca@ignou.ac.in
+
+-- 3 of 17 --
+
+4
+Sl.No. Topic Date
+1. Submission of a Guide’s bio-data and project
+proposal at the following address:
+The Regional Director of your Regional
+Centre
+Twice a year as shown
+below:
+1st April to 30th June
+or
+1st October to 31st December
+2. Approval of Project 30 days after the
+project proposal is
+received.
+3. Submission of the Project Report (one copy) in
+bound form to:
+The Regional Director of your Regional
+Centre
+Twice a year as shown
+below:
+1st July to 30th September
+(For Project Proposal that
+have been approved during
+the 1st April to 30th June slot)
+or
+1st January to 31st March
+(For Project Proposal that
+have been approved during
+1st October to 31st December
+slot)
+4. Viva-Voce to be conducted In July (For project reports
+submitted during 1st January -
+31st March slot)
+In January (For project
+reports submitted during
+1st July – 30th September slot)
+I . C A L E N D A R F O R T H E P R O J E C T
+
+-- 4 of 17 --
+
+SCHOOL OF COMPUTER AND INFORMATION SCIENCES
+IGNOU, MAIDAN GARHI, NEW DELHI – 110 068
+Enrolment No: ________________ Regional Centre Code: _________Study Centre: __________
+1. Name of Student: ________________________________________________________________
+2. Address of the Student : ________________________________________________________________
+_______________________________________________________________
+_______________________________________________________________
+3.(a) E-mail: 3.(b) Telephone/ Mobile No.:
+4. Title of the Project :
+5. Name of the Project Guide: 5.(b) Designation of the Project Guide:
+6. Address of Project Guide: ________________________________________________________________
+_______________________________________________________________
+_______________________________________________________________
+7. Qualification of the Guide*
+(Attach bio-data of the Guide)
+Ph.D. M.Tech. B.Tech. MCA Any other
+*Note : i. All the above mentioned Degrees must have been awarded in Computer Science/IT only
+ii. AGuide should not guide more than 8 students of BCA at any point of time.
+8. Industrial / Teaching experience of the Guide (in Years) ………………………………………………..
+9. Software Used for this Project: ………………………………………………………………
+Note : 1. Use of Visual Basic and MS-Access as Front End and Back End respectively is forbidden. But, you are permitted
+to use Visual Basic with other Software. Also, you can use MS-Access with other software.
+2. The use of C or C++ programming languages is strictly prohibited for projects associated with database management.
+Signature of the Student Signature of the Guide
+Date: ………………… Date: …………………
+For Office Use Only
+……………………………………
+Signature, Designation, Stamp of the
+Project Proposal Evaluator
+Approved Not approved Date: …………………….
+Important:
+1. Attach the Approved Proforma along with Guide’s Biodata and Project Synopsis in the Project Report.
+2. Not more than one student is permitted to work on a project.
+3. You should submit your Project Report only after incorporating the reformulations provided by the Evaluator.
+II. PROFORMA OF BCA PROJECT PROPOSAL (BCSP-064)
+(Project Title and Guides Details)
+Suggestions for Reformulating the Project:
+5
+
+-- 5 of 17 --
+
+6
+Ensure that you include the following while submitting the Project Proposal:
+1. Proforma for Approval of Project Proposal duly filled and signed by both the student and the
+Project Guide with date.
+2. Bio-data of the project guide with her/his signature and date.
+3. Synopsis of the project proposal (12-15 pages).
+4. A self-addressed envelope with duly affixed postage stamps (to send it by ordinary post only)
+on it.
+A photocopy of the complete Project Proposal (along with Project Proforma,
+Project Synopsis, Biodata of the guide) submitted to your Regional Centre,
+should be retained by the student for future reference.
+
+-- 6 of 17 --
+
+7
+III. GUIDELINES FOR PROJECT FORMULATION
+SCHOOL OF COMPUTER AND INFORMATION SCIENCES
+IGNOU, MAIDAN GARHI, NEW DELHI – 110 068
+The project work constitutes a major component in most of the professional programmes and it is to be
+carried out with due care and should be executed with seriousness by the candidates.
+TYPE OF PROJECT
+As majority of the students are expected to work out a real life project in some industry/research and
+development laboratories/educational institutions/software companies, it is suggested that the project is
+to be chosen which should have some direct relevance in day-to-day activities of the candidates in
+his/her institution. Students are encouraged to work in the areas listed at the end. However, it is not
+mandatory for a student to work on a real life project. The student can formulate a project problem with
+the help of Guide.
+PROJECT PROPOSAL (SYNOPSIS)
+The project proposal should be prepared in consultation with your guide. The project proposal
+should clearly state the project objectives and the environment of the proposed project to be undertaken.
+The project work should compulsorily include the software development. The project proposal
+should contain complete details in the following form:
+1. Title of the Project
+2. Introduction and Objectives of the Project
+3. Project Category (RDBMS/OOPS/Networking/Multimedia/Artificial Intelligence/Expert Systems
+etc.)
+4. Analysis (DFDs at least up to second level , ER Diagrams/ Class Diagrams, Database Design etc.
+as per the project requirements).
+5. A complete structure which includes:
+Number of modules and their description to provide an estimation of the student’s effort
+on the project work.
+Data Structures as per the project requirements for all the modules.
+Database Design
+ Process Logic for each module
+Testing Details
+Reports Generation (Mention tentative content of the report)
+6. Tools / Platform, Hardware and Software Requirement specifications
+7. Are you doing this project for any Industry/Client? Mention Yes/No. If Yes, Mention the Name and
+Address of the Industry or Client
+8. Future scope and further enhancement of the project.
+Note: You are advised to hear to Audio and watch Video Programmes available on
+IGNOUSOCISYoutube Channel. The list of reference links are provided on page number 17.
+
+-- 7 of 17 --
+
+8
+After finalising the topic and the selection of the guide, students should send the Project Proposal
+Proforma given on page no. 6 along with the synopsis and bio-data of the guide to The Regional
+Director of the Regional Centre concerned. Incomplete project proposals in any respect will be
+summarily rejected.
+COMMUNICATION OF APPROVAL
+Communication regarding the Approval / Non-approval of the project will be sent to you within four
+weeks after the receipt of the project proposal by the Regional Centre concerned.
+RESUBMISSION OF THE PROJECT PROPOSAL IN CASE OF NON-APPROVAL
+In case of non-approval, the suggestions for reformulating the project will be communicated to you. The
+revised project synopsis along with a new Proforma, should be re-submitted along with a copy of the
+earlier synopsis and non-approval project proposal Proforma in the next slot. For example, if the student
+submitted the synopsis during the 1st April to 30th June slot and is not approved due to some reasons,
+s/he is eligible to resubmit the revised project synopsis only during the next slot i.e., 1st October to 31st
+December. These guidelines are applicable for earlier batch students also whose project work is
+pending.
+ELIGIBILITY OF PROJECT GUIDE
+1. A person having Ph.D./M.Tech. in Computer Science.
+OR
+2. A person having B.E/B.Tech (Computer Science), MCA, M.Sc (Computer Science) with minimum
+2 years experience in Teaching/Industry.
+IV. PROJECT PROPOSAL SUBMISSION AND APPROVAL
+
+-- 8 of 17 --
+
+9
+ITEMS TO BE INCLUDED IN THE PROJECT REPORT
+The following items should be included in the Project Report:
+1. The project report must contain the following:
+Introduction
+Objectives
+Tools/Environment Used
+Analysis Document (This should include SRS in proper structure based on Software
+Engineering concepts, E-R diagrams/Class diagrams/any related diagrams (if the former are
+not applicable), Data flow diagrams/other similar diagrams (if the former is not applicable),
+Data dictionary)
+Design Document (Modularization details, Data integrity & constraints including database
+design, Procedural design, User interface design)
+Programme code (Complete code (well indented)/Detailed specification instead of code*,
+Comments & Description. The programme code should always be developed in such a way
+that it includes complete error handling, passing of parameters as required, placement of
+procedure/function statements as needed.)
+Testing (Test case designs are to be included separately for Unit testing, Integration testing,
+System testing; Reports of the outcome of Unit testing, Integration testing, System testing
+are to be included separately. Also, details of debugging and code improvement are to be
+included.)
+Input and Output Screens
+Implementation of Security for the Software developed (In case, you have set up a User
+Name and Password for your software, you should ensure the security of User Name and
+Password during transmission to server)
+Limitations of the Project
+Future Application of the Project
+Bibliography
+*Students who have done their project for any organization are permitted to attach detailed
+algorithm/specification instead of code, in case, the organization doesn’t permit them to attach the code.
+Student needs to attach letter in the project report from the Project Manager of the project in the
+organization that they are not permitting student to attach the code. In the absence of such letter, the
+student needs to attach the code compulsorily.
+The project report should be hard bound; should consist of a Contents page; all pages of report
+should be numbered; content should be well organized in a meaningful manner; printouts of text
+& screen layouts should be original and should not be xeroxed)
+2. Original copy of the Approved Project Proposal Proforma, Synopsis and Guide’s
+Bio-data.
+3. Certificate of Originality (Format given on page no. 13).
+4. The Project Report may be about 50 to 80 double spaced A-4 size typed pages (excluding
+programme code). However,10% variation on either side is permissible.
+V. PROJECT REPORT FORMULATION
+
+-- 9 of 17 --
+
+10
+SUBMISSION OF PROJECT REPORT
+Only one copy of the project report is to be submitted to the following address by registered insured
+post: Regional Director, Concerned Regional Centre by the date mentioned in the Calendar for the
+project (refer to page-3).
+TYPE OF THE PROJECT
+The majority of the students are expected to work on a real-life project preferably in some industry/
+Research and Development Laboratories / Educational Institution / Software Company. Students are
+encouraged to work in the areas listed at the end (Refer page no.15). However, it is not mandatory for a
+student to work on a real-life project. The student can formulate a project problem with the help of
+her/his Guide and submit the project proposal of the same. If approved, the student can commence
+working on it and complete it.
+PROJECT EVALUATION
+The Project Report is evaluated for 150 marks and the Viva-Voce is for 50 marks. To be declared
+successful, the student should secure at least 40% marks separately in both project report evaluation
+(i.e.60/150) and viva-voce (i.e.20/50). Students will be duly intimated about the schedule of viva-voce
+by a letter from the respective Regional Centre. An unsuccessful student can either submit the same
+project after following comments on the assessment sheet or s/he can do a different project. Always,
+ensure that the BCSP-064 project guidelines are followed.
+Unfair cases of copied versions of the project synopsis and project reports will be sent to Unfair
+Means Committee of IGNOU for action.
+RESUBMISSION OF THE BCA PROJECT IN CASE OF FAILED STUDENTS
+If the student is unsuccessful in the project, s/he should „re-do‟ the whole cycle, right from the
+submission of the project synopsis. Students are advised to select a new topic for the project and should
+prepare and submit the project synopsis to the Regional Centre concerned as per the project guidelines.
+There are no separate slots for the submission of the project synopsis / project reports for the failed
+students. Respective submissions of the project synopsis and the project reports should be done strictly
+as per the “Calendar for the BCA project” given in the project guidelines. Along with the resubmission
+of the project report, the student is required to remit the pro-rata fee (subject to change as per university
+rule – contact your concerned Regional Centre for necessary update). The fee should be remitted to the
+Regional Centre at the time of resubmission of the project report by the way of Demand Draft favouring
+IGNOU and payable at the city where your Regional Centre is located.
+ENQUIRY
+Enquiries regarding the Project Report and Viva-Voce should be addressed to the Regional Director,
+Concerned Regional Centre. In all communications, please mention your Enrolment No.
+
+-- 10 of 17 --
+
+11
+1. The Project Report should be submitted in A-4 size typed in double space. The Project Report
+should be hard bound.
+2. Ensure that it contains the following:
+Project Proposal Proforma. All the items should be filled. The signatures of both student and
+Guide should be present.
+Project Synopsis. Both Guide and student should sign on the Project Synopsis.
+Guide’s Bio data. The Biodata should consist of signature of the Guide.
+Certificate of Originality (Format given on Page no.13)
+All signatures should be accompanied by the date of signature.
+It should include all items mentioned in Section IV.
+3. If any project report is received in the absence of the items listed above, it will be rejected
+and returned to students for compliance. Also, violation of Project Guidelines may lead to
+rejection of the Project.
+4. Only One hard bound original copy of the project report is to be submitted to „The Regional
+Director, Concerned Regional Centre‟ by registered insured post. One copy of the same
+Project Report is to be retained with the student and the student is supposed to carry his
+copy while appearing for viva voce. Spiral binding of Project Report is not permitted.
+5. Xerox copy of the project report is not acceptable.
+6. Not more than one student is permitted to work on a Project.
+7. If the title of the Project differs from the title mentioned in the Project Proposal, the Project
+Report will be rejected and will be returned back to the student.
+8. Kindly mention on the top of the envelope “BCA PROJECT REPORT (BCSP-064)”. This
+will facilitate sorting out project reports at the Regional Centre.
+9. The envelope containing the remuneration form for the Project Guide duly signed by the Guide
+and the student, should be sent to “Regional Director, Concerned Regional Centre.”
+10. In case, students require any letter from the University for doing a project in any organization,
+they may request the Regional Director of the concerned Regional centre for the issuance of the
+same in the format indicated under Project Trainee in this document. (Refer to Page number :
+15).
+VI. IMPORTANT POINTS WHILE PREPARING THE PROJECT REPORT
+
+-- 11 of 17 --
+
+12
+FRONT END / GUI Tools Visual Basic, Power Builder, X-Windows (X/lib, X/motif, X/Intrinsic),
+Oracle Developer 2000,VC++, Jbuilder
+LANGUAGES Java, VC++, C#, Python, Kotlin, Objective-C, Swift, React, Angular,
+Rust, Scala, Ruby, Flutter, React Native
+SCRIPTING LANGUAGES PERL, SHELL Scripts(Unix), TcL/TK
+RDBMS/BACK END
+BACKEND FOR MOBILE APPs
+Oracle, Ingres, Sybase, Progress, SQL Plus, Versant,MY SQL,
+SQL Server, DB2 etc..
+Firebase, SQLite, MongoDB,MariaDB, IBM Db2, HBase, Firebird,
+ArangoDB, Apache Casandra, Neo4j, OrientDB etc..
+MIDDLE WARE(COMPONENT)
+TECHNOLOGIES
+COM/DCOM, Active-X, EJB, Rational Rose,MSMQ, BEA,
+Message Q, MTS, CICS
+UNIX INTERNALS Device Drivers, Pipes, RPC, Threads, Sockets
+ARCHITECTURAL CONCEPTS CORBA, TUXEDO
+INTERNET TECHNOLOGIES DHTML, Java script, VB Script, Perl & CGI script, HTML, Java,
+Active X, RMI, CORBA, SWING, JSP,
+ASP, XML, EJB, Java Beans, Java Servlets, Visual Age for JAVA,
+UML, VRML, WML, iPlanet, ATG,BigTalk, CSS, XSL, Oracle
+ASP server, VB.Net, AWT, J2EE, LDAP, ColdFusion etc..
+NETWORKING TECHNOLOGIES ATM, Frame Relay, TCP/IP, SNMP, GSM, VoIP, PPP,IP-PSTN,
+SONET/SDH etc..
+WIRELESS TECHNOLOGIES Blue Tooth, 3G, ISDN, EDGE, Mobile Apps etc..
+REALTIME OPERATING SYSTEM/
+EMBEDDED SKILLS
+QNX, LINUX, OSEK, DSP, VRTX, RTXC, Nucleus
+OPERATING SYSTEMS
+MOBILE OPERATING SYSTEMS
+WINDOWS 10/11, WINDOWS NT, UNIX,LINUX, IRIX, SUN
+SOLARIS, HP/UX, PSOS, VxWorks, AS400, AIX etc.
+Android, iOS, webOS, Windows 10 Mobile, watchOS etc.
+APPLICATIONS Financial/ Manufacturing/ Multimedia/ Computer Graphics/
+Instructional Design/ Database Management System/ Internet/ Intranet/
+Computer Networking- Communication Software/E-Commerce/ ERP /
+MRP/ TCP/IP Internals/ Routing protocols/ Socket Programming/
+Implementation of Switches & Routers/Mobile Applications /AI
+Applications etc.
+Note: Projects should not be developed using the packages like Dbase, Foxpro, Visual Foxpro, MS-Access, C and C++.
+Also,projects should not be developed using the combination of Visual Basic as the front end and MS-Access as the backend.
+Student should be innovative in each and every phase of project development. Student should do coding by
+himself/herself. Students have the flexibility to utilize cutting-edge tools, programming languages, and technologies for
+their software development, even if they are not mentioned above or included as part of their project development.
+VII. LIST OF BROAD AREAS OF APPLICATION AND RELATED TOOLS
+
+-- 12 of 17 --
+
+13
+INDIRA GANDHI NATIONAL OPEN UNIVERSITY
+MAIDAN GARHI, NEW DELHI – 110068
+REMUNERATION BILL FOR THE BCA PROJECT GUIDE
+1. Course Code : BCA (BCSP-064)
+2. Name of the Guide :
+3. Residential Address :
+This is to certify that I have Guided the following student/(s) for their project work:
+S.No Enrolment
+Number of the
+student
+PR No. (to be
+filled by the
+Regional Centre)
+Name of the student Title of the
+Project
+Amount Claimed
+Signature of the Guide
+Date :......…………………….
+VIII. REMUNERATION FORM FOR THE BCA (BCSP-064) PROJECT GUIDE
+4. Designation :
+5. Office address :
+NOTE: Project guide cannot guide more than eight students in any given point of time. This form duly
+signed by the guide placed in a separate envelope, should be submitted along with the project report.
+Remuneration Bill not accompanied with the project report will not be considered for payment. For BCSP-
+064(8 Credits) course, the remuneration to the project guide (for guiding one project) is as per the
+university norm.
+
+-- 13 of 17 --
+
+14
+FOR USE IN THE EXAMINATION BRANCH
+Registrar (SR&ED) Verified by Dealing Asstt.
+FOR USE IN FINANCE BRANCH
+Passed for payment of Rs. :
+Debit Head: Examination
+: Contingent
+: T.A.
+Dated : Section Officer / A.R. (Accounts)
+Dealing Asstt.
+Paid by Cheque No. Dated
+Assistant Registrar
+
+-- 14 of 17 --
+
+15
+This is to certify that the project report entitled
+submitted to Indira Gandhi National Open University in partial fulfilment of the requirements
+for the award of the degree of BACHELOR OF COMPUTER APPLICATIONS ( BCA), is
+an original work carried out by Mr./ Ms.
+Enrolment No.: under the guidance of Mr./ Ms.
+The matter embodied in this project is a genuine work done by the student and has not been
+submitted whether to this University or to any other University / Institute for the fulfilment of the
+requirement of any course of study.
+Signature of the Student Signature of the Guide
+Name and Address Name, Designation and
+of the student : Address of the Guide
+Enrolment No.:
+IX CERTIFICATE OF ORIGINALITY
+
+-- 15 of 17 --
+
+16
+School of Computer and Information Sciences
+INDIRA GANDHI NATIONAL OPEN UNIVERSITY
+Maidan Garhi, NEW DELHI – 110068
+Date:
+Subject: Project Trainee
+Sir,
+This is to certify that Mr / Ms whose Enrolment
+No. is a student of BCA Programme of Indira Gandhi National Open University and
+has to do a project in his/her final year starting from January / July session. The project is compulsory
+for BCA programme. S/he has to do a project for 3-6 months in Industry/Research Laboratories under
+the supervision of a guide preferably from the same organization. During his course, the student has
+studied several theoretical papers such as Data Structures, Database Management System,
+Programming Languages (C, C++, and Java), TCP/IP Programming, Intranet Administration, Computer
+Networks, Software Engineering etc. The student also attended practical sessions in all courses in which
+practical sessions were prescribed.
+Looking forward for your positive response.
+Signature& Name of Project Coordinator
+with Date and Stamp
+X . P R O J E C T T R A I N E E L E T T E R
+Note: This letter may also be signed by Regional Director / Asst. Regional Director of Regional
+Centre concerned.
+
+-- 16 of 17 --
+
+17
+List of Videos and Audios Web Link
+Videos Web References:
+1. Module - I : Problem Identification for Project
+(https://www.youtube.com/watch?v=_7-qUE1ycCw )
+2. Module - II : Components of Project Synopsis
+(https://www.youtube.com/watch?v=GXaf7rnhlTY )
+3. Module - III : Preparing Project Report
+(https://www.youtube.com/watch?v=GXaf7rnhlTY )
+4. Module - IV : Preparation for Viva-Voce
+(https://www.youtube.com/watch?v=zjusd4X_39c )
+Audios Web References:
+1. Module - I : Problem Identification and Tool and Platform Selection
+(https://www.youtube.com/watch?v=7MtqyCZtvxk&t=10s )
+2. Module - II : Analysis and Design Documentation for Project Synopsis
+(https://www.youtube.com/watch?v=b_VFgjaCKIo )
+3. Module - III : Preparation of Project Report
+(https://www.youtube.com/watch?v=fOeqr2kvWko )
+4. Module - IV : Viva-Voce of Project
+(https://www.youtube.com/watch?v=LvsliKD6J50 )
+
+-- 17 of 17 --
+

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
 import { clearCategoryTreeCache, DEFAULT_CATEGORY_TREE } from "../utils/categoryMaster";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const EMPTY_DRAFT = {
   category: "",
   subcategories: "",
@@ -766,3 +766,4 @@ export default function AdminCategories() {
     </AdminSidebarLayout>
   );
 }
+

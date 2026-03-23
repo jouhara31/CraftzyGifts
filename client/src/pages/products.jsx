@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
+import ProductHoverImage from "../components/ProductHoverImage";
 import { addToCart } from "../utils/cart";
 import { getWishlist, toggleWishlist } from "../utils/wishlist";
 import {
@@ -10,8 +11,13 @@ import {
   normalizeCategoryKey,
 } from "../utils/categoryMaster";
 import { getProductImage } from "../utils/productMedia";
+import {
+  getPurchaseBlockedMessage,
+  isPurchaseBlockedRole,
+  readStoredSessionClaims,
+} from "../utils/authRoute";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const PAGE_SIZE = 16;
 const PRICE_FILTER_MIN = 0;
 const PRICE_FILTER_MAX = 40000;
@@ -158,17 +164,6 @@ const parsePrice = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const readStoredUserRole = () => {
-  try {
-    const raw = localStorage.getItem("user");
-    if (!raw) return "";
-    const parsed = JSON.parse(raw);
-    return String(parsed?.role || "").trim().toLowerCase();
-  } catch {
-    return "";
-  }
-};
-
 const getWishlistIdSet = () =>
   new Set(getWishlist().map((entry) => String(entry.id)));
 
@@ -204,7 +199,7 @@ export default function Products() {
   const [cartAnimatingId, setCartAnimatingId] = useState("");
   const [wishlistAnimatingId, setWishlistAnimatingId] = useState("");
   const [wishlistIds, setWishlistIds] = useState(() => getWishlistIdSet());
-  const [userRole, setUserRole] = useState(() => readStoredUserRole());
+  const [sessionClaims, setSessionClaims] = useState(() => readStoredSessionClaims());
   const [activeRatingProductId, setActiveRatingProductId] = useState("");
   const [categoryTree, setCategoryTree] = useState(DEFAULT_CATEGORY_TREE);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -259,7 +254,9 @@ export default function Products() {
       : subcategory
       ? `${category} - ${subcategory}`
       : category;
-  const isSellerAccount = userRole === "seller";
+  const userRole = sessionClaims.role;
+  const isPurchaseBlocked = isPurchaseBlockedRole(userRole);
+  const purchaseBlockedMessage = getPurchaseBlockedMessage(userRole);
 
   useEffect(() => {
     const syncWishlist = () => {
@@ -273,9 +270,9 @@ export default function Products() {
   }, []);
 
   useEffect(() => {
-    const syncUserRole = () => setUserRole(readStoredUserRole());
-    window.addEventListener("user:updated", syncUserRole);
-    return () => window.removeEventListener("user:updated", syncUserRole);
+    const syncSessionClaims = () => setSessionClaims(readStoredSessionClaims());
+    window.addEventListener("user:updated", syncSessionClaims);
+    return () => window.removeEventListener("user:updated", syncSessionClaims);
   }, []);
 
   useEffect(() => {
@@ -424,7 +421,7 @@ export default function Products() {
 
   const requireLogin = () => {
     const token = localStorage.getItem("token");
-    if (!token) {
+    if (!token || sessionClaims.isExpired) {
       navigate("/login");
       return false;
     }
@@ -452,7 +449,7 @@ export default function Products() {
   const addItemToCart = (item) => {
     const availableStock = Number(item?.stock || 0);
     if (availableStock <= 0) return false;
-    if (isSellerAccount) return false;
+    if (isPurchaseBlocked) return false;
     if (!requireLogin()) return false;
     setCartAnimatingId(String(item._id));
     addToCart(toCartItem(item));
@@ -805,10 +802,10 @@ export default function Products() {
               {error && <p className="field-hint">{error}</p>}
             </div>
           )}
-          {isSellerAccount && (
+          {isPurchaseBlocked && (
             <div className="catalog-meta">
               <p className="field-hint">
-                Seller accounts cannot place orders. Login with a customer account to buy.
+                {purchaseBlockedMessage}
               </p>
             </div>
           )}
@@ -851,7 +848,7 @@ export default function Products() {
                 const isWishlistAnimating = wishlistAnimatingId === itemId;
                 const isCartAnimating = cartAnimatingId === itemId;
                 const isAdded = addedItemId === itemId;
-                const disablePurchase = isOutOfStock || isSellerAccount;
+                const disablePurchase = isOutOfStock || isPurchaseBlocked;
                 const isRatingOpen = activeRatingProductId === itemId;
                 const ratingPopoverId = `catalog-rating-popover-${itemId}`;
 
@@ -876,9 +873,9 @@ export default function Products() {
                         </svg>
                       </button>
                       <Link className="catalog-image-link" to={`/products/${item._id}`}>
-                        <img
+                        <ProductHoverImage
                           className="product-image"
-                          src={getProductImage(item)}
+                          product={item}
                           alt={item.name}
                         />
                       </Link>
@@ -980,11 +977,11 @@ export default function Products() {
                           <span className="catalog-offer">{discountPercent}% off</span>
                         )}
                       </div>
-                      <div className="product-flags catalog-stock-flags">
-                        <span className={`status-pill ${isOutOfStock ? "locked" : "available"}`}>
-                          {isOutOfStock ? "Out of stock" : `${stockCount} in stock`}
-                        </span>
-                      </div>
+                      {isOutOfStock ? (
+                        <div className="product-flags catalog-stock-flags">
+                          <span className="status-pill locked">Out of stock</span>
+                        </div>
+                      ) : null}
 
                       <div className="catalog-action-row">
                         <button
@@ -1006,8 +1003,8 @@ export default function Products() {
                           aria-label={
                             isOutOfStock
                               ? `${item.name} is out of stock`
-                              : isSellerAccount
-                              ? "Seller accounts cannot add to cart"
+                              : isPurchaseBlocked
+                              ? purchaseBlockedMessage
                               : isAdded
                               ? `${item.name} added to cart`
                               : "Add to cart"
@@ -1103,3 +1100,4 @@ export default function Products() {
     </div>
   );
 }
+

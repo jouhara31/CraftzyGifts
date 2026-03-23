@@ -4,8 +4,13 @@ import Header from "../components/Header";
 import CustomizationPanel from "../components/customizationPanel";
 import { getProductImage } from "../utils/productMedia";
 import { addToCart, getCart, setCustomization } from "../utils/cart";
+import {
+  getPurchaseBlockedMessage,
+  isPurchaseBlockedRole,
+  readStoredSessionClaims,
+} from "../utils/authRoute";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const OPTION_LABELS = {
   giftBoxes: "Gift box",
   chocolates: "Chocolates",
@@ -151,17 +156,6 @@ const sanitizeExistingSelections = (selectedOptions) =>
     return acc;
   }, {});
 
-const readStoredUserRole = () => {
-  try {
-    const raw = localStorage.getItem("user");
-    if (!raw) return "";
-    const parsed = JSON.parse(raw);
-    return String(parsed?.role || "").trim().toLowerCase();
-  } catch {
-    return "";
-  }
-};
-
 export default function Customization() {
   const { id, sellerId: sellerIdParam } = useParams();
   const location = useLocation();
@@ -177,7 +171,7 @@ export default function Customization() {
   const [sellerMinimumCharge, setSellerMinimumCharge] = useState(0);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
-  const [userRole, setUserRole] = useState(() => readStoredUserRole());
+  const [sessionClaims, setSessionClaims] = useState(() => readStoredSessionClaims());
   const [customizationMode, setCustomizationMode] = useState(() => (isBuildOnly ? "build" : ""));
 
   const [existingCustomization, setExistingCustomization] = useState(
@@ -194,11 +188,14 @@ export default function Customization() {
   const [buildIdeaDescription, setBuildIdeaDescription] = useState("");
   const [buildReferenceImageNames, setBuildReferenceImageNames] = useState([]);
   const navigate = useNavigate();
+  const userRole = sessionClaims.role;
+  const isPurchaseBlocked = isPurchaseBlockedRole(userRole);
+  const purchaseBlockedMessage = getPurchaseBlockedMessage(userRole);
 
   useEffect(() => {
     const load = async () => {
       const token = localStorage.getItem("token");
-      if (!token) {
+      if (!token || sessionClaims.isExpired) {
         navigate("/login");
         setLoading(false);
         return;
@@ -345,12 +342,12 @@ export default function Customization() {
       }
     };
     load();
-  }, [id, location.search, navigate, sellerIdParam]);
+  }, [id, location.search, navigate, sellerIdParam, sessionClaims.isExpired]);
 
   useEffect(() => {
-    const syncUserRole = () => setUserRole(readStoredUserRole());
-    window.addEventListener("user:updated", syncUserRole);
-    return () => window.removeEventListener("user:updated", syncUserRole);
+    const syncSessionClaims = () => setSessionClaims(readStoredSessionClaims());
+    window.addEventListener("user:updated", syncSessionClaims);
+    return () => window.removeEventListener("user:updated", syncSessionClaims);
   }, []);
 
   const existingContentCategories = useMemo(
@@ -656,7 +653,6 @@ export default function Customization() {
       ? existingBasePrice + existingModeCharge
       : effectiveCustomizationCharge;
 
-  const isSellerAccount = userRole === "seller";
   const sellerDisplayName = String(
     sellerProfile?.storeName || sellerProfile?.name || ""
   ).trim();
@@ -697,8 +693,8 @@ export default function Customization() {
   };
 
   const saveCustomization = () => {
-    if (isSellerAccount) {
-      setNotice("Seller account cannot place orders. Use a customer account.");
+    if (isPurchaseBlocked) {
+      setNotice(purchaseBlockedMessage);
       return false;
     }
     if (!customizationMode) {
@@ -884,9 +880,9 @@ export default function Customization() {
             : "This hamper is marked non-customizable by the seller."}
         </p>
       )}
-      {isSellerAccount && (
+      {isPurchaseBlocked && (
         <p className="field-hint">
-          Seller account cannot place orders. Login with a customer account to continue.
+          {purchaseBlockedMessage}
         </p>
       )}
 
@@ -1073,11 +1069,9 @@ export default function Customization() {
                                       {option.size ? `${option.size} | ` : ""}₹
                                       {formatPrice(option.price)}
                                     </small>
-                                    <small>
-                                      {Number(option.stock || 0) > 0
-                                        ? `${Number(option.stock || 0)} available`
-                                        : "Out of stock"}
-                                    </small>
+                                    {Number(option.stock || 0) <= 0 ? (
+                                      <small>Out of stock</small>
+                                    ) : null}
                                   </span>
                                 </button>
                               ))}
@@ -1140,11 +1134,9 @@ export default function Customization() {
                                       ₹{formatPrice(item.price)}
                                       {item.size ? ` | ${item.size}` : ""}
                                     </p>
-                                    <p className="field-hint">
-                                      {Number(item.stock || 0) > 0
-                                        ? `${Number(item.stock || 0)} available`
-                                        : "Out of stock"}
-                                    </p>
+                                    {Number(item.stock || 0) <= 0 ? (
+                                      <p className="field-hint">Out of stock</p>
+                                    ) : null}
                                     <div className="hamper-stepper">
                                       <button
                                         type="button"
@@ -1429,7 +1421,7 @@ export default function Customization() {
               className="btn ghost"
               type="button"
               onClick={saveCustomization}
-              disabled={isSellerAccount || isDisabled || !isModeChosen || isBuildUnavailable}
+              disabled={isPurchaseBlocked || isDisabled || !isModeChosen || isBuildUnavailable}
             >
               Save customization
             </button>
@@ -1440,7 +1432,7 @@ export default function Customization() {
                 const saved = saveCustomization();
                 if (saved) navigate("/checkout");
               }}
-              disabled={isSellerAccount || isDisabled || !isModeChosen || isBuildUnavailable}
+              disabled={isPurchaseBlocked || isDisabled || !isModeChosen || isBuildUnavailable}
             >
               Continue to checkout
             </button>
@@ -1450,3 +1442,4 @@ export default function Customization() {
     </div>
   );
 }
+

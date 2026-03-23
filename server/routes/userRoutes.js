@@ -15,8 +15,15 @@ const {
   listMyContactRequests,
   listMyNotifications,
   markMyNotificationsRead,
+  streamMyNotifications,
 } = require("../controllers/userController");
-const { auth, optionalAuth, requireApprovedSeller, requireRole } = require("../middleware/auth");
+const {
+  auth,
+  optionalAuth,
+  authStream,
+  requireApprovedSeller,
+  requireRole,
+} = require("../middleware/auth");
 
 router.get("/me", auth, getMe);
 router.patch("/me", auth, updateMe);
@@ -30,6 +37,7 @@ router.post("/me/webhooks", auth, requireRole("admin"), createMyWebhook);
 router.delete("/me/webhooks/:webhookId", auth, requireRole("admin"), deleteMyWebhook);
 router.get("/me/contact-requests", auth, requireApprovedSeller, listMyContactRequests);
 router.get("/me/notifications", auth, listMyNotifications);
+router.get("/me/notifications/stream", authStream, streamMyNotifications);
 router.patch("/me/notifications/read", auth, markMyNotificationsRead);
 router.post("/sellers/:sellerId/contact", optionalAuth, submitSellerContactRequest);
 

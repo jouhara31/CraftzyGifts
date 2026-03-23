@@ -1,5 +1,4 @@
 const CustomizationMaster = require("../models/CustomizationMaster");
-const { DEFAULT_CUSTOMIZATION_MASTER_OPTIONS } = require("../data/customizationMasterDefaults");
 
 const MASTER_KEY = "default";
 
@@ -64,7 +63,7 @@ const ensureCustomizationMaster = async () => {
   if (!config) {
     config = new CustomizationMaster({
       key: MASTER_KEY,
-      options: normalizeMasterOptions(DEFAULT_CUSTOMIZATION_MASTER_OPTIONS, []),
+      options: [],
     });
     await config.save();
     return config;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Header from "../components/Header";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 
 const createId = (prefix) =>
   `${prefix}_${Math.random().toString(36).slice(2, 9)}_${Date.now()
@@ -730,3 +730,4 @@ export default function SellerListedItems() {
     </div>
   );
 }
+

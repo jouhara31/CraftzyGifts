@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 
 export default function Register() {
   const [searchParams] = useSearchParams();
@@ -355,3 +355,4 @@ export default function Register() {
     </div>
   );
 }
+

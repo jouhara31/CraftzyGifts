@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 const CACHE_TTL_MS = 90 * 1000;
 const sellerStoreCache = new Map();
 const inFlightRequests = new Map();
@@ -151,3 +151,4 @@ export const clearSellerStoreCache = (sellerId = "") => {
     }
   }
 };
+

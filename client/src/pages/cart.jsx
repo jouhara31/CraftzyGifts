@@ -3,8 +3,13 @@ import { Link, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import { getProductImage } from "../utils/productMedia";
 import { addToCart, getCart, removeFromCart, updateQuantity } from "../utils/cart";
+import {
+  getPurchaseBlockedMessage,
+  isPurchaseBlockedRole,
+  readStoredSessionClaims,
+} from "../utils/authRoute";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "../apiBase";
 
 const isGenericHamperItem = (item) =>
   Boolean(String(item?.customization?.catalogSellerId || "").trim());
@@ -20,16 +25,6 @@ const getItemPrice = (item) => {
 };
 
 const formatPrice = (value) => Number(value || 0).toLocaleString("en-IN");
-const readStoredUserRole = () => {
-  try {
-    const raw = localStorage.getItem("user");
-    if (!raw) return "";
-    const parsed = JSON.parse(raw);
-    return String(parsed?.role || "").trim().toLowerCase();
-  } catch {
-    return "";
-  }
-};
 
 const getDeliveryText = (item) => {
   const min = Math.max(0, Number(item?.deliveryMinDays || 0));
@@ -63,21 +58,23 @@ export default function Cart() {
   const [recoVisibleCount, setRecoVisibleCount] = useState(getRecoVisibleCount);
   const [recoStartIndex, setRecoStartIndex] = useState(0);
   const [notice, setNotice] = useState("");
-  const [userRole, setUserRole] = useState(() => readStoredUserRole());
+  const [sessionClaims, setSessionClaims] = useState(() => readStoredSessionClaims());
   const navigate = useNavigate();
-  const isSellerAccount = userRole === "seller";
+  const userRole = sessionClaims.role;
+  const isPurchaseBlocked = isPurchaseBlockedRole(userRole);
+  const purchaseBlockedMessage = getPurchaseBlockedMessage(userRole);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (!token) {
+    if (!token || sessionClaims.isExpired) {
       navigate("/login");
     }
-  }, [navigate]);
+  }, [navigate, sessionClaims.isExpired]);
 
   useEffect(() => {
-    const syncUserRole = () => setUserRole(readStoredUserRole());
-    window.addEventListener("user:updated", syncUserRole);
-    return () => window.removeEventListener("user:updated", syncUserRole);
+    const syncSessionClaims = () => setSessionClaims(readStoredSessionClaims());
+    window.addEventListener("user:updated", syncSessionClaims);
+    return () => window.removeEventListener("user:updated", syncSessionClaims);
   }, []);
 
   useEffect(() => {
@@ -180,6 +177,19 @@ export default function Cart() {
     return () => window.removeEventListener("resize", syncRecoLayout);
   }, []);
 
+  const guardPurchaseAction = () => {
+    const token = localStorage.getItem("token");
+    if (!token || sessionClaims.isExpired) {
+      navigate("/login");
+      return false;
+    }
+    if (isPurchaseBlocked) {
+      setNotice(purchaseBlockedMessage);
+      return false;
+    }
+    return true;
+  };
+
   if (items.length === 0) {
     return (
       <div className="page">
@@ -273,6 +283,12 @@ export default function Cart() {
                     </p>
                   )}
 
+                  {item.customization?.specialNote && (
+                    <p className="cart-line-meta">
+                      Note: {item.customization.specialNote}
+                    </p>
+                  )}
+
                   <label className="cart-qty-block">
                     <span>Quantity</span>
                     <select
@@ -311,28 +327,22 @@ export default function Cart() {
               className="cart-checkout-btn"
               type="button"
               onClick={() => {
-                if (isSellerAccount) {
-                  setNotice("Seller account cannot place orders. Use a customer account.");
-                  return;
-                }
+                if (!guardPurchaseAction()) return;
                 navigate("/checkout");
               }}
-              disabled={isSellerAccount}
+              disabled={isPurchaseBlocked}
             >
               Checkout
             </button>
             {notice && <p className="field-hint">{notice}</p>}
 
-            <div className="cart-or-divider">OR</div>
-
+            <div className="cart-or-divider">Info</div>
             <div className="cart-express">
-              <p>Express checkout</p>
-              <button className="cart-express-btn" type="button">
-                UPI / Cards
-              </button>
-              <button className="cart-express-btn" type="button">
-                PayPal
-              </button>
+              <p>Secure checkout</p>
+              <p className="field-hint">
+                Payment options are shown during checkout based on what is configured for the
+                store.
+              </p>
             </div>
 
             <div className="cart-summary-breakup">
@@ -390,13 +400,10 @@ export default function Cart() {
                       className="cart-reco-add-btn"
                       type="button"
                       onClick={() => {
-                        if (isSellerAccount) {
-                          setNotice("Seller account cannot place orders. Use a customer account.");
-                          return;
-                        }
+                        if (!guardPurchaseAction()) return;
                         setItems(addToCart(toCartItem(item)));
                       }}
-                      disabled={isSellerAccount}
+                      disabled={isPurchaseBlocked}
                     >
                       Add to cart
                     </button>
@@ -419,3 +426,4 @@ export default function Cart() {
     </div>
   );
 }
+

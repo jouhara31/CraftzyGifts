@@ -1,15 +1,20 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import logoPng from "../assets/logo.png";
+import { logoutSession } from "../utils/authSession";
+import AdminNotificationBell from "./AdminNotificationBell";
 
 const ADMIN_NAV_ITEMS = [
   { label: "Dashboard", path: "/admin/dashboard" },
+  { label: "Sellers", path: "/admin/sellers" },
+  { label: "Messages", path: "/admin/messages" },
   { label: "Orders", path: "/admin/orders" },
   { label: "Products", path: "/admin/products" },
   { label: "Categories", path: "/admin/categories" },
   { label: "Customers", path: "/admin/customers" },
   { label: "Inventory", path: "/admin/inventory" },
   { label: "Analytics", path: "/admin/analytics" },
+  { label: "Reports", path: "/admin/reports" },
   { label: "Settings", path: "/admin/settings" },
   { label: "Account", path: "/admin/account" },
 ];
@@ -32,6 +37,25 @@ function AdminNavIcon({ path }) {
         <path d="M8 3.5h8l3.5 3.5v13H4.5v-16z" />
         <path d="M8 3.5V7h11.5" />
         <path d="M8.5 11.2h7.2M8.5 15.2h5.2" />
+      </svg>
+    );
+  }
+
+  if (path === "/admin/messages") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 6.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H10l-4 3v-3H5A1.5 1.5 0 0 1 3.5 16V8A1.5 1.5 0 0 1 5 6.5Z" />
+        <path d="M8 10h8M8 13.5h5" />
+      </svg>
+    );
+  }
+
+  if (path === "/admin/sellers") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 10h16" />
+        <path d="M6 10v8h12v-8" />
+        <path d="m6 10 1.8-4h8.4l1.8 4" />
       </svg>
     );
   }
@@ -87,6 +111,17 @@ function AdminNavIcon({ path }) {
     );
   }
 
+  if (path === "/admin/reports") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 4h7l4 4v12H7z" />
+        <path d="M14 4v5h5" />
+        <path d="M9 13h7" />
+        <path d="M9 16.5h5" />
+      </svg>
+    );
+  }
+
   if (path === "/admin/settings") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -115,15 +150,21 @@ export default function AdminSidebarLayout({
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isMobileNav, setIsMobileNav] = useState(false);
+  const menuButtonRef = useRef(null);
+  const sidebarRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const lastFocusRef = useRef(null);
   const pageClasses = ["page seller-page admin-page", pageClassName]
     .filter(Boolean)
     .join(" ");
+  const hasPageHeader = Boolean(title || description || actions || titleActions);
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem("user_profile_image");
-    window.dispatchEvent(new Event("user:updated"));
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  const toggleSidebar = useCallback(() => setSidebarOpen((prev) => !prev), []);
+
+  const handleLogout = async () => {
+    await logoutSession();
     navigate("/login");
   };
 
@@ -131,15 +172,108 @@ export default function AdminSidebarLayout({
     setSidebarOpen(false);
   }, [location.pathname]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const media = window.matchMedia("(max-width: 1040px)");
+    const sync = () => setIsMobileNav(media.matches);
+    sync();
+    if (media.addEventListener) {
+      media.addEventListener("change", sync);
+      return () => media.removeEventListener("change", sync);
+    }
+    media.addListener(sync);
+    return () => media.removeListener(sync);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    if (!isMobileNav) {
+      document.body.classList.remove("admin-drawer-open");
+      return undefined;
+    }
+
+    if (sidebarOpen) {
+      lastFocusRef.current = document.activeElement;
+      document.body.classList.add("admin-drawer-open");
+      window.requestAnimationFrame(() => {
+        const focusables = sidebarRef.current?.querySelectorAll(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        const target = closeButtonRef.current || focusables?.[0];
+        if (target && typeof target.focus === "function") {
+          target.focus();
+        }
+      });
+    } else {
+      document.body.classList.remove("admin-drawer-open");
+      const fallback = menuButtonRef.current || lastFocusRef.current;
+      if (fallback && typeof fallback.focus === "function") {
+        fallback.focus();
+      }
+    }
+
+    return () => {
+      document.body.classList.remove("admin-drawer-open");
+    };
+  }, [isMobileNav, sidebarOpen]);
+
+  const handleKeyDown = useCallback(
+    (event) => {
+      if (!sidebarOpen || !isMobileNav) return;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSidebar();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      const focusables = sidebarRef.current?.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusables || focusables.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+
+      if (event.shiftKey) {
+        if (active === first || !sidebarRef.current?.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+        return;
+      }
+
+      if (active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    },
+    [closeSidebar, isMobileNav, sidebarOpen]
+  );
+
+  useEffect(() => {
+    if (!sidebarOpen || !isMobileNav || typeof document === "undefined") return undefined;
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown, isMobileNav, sidebarOpen]);
+
   return (
     <div className={pageClasses}>
       <div className="admin-classic-top">
         <button
+          ref={menuButtonRef}
           className="admin-menu-btn"
           type="button"
           aria-label={sidebarOpen ? "Close menu" : "Open menu"}
           aria-expanded={sidebarOpen}
-          onClick={() => setSidebarOpen((prev) => !prev)}
+          aria-controls="adminMobileSidebar"
+          onClick={toggleSidebar}
         >
           <span />
           <span />
@@ -155,6 +289,7 @@ export default function AdminSidebarLayout({
           </span>
         </Link>
         <div className="admin-classic-actions">
+          <AdminNotificationBell />
           <Link className="admin-text-action" to="/">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M14 5h5v5" />
@@ -164,6 +299,18 @@ export default function AdminSidebarLayout({
             <span className="admin-view-site-label admin-view-site-desktop">Home</span>
             <span className="admin-view-site-label admin-view-site-mobile">Home</span>
           </Link>
+          <button
+            className="admin-text-action admin-view-site-desktop"
+            type="button"
+            onClick={handleLogout}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 4H5v16h6" />
+              <path d="M21 12H10" />
+              <path d="m13 9-3 3 3 3" />
+            </svg>
+            <span className="admin-view-site-label admin-view-site-desktop">Logout</span>
+          </button>
         </div>
       </div>
 
@@ -172,16 +319,26 @@ export default function AdminSidebarLayout({
           type="button"
           className={`admin-shell-backdrop ${sidebarOpen ? "show" : ""}`.trim()}
           aria-hidden={!sidebarOpen}
+          aria-label="Close menu"
           tabIndex={sidebarOpen ? 0 : -1}
-          onClick={() => setSidebarOpen(false)}
+          onClick={closeSidebar}
         />
-        <aside className={`admin-shell-sidebar ${sidebarOpen ? "open" : ""}`.trim()}>
+        <aside
+          ref={sidebarRef}
+          id="adminMobileSidebar"
+          className={`admin-shell-sidebar ${sidebarOpen ? "open" : ""}`.trim()}
+          role={isMobileNav ? "dialog" : undefined}
+          aria-modal={sidebarOpen && isMobileNav ? "true" : undefined}
+          aria-hidden={isMobileNav ? !sidebarOpen : undefined}
+          tabIndex={-1}
+        >
           <div className="admin-sidebar-mobile-head">
             <span>Menu</span>
             <button
               type="button"
               className="admin-sidebar-close"
-              onClick={() => setSidebarOpen(false)}
+              ref={closeButtonRef}
+              onClick={closeSidebar}
               aria-label="Close menu"
             >
               ×
@@ -198,7 +355,7 @@ export default function AdminSidebarLayout({
                 className={({ isActive }) =>
                   `admin-shell-link ${isActive ? "active" : ""}`.trim()
                 }
-                onClick={() => setSidebarOpen(false)}
+                onClick={closeSidebar}
               >
                 <span className="admin-shell-link-icon">
                   <AdminNavIcon path={item.path} />
@@ -223,40 +380,25 @@ export default function AdminSidebarLayout({
           </nav>
         </aside>
 
-        <section className="admin-shell-content">
-          <div className="section-head admin-shell-head">
-            <div className="admin-shell-title">
-              <div className="admin-shell-title-row">
-                <h2>{title}</h2>
-                {titleActions && (
-                  <div className="admin-shell-title-actions">{titleActions}</div>
-                )}
+        <section className="admin-shell-content" aria-hidden={sidebarOpen && isMobileNav ? true : undefined}>
+          {hasPageHeader ? (
+            <div className="section-head admin-shell-head">
+              <div className="admin-shell-title">
+                <div className="admin-shell-title-row">
+                  {title ? <h2>{title}</h2> : null}
+                  {titleActions ? (
+                    <div className="admin-shell-title-actions">{titleActions}</div>
+                  ) : null}
+                </div>
+                {description ? <p>{description}</p> : null}
               </div>
-              {description && <p>{description}</p>}
+              {actions ? <div className="seller-toolbar">{actions}</div> : null}
             </div>
-            {actions && <div className="seller-toolbar">{actions}</div>}
-          </div>
+          ) : null}
           {children}
         </section>
       </div>
 
-      <nav className="admin-bottom-nav" aria-label="Admin mobile navigation">
-        {ADMIN_NAV_ITEMS.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            className={({ isActive }) =>
-              `admin-bottom-link ${isActive ? "active" : ""}`.trim()
-            }
-            onClick={() => setSidebarOpen(false)}
-          >
-            <span className="admin-bottom-icon">
-              <AdminNavIcon path={item.path} />
-            </span>
-            <span className="admin-bottom-label">{item.label}</span>
-          </NavLink>
-        ))}
-      </nav>
     </div>
   );
 }
