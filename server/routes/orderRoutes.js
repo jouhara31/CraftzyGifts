@@ -1,14 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const {
-  createOrder,
   createCheckoutSession,
   getPaymentConfig,
   getMyOrders,
   getSellerOrders,
   payOrder,
-  verifyOrderPayment,
-  verifyCheckoutSessionPayment,
   paymentWebhook,
   requestReturn,
   submitOrderReview,
@@ -37,7 +34,6 @@ const sellerOrderWriteRateLimit = createRateLimiter({
   message: "Too many order updates in a short time. Please wait a moment and try again.",
 });
 
-router.post("/", auth, requireRole("customer"), checkoutRateLimit, createOrder);
 router.get("/payment/config", getPaymentConfig);
 router.post(
   "/checkout-session",
@@ -46,23 +42,9 @@ router.post(
   checkoutRateLimit,
   createCheckoutSession
 );
-router.post(
-  "/checkout-session/verify",
-  auth,
-  requireRole("customer"),
-  paymentRateLimit,
-  verifyCheckoutSessionPayment
-);
 router.get("/my", auth, requireRole("customer"), getMyOrders);
 router.post("/payment/webhook", paymentWebhook);
 router.post("/:id/pay", auth, requireRole("customer"), paymentRateLimit, payOrder);
-router.post(
-  "/:id/pay/verify",
-  auth,
-  requireRole("customer"),
-  paymentRateLimit,
-  verifyOrderPayment
-);
 router.post("/:id/return", auth, requireRole("customer"), checkoutRateLimit, requestReturn);
 router.patch("/:id/review", auth, requireRole("customer"), checkoutRateLimit, submitOrderReview);
 

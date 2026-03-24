@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import { getProductImage } from "../utils/productMedia";
+import { clearBuyNowCheckoutItem } from "../utils/buyNowCheckout";
 import { addToCart, getCart, removeFromCart, updateQuantity } from "../utils/cart";
 import {
   getPurchaseBlockedMessage,
@@ -55,6 +56,8 @@ const getRecoVisibleCount = () => {
 export default function Cart() {
   const [items, setItems] = useState(() => getCart());
   const [catalogPool, setCatalogPool] = useState([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState("");
   const [recoVisibleCount, setRecoVisibleCount] = useState(getRecoVisibleCount);
   const [recoStartIndex, setRecoStartIndex] = useState(0);
   const [notice, setNotice] = useState("");
@@ -82,8 +85,17 @@ export default function Cart() {
 
     const loadCatalog = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/products`);
-        if (!res.ok) return;
+        setCatalogLoading(true);
+        setCatalogError("");
+        const params = new URLSearchParams({
+          page: "1",
+          limit: "18",
+          sort: "newest",
+        });
+        const res = await fetch(`${API_URL}/api/products?${params.toString()}`);
+        if (!res.ok) {
+          throw new Error("Recommendations could not be loaded right now.");
+        }
         const data = await res.json();
         if (ignore) return;
         const products = Array.isArray(data)
@@ -91,9 +103,13 @@ export default function Cart() {
           : Array.isArray(data?.items)
             ? data.items
             : [];
-        if (products.length > 0) setCatalogPool(products);
+        setCatalogPool(products);
       } catch {
-        // Live data only. Keep recommendations empty on failure.
+        if (ignore) return;
+        setCatalogPool([]);
+        setCatalogError("Recommendations could not be loaded right now.");
+      } finally {
+        if (!ignore) setCatalogLoading(false);
       }
     };
 
@@ -328,6 +344,7 @@ export default function Cart() {
               type="button"
               onClick={() => {
                 if (!guardPurchaseAction()) return;
+                clearBuyNowCheckoutItem();
                 navigate("/checkout");
               }}
               disabled={isPurchaseBlocked}
@@ -361,69 +378,74 @@ export default function Cart() {
         </div>
       </section>
 
-      {recommendations.length > 0 && (
+      {(catalogLoading || catalogError || recommendations.length > 0) && (
         <section className="cart-reco-section" aria-label="You might also like">
           <div className="cart-reco-head">
             <h3>You might also like</h3>
           </div>
-          <div className="cart-reco-rail">
-            <button
-              type="button"
-              className="cart-reco-side-btn left"
-              aria-label="Previous recommendation"
-              onClick={() => handleRecoArrow(-1)}
-              disabled={recommendations.length <= 1}
-            >
-              &#8249;
-            </button>
-            <div className="cart-reco-carousel">
-              <div className="cart-reco-row">
-                {visibleRecommendations.map((item) => (
-                  <article key={item._id || item.id} className="cart-reco-card">
-                    <button
-                      type="button"
-                      className="cart-reco-image-btn"
-                      onClick={() =>
-                        navigate(item?._id ? `/products/${item._id}` : "/products")
-                      }
-                    >
-                      <img
-                        className="cart-reco-thumb"
-                        src={getProductImage(item)}
-                        alt={item.name}
-                        loading="lazy"
-                      />
-                    </button>
-                    <h4>{item.name}</h4>
-                    <p>₹{formatPrice(item.price)}</p>
-                    <button
-                      className="cart-reco-add-btn"
-                      type="button"
-                      onClick={() => {
-                        if (!guardPurchaseAction()) return;
-                        setItems(addToCart(toCartItem(item)));
-                      }}
-                      disabled={isPurchaseBlocked}
-                    >
-                      Add to cart
-                    </button>
-                  </article>
-                ))}
+          {catalogLoading ? (
+            <p className="field-hint">Loading recommendations...</p>
+          ) : catalogError ? (
+            <p className="field-hint">{catalogError}</p>
+          ) : (
+            <div className="cart-reco-rail">
+              <button
+                type="button"
+                className="cart-reco-side-btn left"
+                aria-label="Previous recommendation"
+                onClick={() => handleRecoArrow(-1)}
+                disabled={recommendations.length <= 1}
+              >
+                &#8249;
+              </button>
+              <div className="cart-reco-carousel">
+                <div className="cart-reco-row">
+                  {visibleRecommendations.map((item) => (
+                    <article key={item._id || item.id} className="cart-reco-card">
+                      <button
+                        type="button"
+                        className="cart-reco-image-btn"
+                        onClick={() =>
+                          navigate(item?._id ? `/products/${item._id}` : "/products")
+                        }
+                      >
+                        <img
+                          className="cart-reco-thumb"
+                          src={getProductImage(item)}
+                          alt={item.name}
+                          loading="lazy"
+                        />
+                      </button>
+                      <h4>{item.name}</h4>
+                      <p>₹{formatPrice(item.price)}</p>
+                      <button
+                        className="cart-reco-add-btn"
+                        type="button"
+                        onClick={() => {
+                          if (!guardPurchaseAction()) return;
+                          setItems(addToCart(toCartItem(item)));
+                        }}
+                        disabled={isPurchaseBlocked}
+                      >
+                        Add to cart
+                      </button>
+                    </article>
+                  ))}
+                </div>
               </div>
+              <button
+                type="button"
+                className="cart-reco-side-btn right"
+                aria-label="Next recommendation"
+                onClick={() => handleRecoArrow(1)}
+                disabled={recommendations.length <= 1}
+              >
+                &#8250;
+              </button>
             </div>
-            <button
-              type="button"
-              className="cart-reco-side-btn right"
-              aria-label="Next recommendation"
-              onClick={() => handleRecoArrow(1)}
-              disabled={recommendations.length <= 1}
-            >
-              &#8250;
-            </button>
-          </div>
+          )}
         </section>
       )}
     </div>
   );
 }
-

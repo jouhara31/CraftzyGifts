@@ -16,6 +16,8 @@ export default function Home() {
   const [activeSlide, setActiveSlide] = useState(0);
   const [carouselPaused, setCarouselPaused] = useState(false);
   const [featuredProducts, setFeaturedProducts] = useState([]);
+  const [featuredLoading, setFeaturedLoading] = useState(true);
+  const [featuredError, setFeaturedError] = useState("");
   const [categoryTree, setCategoryTree] = useState(DEFAULT_CATEGORY_TREE);
   const location = useLocation();
 
@@ -41,14 +43,25 @@ export default function Home() {
   useEffect(() => {
     const loadFeatured = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/products`);
-        if (!res.ok) return;
+        setFeaturedLoading(true);
+        setFeaturedError("");
+        const params = new URLSearchParams({
+          page: "1",
+          limit: "4",
+          sort: "newest",
+        });
+        const res = await fetch(`${API_URL}/api/products?${params.toString()}`);
+        if (!res.ok) {
+          throw new Error("Featured products could not be loaded right now.");
+        }
         const data = await res.json();
         const items = Array.isArray(data) ? data : data?.items;
-        if (!Array.isArray(items) || items.length === 0) return;
-        setFeaturedProducts(items.slice(0, 4));
+        setFeaturedProducts(Array.isArray(items) ? items : []);
       } catch {
-        // No local fallback. Keep live data only.
+        setFeaturedProducts([]);
+        setFeaturedError("Featured products could not be loaded right now.");
+      } finally {
+        setFeaturedLoading(false);
       }
     };
     loadFeatured();
@@ -87,7 +100,7 @@ export default function Home() {
       title: "Secure Checkout",
       text: "Safe payments, clear tracking, and dependable support.",
       image: "/images/about/secure.png",
-      path: "/checkout",
+      path: "/cart",
     },
   ];
 
@@ -301,41 +314,46 @@ export default function Home() {
             View all products
           </Link>
         </div>
-        <div className="product-grid featured-crafts-grid">
-          {featuredProducts.map((item) => {
-            const isCustomizable = Boolean(item.isCustomizable);
-            const detailLink = item._id ? `/products/${item._id}` : "/products";
-            return (
-              <article key={item._id || item.name} className="product-card">
-                <div className="featured-crafts-media">
-                  <ProductHoverImage
-                    className="product-image large"
-                    product={item}
-                    alt={item.name}
-                  />
-                  <span className="chip featured-crafts-badge">
-                    {isCustomizable ? "Customizable" : "Ready-made"}
-                  </span>
-                </div>
-                <div className="product-body">
-                  <div className="product-top">
-                    <h3>{item.name}</h3>
+        {featuredLoading ? (
+          <p className="field-hint">Loading featured products...</p>
+        ) : featuredError ? (
+          <p className="field-hint">{featuredError}</p>
+        ) : featuredProducts.length > 0 ? (
+          <div className="product-grid featured-crafts-grid">
+            {featuredProducts.map((item) => {
+              const isCustomizable = Boolean(item.isCustomizable);
+              const detailLink = item._id ? `/products/${item._id}` : "/products";
+              return (
+                <article key={item._id || item.name} className="product-card">
+                  <div className="featured-crafts-media">
+                    <ProductHoverImage
+                      className="product-image large"
+                      product={item}
+                      alt={item.name}
+                    />
+                    <span className="chip featured-crafts-badge">
+                      {isCustomizable ? "Customizable" : "Ready-made"}
+                    </span>
                   </div>
-                  <div className="product-meta">
-                    <span>{item.category || "Hamper"}</span>
+                  <div className="product-body">
+                    <div className="product-top">
+                      <h3>{item.name}</h3>
+                    </div>
+                    <div className="product-meta">
+                      <span>{item.category || "Hamper"}</span>
+                    </div>
+                    <div className="product-price">
+                      <strong>₹{formatPrice(item.price)}</strong>
+                      <Link className="btn ghost" to={detailLink}>
+                        View Details
+                      </Link>
+                    </div>
                   </div>
-                  <div className="product-price">
-                    <strong>₹{formatPrice(item.price)}</strong>
-                    <Link className="btn ghost" to={detailLink}>
-                      View Details
-                    </Link>
-                  </div>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-        {featuredProducts.length === 0 && (
+                </article>
+              );
+            })}
+          </div>
+        ) : (
           <p className="field-hint">No featured products available right now.</p>
         )}
       </section>
@@ -373,4 +391,3 @@ export default function Home() {
     </div>
   );
 }
-

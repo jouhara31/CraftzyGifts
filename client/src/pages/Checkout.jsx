@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import { clearCart, getCart } from "../utils/cart";
+import {
+  clearBuyNowCheckoutItem,
+  readBuyNowCheckoutItem,
+} from "../utils/buyNowCheckout";
 import { getProductImage } from "../utils/productMedia";
 import { addPendingPaymentGroup } from "../utils/paymentTracking";
 import { buildPaymentStatusPath } from "../utils/paymentStatusRoute";
@@ -81,6 +85,25 @@ const normalizeCheckoutItem = (item = {}) => {
   };
 };
 
+const hasAddressContent = (address) =>
+  Boolean(
+    String(address?.line1 || "").trim() ||
+      String(address?.city || "").trim() ||
+      String(address?.state || "").trim() ||
+      String(address?.pincode || "").trim()
+  );
+
+const buildAddressLabel = (address) => {
+  const parts = [
+    String(address?.label || "").trim(),
+    String(address?.line1 || "").trim(),
+    String(address?.city || "").trim(),
+    String(address?.state || "").trim(),
+    String(address?.pincode || "").trim(),
+  ].filter(Boolean);
+  return parts.join(", ");
+};
+
 export default function Checkout() {
   const [form, setForm] = useState({
     name: "",
@@ -106,12 +129,21 @@ export default function Checkout() {
     supportedModes: ["cod"],
     isLoading: true,
   });
+  const [savedAddresses, setSavedAddresses] = useState([]);
+  const [selectedAddressId, setSelectedAddressId] = useState("");
+  const [addressBookLoading, setAddressBookLoading] = useState(true);
+  const [addressBookError, setAddressBookError] = useState("");
   const location = useLocation();
   const navigate = useNavigate();
   const cartItems = getCart();
+  const storedBuyNowItem = useMemo(
+    () => normalizeCheckoutItem(readBuyNowCheckoutItem()),
+    []
+  );
   const buyNowItem = useMemo(
-    () => normalizeCheckoutItem(location.state?.buyNowItem),
-    [location.state]
+    () =>
+      normalizeCheckoutItem(location.state?.buyNowItem) || storedBuyNowItem,
+    [location.state, storedBuyNowItem]
   );
   const items = buyNowItem ? [buyNowItem] : cartItems;
   const primaryItem = items[0] || null;
@@ -146,6 +178,23 @@ export default function Checkout() {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
+  const handleAddressChange = (event) => {
+    const nextId = String(event.target.value || "").trim();
+    setSelectedAddressId(nextId);
+    const selectedAddress = savedAddresses.find(
+      (entry) => String(entry?.id || "").trim() === nextId
+    );
+    if (!selectedAddress) return;
+    setForm((current) => ({
+      ...current,
+      line1: String(selectedAddress.line1 || "").trim(),
+      line2: "",
+      city: String(selectedAddress.city || "").trim(),
+      state: String(selectedAddress.state || "").trim(),
+      pincode: String(selectedAddress.pincode || "").trim(),
+    }));
+  };
+
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token || sessionClaims.isExpired) {
@@ -168,6 +217,90 @@ export default function Checkout() {
     window.addEventListener("user:updated", syncSessionClaims);
     return () => window.removeEventListener("user:updated", syncSessionClaims);
   }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const loadAddressBook = async () => {
+      const token = localStorage.getItem("token");
+      if (!token || sessionClaims.isExpired) {
+        if (!ignore) setAddressBookLoading(false);
+        return;
+      }
+
+      try {
+        setAddressBookLoading(true);
+        setAddressBookError("");
+        const res = await fetch(`${API_URL}/api/users/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data?.message || "Unable to load your saved addresses.");
+        }
+        if (ignore) return;
+
+        const addressOptions = [];
+        if (hasAddressContent(data?.shippingAddress)) {
+          addressOptions.push({
+            id: "shipping-address",
+            label: "Saved shipping address",
+            ...data.shippingAddress,
+          });
+        }
+        if (Array.isArray(data?.savedAddresses)) {
+          addressOptions.push(
+            ...data.savedAddresses
+              .filter((entry) => hasAddressContent(entry))
+              .map((entry) => ({
+                ...entry,
+                id:
+                  String(entry?.id || "").trim() ||
+                  [
+                    "saved-address",
+                    String(entry?.label || "").trim(),
+                    String(entry?.line1 || "").trim(),
+                    String(entry?.pincode || "").trim(),
+                  ]
+                    .filter(Boolean)
+                    .join("-"),
+              }))
+          );
+        }
+
+        setSavedAddresses(addressOptions);
+
+        const preferredAddress = addressOptions[0] || null;
+        if (preferredAddress) {
+          setSelectedAddressId(String(preferredAddress.id || "").trim());
+        }
+
+        setForm((current) => ({
+          ...current,
+          name: current.name || String(data?.name || "").trim(),
+          phone: current.phone || String(data?.phone || "").trim(),
+          line1: current.line1 || String(preferredAddress?.line1 || "").trim(),
+          city: current.city || String(preferredAddress?.city || "").trim(),
+          state: current.state || String(preferredAddress?.state || "").trim(),
+          pincode: current.pincode || String(preferredAddress?.pincode || "").trim(),
+        }));
+      } catch (error) {
+        if (ignore) return;
+        setAddressBookError(
+          error?.message || "Unable to load your saved addresses."
+        );
+      } finally {
+        if (!ignore) setAddressBookLoading(false);
+      }
+    };
+
+    loadAddressBook();
+    return () => {
+      ignore = true;
+    };
+  }, [navigate, sessionClaims.isExpired]);
 
   useEffect(() => {
     let ignore = false;
@@ -342,6 +475,9 @@ export default function Checkout() {
       }
 
       if (data?.mode === "cod") {
+        if (buyNowItem) {
+          clearBuyNowCheckoutItem();
+        }
         if (!buyNowItem) {
           clearCart();
         }
@@ -359,6 +495,9 @@ export default function Checkout() {
 
       onlineSessionCreated = true;
       paymentGroupId = String(data.checkout.paymentGroupId || "").trim();
+      if (buyNowItem) {
+        clearBuyNowCheckoutItem();
+      }
       if (!buyNowItem) {
         clearCart();
       }
@@ -416,6 +555,9 @@ export default function Checkout() {
       }
     } catch (err) {
       if (onlineSessionCreated) {
+        if (buyNowItem) {
+          clearBuyNowCheckoutItem();
+        }
         if (paymentGroupId) {
           addPendingPaymentGroup(paymentGroupId);
         }
@@ -468,6 +610,25 @@ export default function Checkout() {
           {error && <p className="field-hint">{error}</p>}
           {items.length === 0 && (
             <p className="field-hint">Your cart is empty.</p>
+          )}
+          {savedAddresses.length > 0 && (
+            <div className="field">
+              <label>Saved addresses</label>
+              <select value={selectedAddressId} onChange={handleAddressChange}>
+                <option value="">Choose an address</option>
+                {savedAddresses.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {buildAddressLabel(entry)}
+                  </option>
+                ))}
+              </select>
+              {addressBookLoading && (
+                <p className="field-hint">Loading saved addresses...</p>
+              )}
+            </div>
+          )}
+          {!addressBookLoading && addressBookError && (
+            <p className="field-hint">{addressBookError}</p>
           )}
           <div className="field">
             <label>Full name</label>
@@ -651,4 +812,3 @@ export default function Checkout() {
     </div>
   );
 }
-

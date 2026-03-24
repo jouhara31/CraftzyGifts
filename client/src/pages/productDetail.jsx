@@ -4,6 +4,7 @@ import Header from "../components/Header";
 import ProductHoverImage from "../components/ProductHoverImage";
 import { addToCart } from "../utils/cart";
 import { getWishlist, toggleWishlist } from "../utils/wishlist";
+import { saveBuyNowCheckoutItem } from "../utils/buyNowCheckout";
 import { getProductImage, getProductImages } from "../utils/productMedia";
 import { getCachedProductDetail, loadProductDetail } from "../utils/productDetailCache";
 import {
@@ -604,8 +605,10 @@ export default function ProductDetail() {
 
   const handleGiftNow = () => {
     if (!guardPurchaseAction()) return;
+    const nextCheckoutItem = buildCurrentCheckoutItem();
+    saveBuyNowCheckoutItem(nextCheckoutItem);
     navigate("/checkout", {
-      state: { buyNowItem: buildCurrentCheckoutItem() },
+      state: { buyNowItem: nextCheckoutItem },
     });
   };
 
@@ -1191,4 +1194,3 @@ export default function ProductDetail() {
     </div>
   );
 }
-

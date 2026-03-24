@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import Header from "../components/Header";
 import CustomizationPanel from "../components/customizationPanel";
 import { getProductImage } from "../utils/productMedia";
+import { clearBuyNowCheckoutItem } from "../utils/buyNowCheckout";
 import { addToCart, getCart, setCustomization } from "../utils/cart";
 import {
   getPurchaseBlockedMessage,
@@ -1430,7 +1431,10 @@ export default function Customization() {
               type="button"
               onClick={() => {
                 const saved = saveCustomization();
-                if (saved) navigate("/checkout");
+                if (saved) {
+                  clearBuyNowCheckoutItem();
+                  navigate("/checkout");
+                }
               }}
               disabled={isPurchaseBlocked || isDisabled || !isModeChosen || isBuildUnavailable}
             >
@@ -1442,4 +1446,3 @@ export default function Customization() {
     </div>
   );
 }
-
