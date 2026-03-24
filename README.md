@@ -3,10 +3,6 @@ CraftzyGifts - Project Documentation
 **Overview**
 CraftzyGifts is a web-based multi-vendor marketplace for handmade gifts and custom hampers. Customers can purchase ready-made products or build personalized hampers, while sellers manage listings and orders. Admins oversee approvals, categories, and platform health.
 
-**Academic Documents (BCSP-064)**
-- `PROJECT_SYNOPSIS.md` for the project proposal synopsis.
-- `PROJECT_REPORT.md` for the full project report structure.
-
 **Objectives**
 - Enable customers to buy ready-made gifts or build fully customized hampers.
 - Provide home-based crafters with an easy platform to sell handmade products.
@@ -29,7 +25,7 @@ CraftzyGifts is a web-based multi-vendor marketplace for handmade gifts and cust
 - Wishlist, profile management, and address book.
 
 **Tech Stack**
-- Frontend: React, Vite, Tailwind CSS, React Router
+- Frontend: React, Vite, CSS, React Router
 - Backend: Node.js, Express
 - Database: MongoDB with Mongoose
 - Auth: JWT
@@ -80,6 +76,7 @@ CraftzyGifts is a web-based multi-vendor marketplace for handmade gifts and cust
 
 **Testing**
 - Client tests are available with `cd client` then `npm run test`.
+- Server tests are available with `cd server` then `npm test`.
 - For Razorpay checkout, use test mode keys and webhook secrets during development.
 
 **Future Enhancements**
