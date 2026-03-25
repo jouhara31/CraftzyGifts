@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Header from "../components/Header";
 
 import { API_URL } from "../apiBase";
@@ -18,6 +18,8 @@ const composeItemName = (mainItem, subItem) =>
   [String(mainItem || "").trim(), String(subItem || "").trim()]
     .filter(Boolean)
     .join(" - ");
+const formatCountLabel = (count, singular, plural = `${singular}s`) =>
+  `${count} ${count === 1 ? singular : plural}`;
 const CUSTOM_MAIN_VALUE = "__custom_main__";
 const BASE_CATEGORY_KIND = "base_category";
 const ITEM_COLLECTION_KIND = "item_collection";
@@ -126,6 +128,17 @@ const stripCategoryId = (item = {}) => {
   const nextItem = { ...item };
   delete nextItem.categoryId;
   return nextItem;
+};
+
+const matchesStudioQuery = (item, queryText = "") => {
+  const text = String(queryText || "").trim().toLowerCase();
+  if (!text) return true;
+
+  return `${item?.mainItem || item?.name || ""} ${item?.subItem || ""} ${item?.type || ""} ${
+    item?.size || ""
+  }`
+    .toLowerCase()
+    .includes(text);
 };
 
 const flattenProductItems = (product) =>
@@ -269,12 +282,14 @@ export default function SellerListedItems() {
   const [baseCategoryForm, setBaseCategoryForm] = useState(createEmptyBaseCategoryForm);
   const [editingItemId, setEditingItemId] = useState("");
   const [editingBaseCategoryId, setEditingBaseCategoryId] = useState("");
+  const [selectedBaseCategoryId, setSelectedBaseCategoryId] = useState("");
   const [showBaseCategoryForm, setShowBaseCategoryForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [mainItemMode, setMainItemMode] = useState("select");
+  const studioEditorRef = useRef(null);
   const itemTypeMeta = useMemo(() => getItemTypeMeta(form.itemType), [form.itemType]);
 
   const customizableProducts = useMemo(
@@ -313,8 +328,10 @@ export default function SellerListedItems() {
             Array.isArray(product?.customizationCatalog) &&
             product.customizationCatalog.length > 0
         ) || customizableList[0];
-      setBaseCategories(seedProduct ? extractBaseCategories(seedProduct) : []);
+      const nextBaseCategories = seedProduct ? extractBaseCategories(seedProduct) : [];
+      setBaseCategories(nextBaseCategories);
       setDraftItems(seedProduct ? flattenProductItems(seedProduct) : []);
+      setSelectedBaseCategoryId(nextBaseCategories[0]?.id || "");
       setEditingItemId("");
       setForm(createEmptyForm());
       setBaseCategoryForm(createEmptyBaseCategoryForm());
@@ -367,18 +384,6 @@ export default function SellerListedItems() {
       : "";
   }, [baseCategories, draftItems, editingItemId, form.categoryId, form.itemType, form.size, form.mainItem, form.subItem]);
 
-  const visibleItems = useMemo(() => {
-    const text = query.trim().toLowerCase();
-    if (!text) return draftItems;
-    return draftItems.filter((item) =>
-      `${item.mainItem || item.name || ""} ${item.subItem || ""} ${item.type || ""} ${
-        item.size || ""
-      }`
-        .toLowerCase()
-        .includes(text)
-    );
-  }, [draftItems, query]);
-
   const sortedBaseCategories = useMemo(
     () =>
       [...baseCategories].sort((a, b) =>
@@ -388,6 +393,51 @@ export default function SellerListedItems() {
       ),
     [baseCategories]
   );
+
+  useEffect(() => {
+    if (sortedBaseCategories.length === 0) {
+      if (selectedBaseCategoryId) setSelectedBaseCategoryId("");
+      return;
+    }
+    if (sortedBaseCategories.some((category) => category.id === selectedBaseCategoryId)) return;
+    setSelectedBaseCategoryId(sortedBaseCategories[0]?.id || "");
+  }, [selectedBaseCategoryId, sortedBaseCategories]);
+
+  const selectedBaseCategory = useMemo(
+    () =>
+      sortedBaseCategories.find(
+        (category) => String(category.id || "").trim() === String(selectedBaseCategoryId || "").trim()
+      ) || null,
+    [selectedBaseCategoryId, sortedBaseCategories]
+  );
+
+  const baseTypeItems = useMemo(
+    () => draftItems.filter((item) => normalizeItemType(item?.type) === "base"),
+    [draftItems]
+  );
+
+  const hamperStudioItems = useMemo(
+    () => draftItems.filter((item) => normalizeItemType(item?.type) !== "base"),
+    [draftItems]
+  );
+
+  const visibleBaseTypeItems = useMemo(
+    () =>
+      baseTypeItems.filter(
+        (item) =>
+          String(item?.categoryId || "").trim() === String(selectedBaseCategoryId || "").trim() &&
+          matchesStudioQuery(item, query)
+      ),
+    [baseTypeItems, query, selectedBaseCategoryId]
+  );
+
+  const visibleHamperStudioItems = useMemo(
+    () => hamperStudioItems.filter((item) => matchesStudioQuery(item, query)),
+    [hamperStudioItems, query]
+  );
+  const selectedBaseTypeCount = visibleBaseTypeItems.length;
+  const hamperItemCount = visibleHamperStudioItems.length;
+  const totalBaseCategoryCount = baseCategories.length;
 
   const mainItemOptions = useMemo(() => {
     const seen = new Set();
@@ -405,7 +455,7 @@ export default function SellerListedItems() {
   const mainItemSelectValue =
     mainItemMode === "select" && mainItemOptions.includes(form.mainItem) ? form.mainItem : "";
 
-  const previewImage = showBaseCategoryForm ? baseCategoryForm.image : form.image;
+  const previewImage = form.image;
 
   const onUploadImage = (event) => {
     const file = event.target.files?.[0];
@@ -455,6 +505,45 @@ export default function SellerListedItems() {
     };
     reader.onerror = () => setError("Unable to read selected image.");
     reader.readAsDataURL(file);
+  };
+
+  const scrollToStudioEditor = () => {
+    if (typeof window === "undefined") return;
+    window.requestAnimationFrame(() => {
+      studioEditorRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  };
+
+  const startBaseTypeEditor = (categoryId = "") => {
+    const nextCategoryId = String(categoryId || selectedBaseCategoryId || sortedBaseCategories[0]?.id || "").trim();
+    setEditingItemId("");
+    setShowBaseCategoryForm(false);
+    setMainItemMode("select");
+    setForm({
+      ...createEmptyForm(),
+      itemType: "base",
+      categoryId: nextCategoryId,
+    });
+    if (nextCategoryId) setSelectedBaseCategoryId(nextCategoryId);
+    setError("");
+    setNotice("");
+    scrollToStudioEditor();
+  };
+
+  const startHamperItemEditor = () => {
+    setEditingItemId("");
+    setShowBaseCategoryForm(false);
+    setMainItemMode("select");
+    setForm({
+      ...createEmptyForm(),
+      itemType: "item",
+    });
+    setError("");
+    setNotice("");
+    scrollToStudioEditor();
   };
 
   useEffect(() => {
@@ -764,11 +853,13 @@ export default function SellerListedItems() {
   const editDraftItem = (item) => {
     if (!item?.id) return;
     setEditingItemId(item.id);
+    const nextItemType = normalizeItemType(item.type);
+    const nextCategoryId = nextItemType === "base" ? String(item.categoryId || "").trim() : "";
     setForm({
-      categoryId: normalizeItemType(item.type) === "base" ? String(item.categoryId || "").trim() : "",
+      categoryId: nextCategoryId,
       mainItem: normalizeMainItem(item.mainItem, String(item.name || "").trim()),
       subItem: normalizeSubItem(item.subItem),
-      itemType: normalizeItemType(item.type),
+      itemType: nextItemType,
       size: normalizeItemSize(item.size),
       price: String(Number(item.price || 0)),
       stock: String(Number(item.stock || 0)),
@@ -776,13 +867,14 @@ export default function SellerListedItems() {
       imageName: "",
       active: item.active !== false,
     });
+    if (nextItemType === "base" && nextCategoryId) {
+      setSelectedBaseCategoryId(nextCategoryId);
+    }
     setShowBaseCategoryForm(false);
     setMainItemMode("select");
     setError("");
     setNotice("Editing item. Update fields and click Update Item.");
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
+    scrollToStudioEditor();
   };
 
   const removeBaseCategory = (categoryId) => {
@@ -850,13 +942,43 @@ export default function SellerListedItems() {
         </div>
       </div>
 
+      <div className="seller-studio-overview">
+        <article className="seller-studio-overview-card">
+          <span className="seller-studio-overview-label">Base categories</span>
+          <strong>{totalBaseCategoryCount}</strong>
+          <small>Customer-facing hamper groups</small>
+        </article>
+        <article className="seller-studio-overview-card">
+          <span className="seller-studio-overview-label">Base types</span>
+          <strong>{selectedBaseTypeCount}</strong>
+          <small>
+            {selectedBaseCategory ? `Inside ${selectedBaseCategory.name}` : "Select a category"}
+          </small>
+        </article>
+        <article className="seller-studio-overview-card">
+          <span className="seller-studio-overview-label">Hamper items</span>
+          <strong>{hamperItemCount}</strong>
+          <small>Shared across custom hamper flows</small>
+        </article>
+      </div>
+
       {loading && <p className="field-hint">Loading custom hamper items...</p>}
       {error && <p className="field-hint">{error}</p>}
       {notice && <p className="field-hint">{notice}</p>}
 
       <section className="seller-panel seller-base-category-panel">
         <div className="card-head">
-          <h3 className="card-title">{BASE_CATEGORY_COPY.title}</h3>
+          <div>
+            <h3 className="card-title">{BASE_CATEGORY_COPY.title}</h3>
+            <div className="seller-studio-chip-row">
+              <span className="seller-studio-chip">
+                {formatCountLabel(totalBaseCategoryCount, "category")}
+              </span>
+              {selectedBaseCategory ? (
+                <span className="seller-studio-chip active">{selectedBaseCategory.name} selected</span>
+              ) : null}
+            </div>
+          </div>
           <button
             className="btn primary"
             type="button"
@@ -952,7 +1074,13 @@ export default function SellerListedItems() {
               ).length;
 
               return (
-                <article key={category.id} className="seller-base-category-card">
+                <article
+                  key={category.id}
+                  className={`seller-base-category-card ${
+                    selectedBaseCategoryId === category.id ? "active" : ""
+                  }`}
+                  onClick={() => setSelectedBaseCategoryId(category.id)}
+                >
                   {category.image ? (
                     <img
                       className="seller-base-category-thumb"
@@ -969,9 +1097,11 @@ export default function SellerListedItems() {
                     <p className="mini-sub">
                       {category.description || "No description added yet."}
                     </p>
-                    <p className="mini-sub">
-                      Base types: {categoryTypeCount}
-                    </p>
+                    <div className="seller-studio-meta-row">
+                      <span className="seller-studio-meta-pill">
+                        {formatCountLabel(categoryTypeCount, "base type")}
+                      </span>
+                    </div>
                     {categoryTypeCount === 0 ? (
                       <p className="seller-base-category-status pending">
                         Hidden from customers until you add one hamper base type and publish.
@@ -986,14 +1116,20 @@ export default function SellerListedItems() {
                     <button
                       className="btn ghost"
                       type="button"
-                      onClick={() => editBaseCategory(category)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        editBaseCategory(category);
+                      }}
                     >
                       Edit
                     </button>
                     <button
                       className="btn ghost"
                       type="button"
-                      onClick={() => removeBaseCategory(category.id)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        removeBaseCategory(category.id);
+                      }}
                     >
                       Remove
                     </button>
@@ -1005,181 +1141,374 @@ export default function SellerListedItems() {
         )}
       </section>
 
-      <section className="seller-studio-layout">
+      <section className="seller-studio-sections">
+        <article className="seller-panel seller-studio-rail">
+          <div className="card-head">
+            <div>
+              <h3 className="card-title">Hamper base types</h3>
+              <div className="seller-studio-chip-row">
+                <span className="seller-studio-chip">
+                  {formatCountLabel(selectedBaseTypeCount, "base type")}
+                </span>
+                {selectedBaseCategory ? (
+                  <span className="seller-studio-chip soft">{selectedBaseCategory.name}</span>
+                ) : null}
+              </div>
+              <p className="field-hint">
+                {selectedBaseCategory
+                  ? `Manage the selectable base types inside the ${selectedBaseCategory.name} category.`
+                  : "Select a base category to view and manage its base types."}
+              </p>
+            </div>
+            <button
+              className="btn primary"
+              type="button"
+              onClick={() => startBaseTypeEditor(selectedBaseCategoryId)}
+              disabled={sortedBaseCategories.length === 0}
+            >
+              Add base type
+            </button>
+          </div>
+          {sortedBaseCategories.length === 0 ? (
+            <p className="field-hint">Create a hamper base category before adding base types.</p>
+          ) : visibleBaseTypeItems.length === 0 ? (
+            <p className="field-hint">
+              {selectedBaseCategory
+                ? `No base types have been added under ${selectedBaseCategory.name} yet. Click Add base type to get started.`
+                : "No base types are available for this category yet."}
+            </p>
+          ) : (
+            <div className="seller-draft-items">
+              {visibleBaseTypeItems.map((item) => (
+                <article key={item.id} className="seller-draft-item-card seller-studio-entry-card">
+                  {item.image ? (
+                    <img
+                      src={item.image}
+                      alt={item.name}
+                      className="seller-draft-item-thumb seller-studio-entry-thumb"
+                    />
+                  ) : (
+                    <div className="seller-draft-item-thumb seller-thumb-placeholder seller-studio-entry-thumb">
+                      No image
+                    </div>
+                  )}
+                  <div className="seller-studio-entry-body">
+                    <div className="seller-studio-entry-top">
+                      <p className="mini-title">{getItemDisplayName(item)}</p>
+                      <span className="seller-studio-meta-pill">Base type</span>
+                    </div>
+                    <p className="mini-sub">Category: {item.mainItem || "Not set"}</p>
+                    <p className="mini-sub">{item.size || "No extra type detail added yet."}</p>
+                    <div className="seller-studio-meta-row">
+                      <span className="seller-studio-meta-pill">₹{Number(item.price || 0).toLocaleString("en-IN")}</span>
+                      <span className="seller-studio-meta-pill">Stock {Number(item.stock || 0)}</span>
+                    </div>
+                  </div>
+                  <div className="seller-draft-item-actions seller-studio-entry-actions">
+                    <button className="btn ghost" type="button" onClick={() => editDraftItem(item)}>
+                      Update
+                    </button>
+                    <button className="btn ghost" type="button" onClick={() => removeDraftItem(item.id)}>
+                      Remove
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </article>
+
+        <article className="seller-panel seller-studio-rail">
+          <div className="card-head">
+            <div>
+              <h3 className="card-title">Hamper items</h3>
+              <div className="seller-studio-chip-row">
+                <span className="seller-studio-chip">
+                  {formatCountLabel(hamperItemCount, "hamper item")}
+                </span>
+                <span className="seller-studio-chip soft">Shared studio catalog</span>
+              </div>
+              <p className="field-hint">
+                Manage filler items such as chocolates, perfumes, cards, and flowers here.
+              </p>
+            </div>
+            <button className="btn primary" type="button" onClick={startHamperItemEditor}>
+              Add hamper item
+            </button>
+          </div>
+          {visibleHamperStudioItems.length === 0 ? (
+            <p className="field-hint">No hamper items yet. Click Add hamper item to get started.</p>
+          ) : (
+            <div className="seller-draft-items">
+              {visibleHamperStudioItems.map((item) => (
+                <article key={item.id} className="seller-draft-item-card seller-studio-entry-card">
+                  {item.image ? (
+                    <img
+                      src={item.image}
+                      alt={item.name}
+                      className="seller-draft-item-thumb seller-studio-entry-thumb"
+                    />
+                  ) : (
+                    <div className="seller-draft-item-thumb seller-thumb-placeholder seller-studio-entry-thumb">
+                      No image
+                    </div>
+                  )}
+                  <div className="seller-studio-entry-body">
+                    <div className="seller-studio-entry-top">
+                      <p className="mini-title">{getItemDisplayName(item)}</p>
+                      <span className="seller-studio-meta-pill">Hamper item</span>
+                    </div>
+                    <p className="mini-sub">Category: {item.mainItem || "Not set"}</p>
+                    <p className="mini-sub">{item.size || "No pack or size detail added yet."}</p>
+                    <div className="seller-studio-meta-row">
+                      <span className="seller-studio-meta-pill">₹{Number(item.price || 0).toLocaleString("en-IN")}</span>
+                      <span className="seller-studio-meta-pill">Stock {Number(item.stock || 0)}</span>
+                    </div>
+                  </div>
+                  <div className="seller-draft-item-actions seller-studio-entry-actions">
+                    <button className="btn ghost" type="button" onClick={() => editDraftItem(item)}>
+                      Update
+                    </button>
+                    <button className="btn ghost" type="button" onClick={() => removeDraftItem(item.id)}>
+                      Remove
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </article>
+      </section>
+
+      <section className="seller-studio-layout" ref={studioEditorRef}>
         <article className="seller-studio-card">
           <div className="card-head">
-            <h3 className="card-title">
-              {editingItemId ? `Edit ${itemTypeMeta.title}` : `Add ${itemTypeMeta.title}`}
-            </h3>
-            <span className="chip">Classic Studio</span>
+            <div>
+              <h3 className="card-title">
+                {editingItemId ? `Edit ${itemTypeMeta.title}` : `${itemTypeMeta.title} editor`}
+              </h3>
+              <div className="seller-studio-chip-row">
+                <span className="seller-studio-chip">
+                  {editingItemId ? "Editing existing entry" : "New studio entry"}
+                </span>
+                {form.itemType === "base" && form.categoryId ? (
+                  <span className="seller-studio-chip soft">
+                    {String(
+                      sortedBaseCategories.find((category) => category.id === form.categoryId)?.name || "No category"
+                    ).trim()}
+                  </span>
+                ) : null}
+              </div>
+              <p className="field-hint">
+                {form.itemType === "base"
+                  ? "Add or update the base types inside the selected base category here."
+                  : "Add or update hamper items here."}
+              </p>
+            </div>
+            <span className="chip">
+              {form.itemType === "base" ? "Base Type Editor" : "Hamper Item Editor"}
+            </span>
           </div>
 
-          <div className="field-row">
-            <div className="field">
-              <label htmlFor="studioType">Listing type</label>
-              <select
-                id="studioType"
-                value={form.itemType}
-                onChange={(event) => {
-                  const nextType = normalizeItemType(event.target.value);
-                  setMainItemMode("select");
-                  setForm(() => ({
-                    ...createEmptyForm(),
-                    itemType: nextType,
-                    categoryId:
-                      nextType === "base" ? sortedBaseCategories[0]?.id || "" : "",
-                  }));
-                }}
-              >
-                <option value="base">Hamper Base Type</option>
-                <option value="item">Hamper Item</option>
-              </select>
-            </div>
-
-            {normalizeItemType(form.itemType) === "base" ? (
-              <div className="field">
-                <label htmlFor="studioBaseCategory">{itemTypeMeta.categoryLabel}</label>
-                <select
-                  id="studioBaseCategory"
-                  value={form.categoryId}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, categoryId: event.target.value }))
-                  }
-                  disabled={sortedBaseCategories.length === 0}
-                >
-                  {sortedBaseCategories.length === 0 ? (
-                    <option value="">Add a base category first</option>
-                  ) : (
-                    sortedBaseCategories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))
-                  )}
-                </select>
-                <div className="seller-inline-actions">
-                  <button
-                    className="btn ghost seller-inline-toggle"
-                    type="button"
-                    onClick={() => {
-                      setEditingBaseCategoryId("");
-                      setBaseCategoryForm(createEmptyBaseCategoryForm());
-                      setShowBaseCategoryForm(true);
+          {normalizeItemType(form.itemType) === "base" ? (
+            <>
+              <div className="field-row">
+                <div className="field">
+                  <label htmlFor="studioBaseCategory">{itemTypeMeta.categoryLabel}</label>
+                  <select
+                    id="studioBaseCategory"
+                    value={form.categoryId}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setSelectedBaseCategoryId(nextValue);
+                      setForm((prev) => ({ ...prev, categoryId: nextValue }));
                     }}
+                    disabled={sortedBaseCategories.length === 0}
                   >
-                    {itemTypeMeta.addCategoryLabel}
-                  </button>
-                </div>
-                <p className="field-hint">{itemTypeMeta.categoryHint}</p>
-                <p className="field-hint seller-inline-hint">
-                  Customers see this base category only after you add at least one hamper base type
-                  inside it and publish the changes.
-                </p>
-              </div>
-            ) : (
-              <div className="field">
-                <label htmlFor="studioMainItem">{itemTypeMeta.categoryLabel}</label>
-                {mainItemMode === "custom" ? (
-                  <>
-                    <input
-                      id="studioMainItem"
-                      type="text"
-                      placeholder={itemTypeMeta.categoryPlaceholder}
-                      value={form.mainItem}
-                      onChange={(event) =>
-                        setForm((prev) => ({ ...prev, mainItem: event.target.value }))
-                      }
-                    />
+                    {sortedBaseCategories.length === 0 ? (
+                      <option value="">Add a base category first</option>
+                    ) : (
+                      sortedBaseCategories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <div className="seller-inline-actions">
                     <button
                       className="btn ghost seller-inline-toggle"
                       type="button"
                       onClick={() => {
-                        setMainItemMode("select");
-                        setForm((prev) => ({ ...prev, mainItem: "", subItem: "" }));
+                        setEditingBaseCategoryId("");
+                        setBaseCategoryForm(createEmptyBaseCategoryForm());
+                        setShowBaseCategoryForm(true);
                       }}
                     >
-                      {itemTypeMeta.selectCategoryLabel}
+                      {itemTypeMeta.addCategoryLabel}
                     </button>
-                  </>
-                ) : (
-                  <select
-                    id="studioMainItem"
-                    value={mainItemSelectValue}
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-                      if (nextValue === CUSTOM_MAIN_VALUE) {
-                        setMainItemMode("custom");
-                        setForm((prev) => ({ ...prev, mainItem: "", subItem: "" }));
-                        return;
-                      }
-                      setForm((prev) => ({ ...prev, mainItem: nextValue, subItem: "" }));
-                    }}
-                  >
-                    <option value="">{itemTypeMeta.categorySelectPlaceholder}</option>
-                    {mainItemOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                    <option value={CUSTOM_MAIN_VALUE}>{itemTypeMeta.addCategoryLabel}</option>
-                  </select>
-                )}
-                <p className="field-hint">{itemTypeMeta.categoryHint}</p>
+                  </div>
+                  <p className="field-hint">{itemTypeMeta.categoryHint}</p>
+                </div>
+                <div className="field">
+                  <label htmlFor="studioSubItem">{itemTypeMeta.nameLabel}</label>
+                  <input
+                    id="studioSubItem"
+                    type="text"
+                    placeholder={itemTypeMeta.namePlaceholder}
+                    value={form.subItem}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, subItem: event.target.value }))
+                    }
+                  />
+                </div>
               </div>
-            )}
 
-            <div className="field">
-              <label htmlFor="studioSubItem">{itemTypeMeta.nameLabel}</label>
-              <input
-                id="studioSubItem"
-                type="text"
-                placeholder={itemTypeMeta.namePlaceholder}
-                value={form.subItem}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, subItem: event.target.value }))
-                }
-              />
-            </div>
-          </div>
+              <div className="field-row">
+                <div className="field">
+                  <label htmlFor="studioSize">{itemTypeMeta.detailLabel}</label>
+                  <input
+                    id="studioSize"
+                    type="text"
+                    placeholder={itemTypeMeta.detailPlaceholder}
+                    value={form.size}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, size: event.target.value }))
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="studioPrice">Rate</label>
+                  <input
+                    id="studioPrice"
+                    type="number"
+                    min="0"
+                    value={form.price}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, price: event.target.value }))
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="studioStock">Stock</label>
+                  <input
+                    id="studioStock"
+                    type="number"
+                    min="0"
+                    value={form.stock}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, stock: event.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="field-row">
+                <div className="field">
+                  <label htmlFor="studioMainItem">{itemTypeMeta.categoryLabel}</label>
+                  {mainItemMode === "custom" ? (
+                    <>
+                      <input
+                        id="studioMainItem"
+                        type="text"
+                        placeholder={itemTypeMeta.categoryPlaceholder}
+                        value={form.mainItem}
+                        onChange={(event) =>
+                          setForm((prev) => ({ ...prev, mainItem: event.target.value }))
+                        }
+                      />
+                      <button
+                        className="btn ghost seller-inline-toggle"
+                        type="button"
+                        onClick={() => {
+                          setMainItemMode("select");
+                          setForm((prev) => ({ ...prev, mainItem: "", subItem: "" }));
+                        }}
+                      >
+                        {itemTypeMeta.selectCategoryLabel}
+                      </button>
+                    </>
+                  ) : (
+                    <select
+                      id="studioMainItem"
+                      value={mainItemSelectValue}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        if (nextValue === CUSTOM_MAIN_VALUE) {
+                          setMainItemMode("custom");
+                          setForm((prev) => ({ ...prev, mainItem: "", subItem: "" }));
+                          return;
+                        }
+                        setForm((prev) => ({ ...prev, mainItem: nextValue, subItem: "" }));
+                      }}
+                    >
+                      <option value="">{itemTypeMeta.categorySelectPlaceholder}</option>
+                      {mainItemOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                      <option value={CUSTOM_MAIN_VALUE}>{itemTypeMeta.addCategoryLabel}</option>
+                    </select>
+                  )}
+                  <p className="field-hint">{itemTypeMeta.categoryHint}</p>
+                </div>
+                <div className="field">
+                  <label htmlFor="studioSubItem">{itemTypeMeta.nameLabel}</label>
+                  <input
+                    id="studioSubItem"
+                    type="text"
+                    placeholder={itemTypeMeta.namePlaceholder}
+                    value={form.subItem}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, subItem: event.target.value }))
+                    }
+                  />
+                </div>
+              </div>
 
-          <div className="field-row">
-            <div className="field">
-              <label htmlFor="studioSize">{itemTypeMeta.detailLabel}</label>
-              <input
-                id="studioSize"
-                type="text"
-                placeholder={itemTypeMeta.detailPlaceholder}
-                value={form.size}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, size: event.target.value }))
-                }
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="studioPrice">Rate</label>
-              <input
-                id="studioPrice"
-                type="number"
-                min="0"
-                value={form.price}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, price: event.target.value }))
-                }
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="studioStock">Stock</label>
-              <input
-                id="studioStock"
-                type="number"
-                min="0"
-                value={form.stock}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, stock: event.target.value }))
-                }
-              />
-            </div>
-          </div>
+              <div className="field-row">
+                <div className="field">
+                  <label htmlFor="studioSize">{itemTypeMeta.detailLabel}</label>
+                  <input
+                    id="studioSize"
+                    type="text"
+                    placeholder={itemTypeMeta.detailPlaceholder}
+                    value={form.size}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, size: event.target.value }))
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="studioPrice">Rate</label>
+                  <input
+                    id="studioPrice"
+                    type="number"
+                    min="0"
+                    value={form.price}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, price: event.target.value }))
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="studioStock">Stock</label>
+                  <input
+                    id="studioStock"
+                    type="number"
+                    min="0"
+                    value={form.stock}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, stock: event.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+            </>
+          )}
 
           {duplicateWarning && <p className="field-hint">{duplicateWarning}</p>}
 
@@ -1201,34 +1530,35 @@ export default function SellerListedItems() {
               Cancel
             </button>
             <button className="btn primary" type="button" onClick={saveItemToDraft}>
-              {editingItemId ? `Update ${itemTypeMeta.title}` : `Add ${itemTypeMeta.title}`}
+              {editingItemId ? `Update ${itemTypeMeta.title}` : `Save ${itemTypeMeta.title}`}
             </button>
           </div>
         </article>
 
         <aside className="seller-studio-preview">
-          <h3>
-            {showBaseCategoryForm ? BASE_CATEGORY_COPY.singularTitle : itemTypeMeta.title} preview
-          </h3>
+          <h3>{itemTypeMeta.title} preview</h3>
           {previewImage ? (
             <img
               src={previewImage}
-              alt={`${
-                showBaseCategoryForm ? BASE_CATEGORY_COPY.singularTitle : itemTypeMeta.title
-              } preview`}
+              alt={`${itemTypeMeta.title} preview`}
               className="seller-studio-preview-main"
             />
           ) : (
             <div className="seller-studio-preview-main seller-preview-placeholder">
-              {showBaseCategoryForm ? BASE_CATEGORY_COPY.imageLabel : itemTypeMeta.imageLabel}
+              {itemTypeMeta.imageLabel}
             </div>
           )}
         </aside>
       </section>
 
-      <section className="seller-panel">
+      <section className="seller-panel seller-publish-panel">
         <div className="card-head">
-          <h3 className="card-title">Draft hamper entries</h3>
+          <div>
+            <h3 className="card-title">Publish hamper studio</h3>
+            <p className="field-hint">
+              Publish your base categories, base types, and hamper items from here after saving them.
+            </p>
+          </div>
           <button
             className="btn primary"
             type="button"
@@ -1256,100 +1586,7 @@ export default function SellerListedItems() {
         <p className="field-hint">
           Base categories without hamper base types stay hidden on the customer side.
         </p>
-
-        {draftItems.length === 0 && (
-          <p className="field-hint">No hamper bases or items in draft yet.</p>
-        )}
-
-        <div className="seller-draft-items">
-          {draftItems.map((item) => (
-            <article key={item.id} className="seller-draft-item-card">
-              {item.image ? (
-                <img
-                  src={item.image}
-                  alt={item.name}
-                  className="seller-draft-item-thumb"
-                />
-              ) : (
-                <div className="seller-draft-item-thumb seller-thumb-placeholder">No image</div>
-              )}
-              <div>
-                <p className="mini-title">{getItemDisplayName(item)}</p>
-                <p className="mini-sub">
-                  {getItemTypeMeta(item.type).categorySummaryLabel}: {item.mainItem || "Not set"}
-                </p>
-                <p className="mini-sub">
-                  Type: {item.type === "base" ? "Hamper Base" : "Hamper Item"}
-                </p>
-                <p className="mini-sub">
-                  {getItemTypeMeta(item.type).detailLabel}: {item.size || "General"}
-                </p>
-                <p className="mini-sub">Rate: ₹{Number(item.price || 0).toLocaleString("en-IN")}</p>
-                <p className="mini-sub">Stock: {Number(item.stock || 0)}</p>
-              </div>
-              <div className="seller-draft-item-actions">
-                <button className="btn ghost" type="button" onClick={() => editDraftItem(item)}>
-                  Update
-                </button>
-                <button className="btn ghost" type="button" onClick={() => removeDraftItem(item.id)}>
-                  Remove
-                </button>
-              </div>
-            </article>
-          ))}
-        </div>
       </section>
-
-      {!loading && !error && visibleItems.length === 0 && (
-        <p className="field-hint">No hamper bases or items listed yet.</p>
-      )}
-
-      <div className="seller-listed-grid">
-        {visibleItems.map((item) => {
-          const itemStock = Number(item.stock || 0);
-          const isOutOfStock = itemStock <= 0;
-          const statusClass = item.active
-            ? isOutOfStock
-              ? "warning"
-              : "available"
-            : "locked";
-          const statusLabel = item.active
-            ? isOutOfStock
-              ? "Out of stock"
-              : "Active"
-            : "Inactive";
-
-          return (
-            <article key={item.id} className="seller-listed-card">
-              {item.image ? (
-                <img className="seller-listed-thumb" src={item.image} alt={item.name} />
-              ) : (
-                <div className="seller-listed-thumb seller-thumb-placeholder">No image</div>
-              )}
-              <div className="seller-listed-body">
-                <p className="mini-title">{getItemDisplayName(item)}</p>
-                <p className="mini-sub">
-                  {getItemTypeMeta(item.type).categorySummaryLabel}: {item.mainItem || "Not set"}
-                </p>
-                <p className="mini-sub">
-                  Type: {item.type === "base" ? "Hamper Base" : "Hamper Item"}
-                </p>
-                <p className="mini-sub">
-                  {getItemTypeMeta(item.type).detailLabel}: {item.size || "General"}
-                </p>
-                <p className="mini-sub">
-                  Rate: ₹{Number(item.price || 0).toLocaleString("en-IN")}
-                </p>
-                <p className="mini-sub">Stock: {itemStock}</p>
-                <button className="btn ghost" type="button" onClick={() => editDraftItem(item)}>
-                  Update
-                </button>
-                <span className={`status-pill ${statusClass}`}>{statusLabel}</span>
-              </div>
-            </article>
-          );
-        })}
-      </div>
     </div>
   );
 }
