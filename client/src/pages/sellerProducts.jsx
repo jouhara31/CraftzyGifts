@@ -985,7 +985,7 @@ export default function SellerProducts() {
     setError("");
     setNotice("");
     const payload = buildProductPayload(editForm);
-    const validationError = validatePayload(payload);
+    const validationError = validatePayload(payload, { requireMinimumImages: true });
     if (validationError) {
       setError(validationError);
       return;
@@ -1645,4 +1645,3 @@ export default function SellerProducts() {
     </div>
   );
 }
-

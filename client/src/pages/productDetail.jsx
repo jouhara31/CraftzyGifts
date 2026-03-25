@@ -624,6 +624,21 @@ export default function ProductDetail() {
     navigate(`/customize/seller/${sellerId}?productId=${product._id}`);
   };
 
+  const handleOpenBuildYourOwnHamper = () => {
+    if (isPurchaseBlocked) {
+      setNotice(purchaseBlockedMessage);
+      return;
+    }
+    if (!sellerId) {
+      setNotice("Seller info missing. Unable to open hamper builder.");
+      return;
+    }
+    const params = new URLSearchParams();
+    params.set("mode", "build");
+    params.set("productId", product._id);
+    navigate(`/customize/seller/${sellerId}?${params.toString()}`);
+  };
+
   const guardPurchaseAction = () => {
     if (isPurchaseBlocked) {
       setNotice(purchaseBlockedMessage);
@@ -1035,6 +1050,19 @@ export default function ProductDetail() {
                     </button>
                   )}
                 </div>
+                {sellerId && (
+                  <div className="pdp-build-helper">
+                    <span>Want a fully custom hamper?</span>
+                    <button
+                      className="pdp-build-helper-link"
+                      type="button"
+                      disabled={isPurchaseBlocked || !sellerId}
+                      onClick={handleOpenBuildYourOwnHamper}
+                    >
+                      Build your own
+                    </button>
+                  </div>
+                )}
                 {isPurchaseBlocked && (
                   <p className="pdp-note">{purchaseBlockedMessage}</p>
                 )}

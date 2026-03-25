@@ -130,6 +130,56 @@ const normalizeProductPackagingStyles = (product = {}) =>
     })
     .filter((style) => style && style.active !== false);
 
+const buildOrderProductSnapshot = (product = {}) => ({
+  _id: product?._id,
+  name: String(product?.name || "").trim(),
+  description: String(product?.description || "").trim(),
+  category: String(product?.category || "").trim(),
+  subcategory: String(product?.subcategory || "").trim(),
+  image: String(product?.image || "").trim(),
+  images: Array.isArray(product?.images)
+    ? product.images
+        .map((entry) => String(entry || "").trim())
+        .filter(Boolean)
+        .slice(0, 5)
+    : [],
+  deliveryMinDays: Math.max(0, Number(product?.deliveryMinDays || 0)),
+  deliveryMaxDays: Math.max(0, Number(product?.deliveryMaxDays || 0)),
+  customizationCatalog: getProductCustomizationCatalog(product),
+  packagingStyles: normalizeProductPackagingStyles(product),
+});
+
+const resolveOrderProductForResponse = (order = {}) => {
+  const populatedProduct =
+    order?.product && typeof order.product === "object"
+      ? typeof order.product.toObject === "function"
+        ? order.product.toObject()
+        : order.product
+      : null;
+  const snapshot =
+    order?.productSnapshot && typeof order.productSnapshot === "object"
+      ? order.productSnapshot
+      : null;
+
+  if (!snapshot) return populatedProduct;
+  return {
+    ...snapshot,
+    ...(populatedProduct || {}),
+    _id: populatedProduct?._id || snapshot?._id || order?.product || undefined,
+  };
+};
+
+const serializeOrderForResponse = (order) => {
+  const plainOrder =
+    order && typeof order.toObject === "function" ? order.toObject() : { ...(order || {}) };
+  const resolvedProduct = resolveOrderProductForResponse(order);
+  delete plainOrder.productSnapshot;
+  if (resolvedProduct) {
+    plainOrder.product = resolvedProduct;
+  }
+  return plainOrder;
+};
+
 const resolveRequestedPackagingStyle = (product, customization = {}) => {
   const requestedId = String(customization?.packagingStyleId || "").trim();
   const requestedTitle = String(customization?.packagingStyleTitle || "").trim();
@@ -815,6 +865,7 @@ const buildOrderDraft = async ({
     customer: customerId,
     seller: product.seller,
     product: product._id,
+    productSnapshot: buildOrderProductSnapshot(product),
     quantity: parsedQuantity,
     price,
     makingCharge,
@@ -1506,7 +1557,7 @@ exports.getMyOrders = async (req, res) => {
       .populate("product")
       .populate("seller", "name storeName returnWindowDays")
       .sort({ createdAt: -1 });
-    res.json(orders);
+    res.json(orders.map((order) => serializeOrderForResponse(order)));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -1531,7 +1582,7 @@ exports.getSellerOrders = async (req, res) => {
       }
     }
 
-    res.json(orders);
+    res.json(orders.map((order) => serializeOrderForResponse(order)));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

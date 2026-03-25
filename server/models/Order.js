@@ -5,6 +5,7 @@ const orderSchema = new mongoose.Schema(
     customer: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     seller: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
+    productSnapshot: { type: mongoose.Schema.Types.Mixed, default: undefined },
     quantity: { type: Number, default: 1 },
     price: { type: Number, required: true },
     makingCharge: { type: Number, default: 0 },

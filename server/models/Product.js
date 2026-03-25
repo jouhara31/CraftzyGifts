@@ -37,6 +37,9 @@ const productSchema = new mongoose.Schema(
       {
         id: { type: String },
         name: { type: String },
+        kind: { type: String, enum: ["base_category", "item_collection"], default: "item_collection" },
+        description: { type: String },
+        image: { type: String },
         items: [
           {
             id: { type: String },

@@ -21,6 +21,7 @@ const OPTION_LABELS = {
 };
 const HIDDEN_EXISTING_OPTION_KEYS = new Set(["custom_hamper_items"]);
 const GENERIC_HAMPER_LABEL = "Build Your Own Hamper";
+const BASE_CATEGORY_KIND = "base_category";
 
 const formatPrice = (value) => Number(value || 0).toLocaleString("en-IN");
 const normalizeItemType = (value) =>
@@ -38,6 +39,12 @@ const getSellerCatalogCategories = (product) =>
     .map((category) => ({
       id: String(category?.id || ""),
       label: String(category?.name || "").trim(),
+      kind:
+        String(category?.kind || "").trim().toLowerCase() === BASE_CATEGORY_KIND
+          ? BASE_CATEGORY_KIND
+          : "item_collection",
+      image: String(category?.image || "").trim(),
+      description: String(category?.description || "").trim(),
       items: (Array.isArray(category?.items) ? category.items : [])
         .filter((item) => item?.active !== false)
         .map((item) => {
@@ -49,6 +56,7 @@ const getSellerCatalogCategories = (product) =>
             name,
             mainItem,
             subItem,
+            categoryId: String(category?.id || ""),
             type: normalizeItemType(item?.type),
             size: String(item?.size || "").trim(),
             price: Number(item?.price || 0),
@@ -60,13 +68,16 @@ const getSellerCatalogCategories = (product) =>
         })
         .filter((item) => item.id && item.name),
     }))
-    .filter((category) => category.id && category.label && category.items.length > 0);
+    .filter((category) => category.id && category.label);
 
 const getSellerCatalogItems = (product) =>
   getSellerCatalogCategories(product).flatMap((category) =>
     category.items.map((item) => ({
       ...item,
       category: category.label,
+      categoryKind: category.kind,
+      categoryImage: category.image,
+      categoryDescription: category.description,
     }))
   );
 
@@ -355,6 +366,10 @@ export default function Customization() {
     () => getSellerCatalogCategories(existingProduct),
     [existingProduct]
   );
+  const sellerCatalogCategories = useMemo(
+    () => getSellerCatalogCategories(product),
+    [product]
+  );
   const sellerCatalogItems = useMemo(
     () => getSellerCatalogItems(product),
     [product]
@@ -368,6 +383,26 @@ export default function Customization() {
     [sellerCatalogItems]
   );
   const sellerBaseGroups = useMemo(() => {
+    const explicitBaseGroups = sellerCatalogCategories
+      .filter((category) => category.kind === BASE_CATEGORY_KIND)
+      .map((category) => {
+        const variants = category.items.filter((item) => item.type === "base");
+        return {
+          key: String(category.id || category.label).trim() || category.label.toLowerCase(),
+          mainItem: category.label,
+          thumbnail:
+            category.image ||
+            variants.find((item) => item.image)?.image ||
+            getProductImage(product),
+          description:
+            category.description ||
+            `${variants.length} type${variants.length > 1 ? "s" : ""} available`,
+          variants,
+        };
+      })
+      .filter((group) => group.mainItem && group.variants.length > 0);
+    if (explicitBaseGroups.length > 0) return explicitBaseGroups;
+
     const groups = new Map();
     sellerBaseItems.forEach((item) => {
       const mainItem = normalizeMainItem(item.mainItem, item.name);
@@ -395,7 +430,7 @@ export default function Customization() {
         group.description ||
         `${group.variants.length} type${group.variants.length > 1 ? "s" : ""} available`,
     }));
-  }, [sellerBaseItems]);
+  }, [product, sellerBaseItems, sellerCatalogCategories]);
   const sellerBaseVariants = useMemo(() => {
     const selectedGroup = sellerBaseGroups.find(
       (group) => group.mainItem === selectedSellerBaseMain
@@ -854,10 +889,11 @@ export default function Customization() {
       <Header />
       <div className="section-head">
         <div>
-          <h2>Customize hamper</h2>
+          <h2>{isBuildOnly ? "Build your own hamper" : "Customize hamper"}</h2>
           <p>
-            Select a customization path to continue: refine preset options or
-            build a hamper from scratch.
+            {isBuildOnly
+              ? "Choose items listed by this seller and build a hamper from scratch."
+              : "Select a customization path to continue: refine preset options or build a hamper from scratch."}
           </p>
         </div>
         <Link

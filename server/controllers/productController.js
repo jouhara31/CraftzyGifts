@@ -12,8 +12,16 @@ const MAX_PRODUCT_NAME_LENGTH = 120;
 const MAX_PRODUCT_DESCRIPTION_LENGTH = 2000;
 const MAX_CATEGORY_NAME_LENGTH = 60;
 const MAX_SUBCATEGORY_NAME_LENGTH = 60;
+const MIN_PRODUCT_IMAGES = 3;
 const RATING_PRIOR_COUNT = 8;
 const GLOBAL_RATING_CACHE_TTL_MS = 5 * 60 * 1000;
+const PRODUCT_DELETE_BLOCKING_STATUSES = [
+  "pending_payment",
+  "placed",
+  "processing",
+  "shipped",
+  "return_requested",
+];
 let globalRatingSummaryCache = {
   expiresAt: 0,
   value: null,
@@ -269,6 +277,13 @@ const parseItemType = (value, fallback = "item") => {
   return fallback;
 };
 
+const parseCatalogCategoryKind = (value, fallback = "item_collection") => {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "base_category") return "base_category";
+  if (text === "item_collection") return "item_collection";
+  return fallback;
+};
+
 const parseItemSource = (value, fallback = "custom") => {
   const text = String(value || "").trim().toLowerCase();
   if (text === "admin") return "admin";
@@ -355,6 +370,10 @@ const parseCustomizationCatalog = (value, fallback = []) => {
     .map((category, categoryIndex) => {
       const name = String(category?.name || "").trim();
       const categoryId = String(category?.id || `cat_${categoryIndex}`).trim();
+      const kind = parseCatalogCategoryKind(
+        category?.kind,
+        categoryId === "custom_hamper_items" ? "item_collection" : "base_category"
+      );
       if (!name) return null;
 
       const items = Array.isArray(category?.items)
@@ -390,11 +409,14 @@ const parseCustomizationCatalog = (value, fallback = []) => {
             .filter(Boolean)
         : [];
 
-      if (items.length === 0) return null;
+      if (items.length === 0 && kind !== "base_category") return null;
 
       return {
         id: categoryId,
         name,
+        kind,
+        description: String(category?.description || "").trim(),
+        image: parseImageSource(category?.image, ""),
         items,
       };
     })
@@ -1220,8 +1242,10 @@ exports.createProduct = async (req, res) => {
     }
     const packagingStyles = parsePackagingStyles(req.body.packagingStyles, []);
     const images = parseImageUrls(req.body.images, []);
-    if (images.length < 3) {
-      return res.status(400).json({ message: "Upload at least 3 product images." });
+    if (images.length < MIN_PRODUCT_IMAGES) {
+      return res.status(400).json({
+        message: `Upload at least ${MIN_PRODUCT_IMAGES} product images.`,
+      });
     }
     const status = parseProductStatus(req.body.status, "active");
     const customizationCatalog = isCustomizable
@@ -1437,6 +1461,16 @@ exports.updateProduct = async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(updates, "images")) {
       updates.images = parseImageUrls(updates.images, product.images || []);
     }
+    if (Object.prototype.hasOwnProperty.call(updates, "images")) {
+      const finalImages = Array.isArray(updates.images)
+        ? updates.images
+        : parseImageUrls(product.images, product.image ? [product.image] : []);
+      if (finalImages.length < MIN_PRODUCT_IMAGES) {
+        return res.status(400).json({
+          message: `Upload at least ${MIN_PRODUCT_IMAGES} product images.`,
+        });
+      }
+    }
     if (Object.prototype.hasOwnProperty.call(updates, "customizationCatalog")) {
       updates.customizationCatalog = parseCustomizationCatalog(
         updates.customizationCatalog,
@@ -1498,6 +1532,18 @@ exports.deleteProduct = async (req, res) => {
     if (!product) return res.status(404).json({ message: "Product not found" });
     if (product.seller.toString() !== req.user.id) {
       return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const activeOrderCount = await Order.countDocuments({
+      product: product._id,
+      status: { $in: PRODUCT_DELETE_BLOCKING_STATUSES },
+    });
+    if (activeOrderCount > 0) {
+      const orderLabel =
+        activeOrderCount === 1 ? "1 active order" : `${activeOrderCount} active orders`;
+      return res.status(409).json({
+        message: `This product has ${orderLabel}. Complete or cancel those orders before deleting it.`,
+      });
     }
 
     await product.deleteOne();
