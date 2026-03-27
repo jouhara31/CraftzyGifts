@@ -19,6 +19,13 @@ import {
   openRazorpayCheckout,
   readStoredUserProfile,
 } from "../utils/razorpayCheckout";
+import {
+  buildAddonItemSummary,
+  buildBaseSelectionSummary,
+  getBulkHamperCount,
+  getCustomizationBaseItems,
+  isBulkHamperCustomization,
+} from "../utils/hamperBuildSummary";
 
 import { API_URL } from "../apiBase";
 const isGenericHamperItem = (item) =>
@@ -693,6 +700,40 @@ export default function Checkout() {
             <p className="card-title">Order summary</p>
             <span className="chip">{items.length} items</span>
           </div>
+          {items.length > 0 && (
+            <div className="checkout-item-summary-list">
+              {items.map((item) => {
+                const isBulkBuild = isBulkHamperCustomization(item.customization);
+                const totalHampers = getBulkHamperCount(item.customization);
+                const baseSelections = buildBaseSelectionSummary(item.customization, 3);
+                const addonSelections = buildAddonItemSummary(item.customization, 3);
+                const hasBaseSelection = getCustomizationBaseItems(item.customization).length > 0;
+
+                return (
+                  <div key={`checkout-item-${item.id}`} className="checkout-item-summary">
+                    <strong>{item.name || "Hamper"}</strong>
+                    {hasBaseSelection && (
+                      <p>
+                        {isBulkBuild && totalHampers > 0
+                          ? `${totalHampers} hampers selected`
+                          : "Single hamper build"}
+                      </p>
+                    )}
+                    {baseSelections && (
+                      <p>{isBulkBuild ? `Base mix: ${baseSelections}` : `Base: ${baseSelections}`}</p>
+                    )}
+                    {addonSelections && (
+                      <p>
+                        {isBulkBuild
+                          ? `Shared items: ${addonSelections}`
+                          : `Items: ${addonSelections}`}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="price-summary">
             <div className="price-row">
               <span>Hamper price</span>
@@ -802,7 +843,7 @@ export default function Checkout() {
                   ))}
                 </div>
               ) : (
-                <p className="field-hint">No similar products from this seller yet.</p>
+                <p className="field-hint">More thoughtful picks from this store will appear here soon.</p>
               )}
             </section>
           )}

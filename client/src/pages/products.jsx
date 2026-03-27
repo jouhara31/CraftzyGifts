@@ -16,6 +16,8 @@ import {
   isPurchaseBlockedRole,
   readStoredSessionClaims,
 } from "../utils/authRoute";
+import { fetchJsonCached } from "../utils/jsonCache";
+import { prefetchProductDetail } from "../utils/productDetailCache";
 
 import { API_URL } from "../apiBase";
 const PAGE_SIZE = 16;
@@ -489,9 +491,9 @@ export default function Products() {
         params.set("page", String(page));
         params.set("limit", String(PAGE_SIZE));
 
-        const res = await fetch(`${API_URL}/api/products?${params.toString()}`);
-        if (!res.ok) throw new Error("Unable to fetch products");
-        const data = await res.json();
+        const data = await fetchJsonCached(`${API_URL}/api/products?${params.toString()}`, {
+          ttlMs: 45_000,
+        });
         if (ignore) return;
         const normalized = normalizeProductsResponse(data);
 
@@ -812,11 +814,18 @@ export default function Products() {
 
           {catalog.items.length === 0 && !loading ? (
             <div className="catalog-empty">
-              <h3>No products found</h3>
+              <h3>No matching gifts found</h3>
+              <p>Try a different category, search term, or price range to discover more curated finds.</p>
             </div>
           ) : (
             <div className="product-grid catalog-product-grid">
               {catalog.items.map((item) => {
+                const prefetchCurrentProduct = () => {
+                  if (!item?._id) return;
+                  prefetchProductDetail(String(item._id), {
+                    token: localStorage.getItem("token"),
+                  });
+                };
                 const sellerName =
                   item?.seller?.storeName || item?.seller?.name || "Craftzy seller";
                 const reviewStats =
@@ -872,7 +881,13 @@ export default function Products() {
                           <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09A6 6 0 0 1 16.5 3C19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35Z" />
                         </svg>
                       </button>
-                      <Link className="catalog-image-link" to={`/products/${item._id}`}>
+                      <Link
+                        className="catalog-image-link"
+                        to={`/products/${item._id}`}
+                        onMouseEnter={prefetchCurrentProduct}
+                        onFocus={prefetchCurrentProduct}
+                        onTouchStart={prefetchCurrentProduct}
+                      >
                         <ProductHoverImage
                           className="product-image"
                           product={item}
@@ -883,7 +898,14 @@ export default function Products() {
 
                     <div className="product-body catalog-product-body">
                       <h3 className="catalog-product-title">
-                        <Link to={`/products/${item._id}`}>{item.name}</Link>
+                        <Link
+                          to={`/products/${item._id}`}
+                          onMouseEnter={prefetchCurrentProduct}
+                          onFocus={prefetchCurrentProduct}
+                          onTouchStart={prefetchCurrentProduct}
+                        >
+                          {item.name}
+                        </Link>
                       </h3>
                       <p className="catalog-product-seller">by {sellerName}</p>
                       {totalRatingVotes > 0 ? (

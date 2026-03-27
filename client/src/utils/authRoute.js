@@ -47,10 +47,10 @@ export const isPurchaseBlockedRole = (role) =>
 export const getPurchaseBlockedMessage = (role) => {
   const normalizedRole = normalizeRole(role);
   if (normalizedRole === "admin") {
-    return "Admin accounts cannot place orders. Use a customer account.";
+    return "Orders can be placed only from a customer account. Please switch accounts to continue.";
   }
   if (normalizedRole === "seller") {
-    return "Seller account cannot place orders. Use a customer account.";
+    return "Orders can be placed only from a customer account. Please switch accounts to continue.";
   }
   return "";
 };

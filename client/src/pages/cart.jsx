@@ -5,10 +5,18 @@ import { getProductImage } from "../utils/productMedia";
 import { clearBuyNowCheckoutItem } from "../utils/buyNowCheckout";
 import { addToCart, getCart, removeFromCart, updateQuantity } from "../utils/cart";
 import {
+  buildAddonItemSummary,
+  buildBaseSelectionSummary,
+  getBulkHamperCount,
+  getCustomizationBaseItems,
+  isBulkHamperCustomization,
+} from "../utils/hamperBuildSummary";
+import {
   getPurchaseBlockedMessage,
   isPurchaseBlockedRole,
   readStoredSessionClaims,
 } from "../utils/authRoute";
+import { fetchJsonCached } from "../utils/jsonCache";
 
 import { API_URL } from "../apiBase";
 
@@ -41,7 +49,7 @@ const getDeliveryText = (item) => {
   if (max > 0) {
     return `Delivery: up to ${max} day(s)`;
   }
-  return "Delivery timeline will be shared by seller";
+  return "Delivery timeline will be confirmed soon";
 };
 
 const getRecoVisibleCount = () => {
@@ -92,11 +100,9 @@ export default function Cart() {
           limit: "18",
           sort: "newest",
         });
-        const res = await fetch(`${API_URL}/api/products?${params.toString()}`);
-        if (!res.ok) {
-          throw new Error("Recommendations could not be loaded right now.");
-        }
-        const data = await res.json();
+        const data = await fetchJsonCached(`${API_URL}/api/products?${params.toString()}`, {
+          ttlMs: 60_000,
+        });
         if (ignore) return;
         const products = Array.isArray(data)
           ? data
@@ -216,8 +222,8 @@ export default function Cart() {
               🛒
             </span>
             <div>
-              <h2>Your cart is empty</h2>
-              <p>Add your favorite gifts to get started.</p>
+              <h2>Your cart is waiting for something special</h2>
+              <p>Add handcrafted finds and curated hampers to begin your order.</p>
             </div>
           </div>
           <button
@@ -225,7 +231,7 @@ export default function Cart() {
             type="button"
             onClick={() => navigate("/products")}
           >
-            Go to products
+            Browse collections
           </button>
         </div>
       </div>
@@ -245,7 +251,7 @@ export default function Cart() {
             <span className="cart-keep-shopping-icon" aria-hidden="true">
               ←
             </span>
-            <span>Keep shopping</span>
+            <span>Continue browsing</span>
           </button>
         </div>
 
@@ -260,6 +266,11 @@ export default function Cart() {
             const selectedOptions = Object.values(
               item.customization?.selectedOptions || {}
             ).filter(Boolean);
+            const baseSelections = buildBaseSelectionSummary(item.customization, 3);
+            const addonSelections = buildAddonItemSummary(item.customization, 3);
+            const totalHampers = getBulkHamperCount(item.customization);
+            const isBulkBuild = isBulkHamperCustomization(item.customization);
+            const hasBaseSelection = getCustomizationBaseItems(item.customization).length > 0;
 
             return (
               <article key={productId || item.name} className="cart-line-item">
@@ -290,6 +301,26 @@ export default function Cart() {
                   {selectedOptions.length > 0 && (
                     <p className="cart-line-meta">
                       Options: {selectedOptions.join(", ")}
+                    </p>
+                  )}
+
+                  {hasBaseSelection && (
+                    <p className="cart-line-meta">
+                      {isBulkBuild && totalHampers > 0
+                        ? `Hamper count: ${totalHampers}`
+                        : "Base selected"}
+                    </p>
+                  )}
+
+                  {baseSelections && (
+                    <p className="cart-line-meta">
+                      {isBulkBuild ? "Base mix" : "Base"}: {baseSelections}
+                    </p>
+                  )}
+
+                  {addonSelections && (
+                    <p className="cart-line-meta">
+                      {isBulkBuild ? "Shared items" : "Items"}: {addonSelections}
                     </p>
                   )}
 

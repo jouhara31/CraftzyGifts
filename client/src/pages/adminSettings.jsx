@@ -4,7 +4,7 @@ import AdminSidebarLayout from "../components/AdminSidebarLayout";
 
 import { API_URL } from "../apiBase";
 const DEFAULT_SETTINGS = {
-  platformName: "CraftyGifts",
+  platformName: "CraftzyGifts",
   currencyCode: "INR",
   lowStockThreshold: 5,
   autoApproveSellers: false,

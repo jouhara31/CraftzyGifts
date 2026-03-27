@@ -8,6 +8,15 @@ import {
   removePendingPaymentGroup,
 } from "../utils/paymentTracking";
 import {
+  buildBaseSelectionSummary,
+  formatBaseSelectionLabel,
+  getBulkBaseSelections,
+  getBulkHamperCount,
+  getCustomizationAddonItems,
+  getCustomizationBaseItems,
+  isBulkHamperCustomization,
+} from "../utils/hamperBuildSummary";
+import {
   openRazorpayCheckout,
   readStoredUserProfile,
 } from "../utils/razorpayCheckout";
@@ -795,7 +804,7 @@ export default function Orders() {
       {
         label: "Total orders",
         value: String(orders.length),
-        note: orders.length === 1 ? "One order placed so far" : "Orders placed with CraftyGifts",
+        note: orders.length === 1 ? "One order placed so far" : "Orders placed through CraftzyGifts",
       },
       {
         label: "In progress",
@@ -892,9 +901,11 @@ export default function Orders() {
             .filter(([, value]) => Boolean(String(value || "").trim()))
             .map(([key, value]) => resolveOptionSelection(order.product, key, value))
             .filter((entry) => entry.value);
-          const selectedItems = Array.isArray(order.customization?.selectedItems)
-            ? order.customization.selectedItems
-            : [];
+          const baseSelections = getBulkBaseSelections(order.customization);
+          const selectedBaseItems = getCustomizationBaseItems(order.customization);
+          const selectedAddonItems = getCustomizationAddonItems(order.customization);
+          const isBulkBuild = isBulkHamperCustomization(order.customization);
+          const bulkHamperCount = getBulkHamperCount(order.customization);
           const shippingAddressLines = formatAddressLines(order?.shippingAddress);
           const noteLines = [
             order.customization?.wishCardText
@@ -908,16 +919,24 @@ export default function Orders() {
               : "",
           ].filter(Boolean);
           const detailCards = [
+            baseSelections.length > 0
+              ? {
+                  title: isBulkBuild ? "Base distribution" : "Selected base",
+                  lines: baseSelections.map(
+                    (item) => `${formatBaseSelectionLabel(item)} x${asNumber(item.quantity, 1)}`
+                  ),
+                }
+              : null,
             selectedOptionEntries.length > 0
               ? {
                   title: "Selected options",
                   lines: selectedOptionEntries.map((entry) => `${entry.label}: ${entry.value}`),
                 }
               : null,
-            selectedItems.length > 0
+            selectedAddonItems.length > 0
               ? {
-                  title: "Selected hamper items",
-                  lines: selectedItems.map(
+                  title: isBulkBuild ? "Shared hamper items" : "Selected hamper items",
+                  lines: selectedAddonItems.map(
                     (item) =>
                       `${item.name || item.mainItem || "Item"} x${asNumber(item.quantity, 1)}`
                   ),
@@ -941,12 +960,21 @@ export default function Orders() {
           const orderCode = formatShortOrderCode(orderId);
           const orderDate = formatDate(order?.createdAt);
           const deliveryWindow = formatDeliveryWindow(order?.product);
-          const sellerName = asText(order?.seller?.storeName || order?.seller?.name) || "CraftyGifts seller";
+          const sellerName =
+            asText(order?.seller?.storeName || order?.seller?.name) || "CraftzyGifts store";
           const metaItems = [
             {
               label: "Quantity",
-              value: String(asNumber(order?.quantity, 1)),
-              sub: "Gift units",
+              value:
+                isBulkBuild && bulkHamperCount > 0
+                  ? String(bulkHamperCount)
+                  : String(asNumber(order?.quantity, 1)),
+              sub:
+                isBulkBuild && bulkHamperCount > 0
+                  ? "Custom hampers"
+                  : selectedBaseItems.length > 0
+                    ? "Gift units"
+                    : "Gift units",
             },
             {
               label: "Order total",
@@ -974,7 +1002,14 @@ export default function Orders() {
             ? "Custom hamper"
             : asText(order?.product?.category) || "Curated gift";
           const productDescription = isGenericHamper
-            ? "Seller hamper customization order."
+            ? isBulkBuild && bulkHamperCount > 0
+              ? [
+                  `${bulkHamperCount} hampers planned.`,
+                  buildBaseSelectionSummary(order.customization, 3),
+                ]
+                  .filter(Boolean)
+                  .join(" ")
+              : "Seller hamper customization order."
             : asText(order?.product?.description) || buildOrderNote(order);
           const productImageSource = isGenericHamper
             ? getProductImage({ category: "customgifts" })

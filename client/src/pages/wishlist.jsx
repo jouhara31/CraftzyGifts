@@ -80,12 +80,12 @@ export default function Wishlist() {
         <section className="wishlist-empty-state">
           <div className="section-head wishlist-head wishlist-head-empty">
             <div>
-              <p className="wishlist-kicker">Saved For Later</p>
-              <h2>Your wishlist is empty</h2>
-              <p>Save your favorite hampers and gifts here.</p>
+              <p className="wishlist-kicker">Saved Selections</p>
+              <h2>Your saved collection is empty</h2>
+              <p>Keep the gifts you love in one elegant shortlist.</p>
             </div>
             <Link className="link wishlist-head-link" to="/products">
-              Browse products
+              Explore collections
             </Link>
           </div>
           <div className="wishlist-empty-card">
@@ -94,19 +94,19 @@ export default function Wishlist() {
                 ❤
               </span>
               <div>
-                <h3>No saved items yet</h3>
+                <h3>No saved pieces yet</h3>
                 <p>
-                  Tap the heart icon on any product and it will show up here for
-                  quick access later.
+                  Tap the heart on any piece you love and it will stay here for
+                  an easy return later.
                 </p>
               </div>
             </div>
             <div className="wishlist-empty-actions">
               <Link className="btn primary" to="/products">
-                Explore products
+                Explore gifts
               </Link>
               <Link className="btn ghost" to="/">
-                Back to home
+                Return home
               </Link>
             </div>
           </div>
@@ -122,13 +122,13 @@ export default function Wishlist() {
         <div className="section-head wishlist-head">
           <div>
             <p className="wishlist-kicker">Saved Collection</p>
-            <h2>Your wishlist</h2>
-            <p>Keep track of your favorite products.</p>
+            <h2>Your saved collection</h2>
+            <p>Revisit favorite finds, shortlist gifting ideas, and compare them with ease.</p>
           </div>
           <div className="wishlist-head-actions">
             <span className="chip wishlist-count">{items.length} saved</span>
             <Link className="link wishlist-head-link" to="/products">
-              Continue shopping
+              Continue browsing
             </Link>
           </div>
         </div>
@@ -152,7 +152,7 @@ export default function Wishlist() {
                     <div className="wishlist-title-block">
                       <h3>{item.name}</h3>
                       <p className="wishlist-card-note">
-                        Ready when you want to revisit it.
+                        Saved here for your next thoughtful pick.
                       </p>
                     </div>
                     <span className="chip wishlist-chip">{item.tag || "Favorite"}</span>

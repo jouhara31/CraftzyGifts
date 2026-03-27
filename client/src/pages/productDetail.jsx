@@ -618,7 +618,7 @@ export default function ProductDetail() {
       return;
     }
     if (!sellerId) {
-      setNotice("Seller info missing. Unable to open customization.");
+      setNotice("Store details are unavailable right now. Please try customization again shortly.");
       return;
     }
     navigate(`/customize/seller/${sellerId}?productId=${product._id}`);
@@ -630,7 +630,7 @@ export default function ProductDetail() {
       return;
     }
     if (!sellerId) {
-      setNotice("Seller info missing. Unable to open hamper builder.");
+      setNotice("Store details are unavailable right now. The hamper builder will be back shortly.");
       return;
     }
     const params = new URLSearchParams();
@@ -730,7 +730,7 @@ export default function ProductDetail() {
                       ))}
                     </ul>
                   ) : (
-                    <p className="field-hint">Seller has not added inside-item details yet.</p>
+                    <p className="field-hint">Inside-item details will appear here soon.</p>
                   )}
                   {detailPoints.length > 0 && (
                     <ul className="pdp-detail-list pdp-detail-list-compact">
@@ -766,7 +766,7 @@ export default function ProductDetail() {
                   <p className="pdp-price-meta-sub">
                     {deliveryWindowText
                       ? `Delivery in ${deliveryWindowText}`
-                      : "Delivery timeline by seller"}
+                      : "Delivery timeline will be confirmed soon"}
                   </p>
                 </div>
               </div>
@@ -866,7 +866,7 @@ export default function ProductDetail() {
                   ))}
                 </div>
               ) : (
-                <p className="field-hint">Seller has not added occasion tags yet.</p>
+                <p className="field-hint">Occasion ideas will appear here soon.</p>
               )}
             </div>
 
@@ -916,7 +916,7 @@ export default function ProductDetail() {
                   ))}
                 </div>
               ) : (
-                <p className="field-hint">Seller has not added packaging styles yet.</p>
+                <p className="field-hint">Packaging styles will appear here soon.</p>
               )}
             </div>
           </div>
@@ -1092,14 +1092,14 @@ export default function ProductDetail() {
                     <p className="field-hint">
                       {sellerRatingCount > 0
                         ? `${sellerDisplayRating.toFixed(1)}★ from ${sellerRatingCount} ratings`
-                        : "No seller ratings yet"}
+                        : "Customer ratings will appear here soon"}
                     </p>
                   </div>
                 </div>
                 {sellerAbout ? (
                   <p className="pdp-seller-about">{sellerAbout}</p>
                 ) : (
-                  <p className="pdp-seller-about">Curated gifting store on CraftyGifts.</p>
+                  <p className="pdp-seller-about">A thoughtfully curated gifting studio on CraftzyGifts.</p>
                 )}
                 <div className="pdp-seller-meta">
                   <p>
@@ -1133,7 +1133,7 @@ export default function ProductDetail() {
                     </span>
                     {deliveryWindowText
                       ? `Delivery in ${deliveryWindowText}`
-                      : "Delivery timeline by seller"}
+                      : "Delivery timeline will be confirmed soon"}
                   </p>
                 </div>
                 <button

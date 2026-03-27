@@ -7,6 +7,8 @@ import {
   buildCategoryPath,
   loadCategoryTree,
 } from "../utils/categoryMaster";
+import { prefetchProductDetail } from "../utils/productDetailCache";
+import { fetchJsonCached } from "../utils/jsonCache";
 import { getCategoryImage } from "../utils/productMedia";
 
 import { API_URL } from "../apiBase";
@@ -50,16 +52,14 @@ export default function Home() {
           limit: "4",
           sort: "newest",
         });
-        const res = await fetch(`${API_URL}/api/products?${params.toString()}`);
-        if (!res.ok) {
-          throw new Error("Featured products could not be loaded right now.");
-        }
-        const data = await res.json();
+        const data = await fetchJsonCached(`${API_URL}/api/products?${params.toString()}`, {
+          ttlMs: 60_000,
+        });
         const items = Array.isArray(data) ? data : data?.items;
         setFeaturedProducts(Array.isArray(items) ? items : []);
       } catch {
         setFeaturedProducts([]);
-        setFeaturedError("Featured products could not be loaded right now.");
+        setFeaturedError("Our featured collection is taking a moment to load.");
       } finally {
         setFeaturedLoading(false);
       }
@@ -85,20 +85,20 @@ export default function Home() {
 
   const features = [
     {
-      title: "Curated Craft Collections",
-      text: "Handpicked gifts for birthdays, weddings, festivals, and more.",
+      title: "Curated Gift Collections",
+      text: "Handpicked pieces for birthdays, weddings, festivals, and thoughtful everyday gifting.",
       image: "/images/about/handcraft.png",
       path: "/products",
     },
     {
-      title: "Custom Hampers",
-      text: "Build a hamper with selected items, notes, and add‑ons.",
+      title: "Bespoke Hampers",
+      text: "Design a custom hamper with handpicked treats, keepsakes, and a personal note.",
       image: "/images/about/customhamper.png",
       path: "/products?custom=1",
     },
     {
-      title: "Secure Checkout",
-      text: "Safe payments, clear tracking, and dependable support.",
+      title: "Seamless Checkout",
+      text: "Trusted payments, clear order updates, and dependable support from start to doorstep.",
       image: "/images/about/secure.png",
       path: "/cart",
     },
@@ -130,21 +130,21 @@ export default function Home() {
     {
       kicker: "SEASONAL PICKS",
       title: "Celebrate love\nwith curated\nhampers",
-      text: "Limited-edition bundles, handwritten notes, and handcrafted keepsakes.",
+      text: "Limited-edition hampers, handwritten notes, and artisan keepsakes made for unforgettable moments.",
       image: "/images/slide1.png",
       alt: "Romantic gift hamper collection",
     },
     {
       kicker: "PERSONALIZED GIFTS",
       title: "Design a gift box\nmade just for them",
-      text: "Pick custom items, add a heartfelt message, and create a memorable reveal.",
+      text: "Choose meaningful details, add a heartfelt message, and create a gifting experience made just for them.",
       image: "/images/slide%202.png",
       alt: "Customized gift hamper",
     },
     {
       kicker: "CORPORATE ORDERS",
       title: "Premium gifting\nfor teams and clients",
-      text: "Elegant bulk gifting with artisan products and reliable delivery timelines.",
+      text: "Refined bulk gifting with artisan products, polished presentation, and reliable delivery timelines.",
       image: "/images/slide3.png",
       alt: "Corporate gift hamper set",
     },
@@ -243,16 +243,16 @@ export default function Home() {
             <span> Gifts</span>
           </h1>
           <p className="hero-subtitle">
-            Your online marketplace for handmade crafts, personalized gifts, and
-            specially curated gift hampers for birthdays, weddings, festivals,
-            and every special moment.
+            Discover a curated destination for handmade gifts, bespoke hampers,
+            and elegant keepsakes crafted for life&apos;s most meaningful
+            celebrations.
           </p>
           <div className="hero-actions">
             <Link className="btn primary" to={shopLink}>
-              Shop Now
+              Explore Collections
             </Link>
             <Link className="btn ghost" to="/register">
-              Create Account
+              Create Your Account
             </Link>
           </div>
         </div>
@@ -280,8 +280,8 @@ export default function Home() {
       <section className="section">
         <div className="section-head">
           <div>
-            <h2>Perfect gifts for every occasion</h2>
-            <p>Browse curated collections for life&apos;s special moments.</p>
+            <h2>Thoughtful gifts for every occasion</h2>
+            <p>Browse beautifully curated collections for life&apos;s most memorable moments.</p>
           </div>
         </div>
         <div className="occasion-grid">
@@ -307,11 +307,11 @@ export default function Home() {
       <section className="section" id="featured">
         <div className="section-head">
           <div>
-            <h2>Featured crafts</h2>
-            <p>Handpicked collection of our artisans&apos; finest work.</p>
+            <h2>Featured collections</h2>
+            <p>A refined edit of artisan-made gifts chosen for today&apos;s celebrations.</p>
           </div>
           <Link className="link" to="/products">
-            View all products
+            View the full collection
           </Link>
         </div>
         {featuredLoading ? (
@@ -323,28 +323,56 @@ export default function Home() {
             {featuredProducts.map((item) => {
               const isCustomizable = Boolean(item.isCustomizable);
               const detailLink = item._id ? `/products/${item._id}` : "/products";
+              const prefetchCurrentProduct = () => {
+                if (!item?._id) return;
+                prefetchProductDetail(String(item._id), {
+                  token: localStorage.getItem("token"),
+                });
+              };
               return (
                 <article key={item._id || item.name} className="product-card">
                   <div className="featured-crafts-media">
-                    <ProductHoverImage
-                      className="product-image large"
-                      product={item}
-                      alt={item.name}
-                    />
+                    <Link
+                      to={detailLink}
+                      onMouseEnter={prefetchCurrentProduct}
+                      onFocus={prefetchCurrentProduct}
+                      onTouchStart={prefetchCurrentProduct}
+                    >
+                      <ProductHoverImage
+                        className="product-image large"
+                        product={item}
+                        alt={item.name}
+                      />
+                    </Link>
                     <span className="chip featured-crafts-badge">
                       {isCustomizable ? "Customizable" : "Ready-made"}
                     </span>
                   </div>
                   <div className="product-body">
                     <div className="product-top">
-                      <h3>{item.name}</h3>
+                      <h3>
+                        <Link
+                          to={detailLink}
+                          onMouseEnter={prefetchCurrentProduct}
+                          onFocus={prefetchCurrentProduct}
+                          onTouchStart={prefetchCurrentProduct}
+                        >
+                          {item.name}
+                        </Link>
+                      </h3>
                     </div>
                     <div className="product-meta">
                       <span>{item.category || "Hamper"}</span>
                     </div>
                     <div className="product-price">
                       <strong>₹{formatPrice(item.price)}</strong>
-                      <Link className="btn ghost" to={detailLink}>
+                      <Link
+                        className="btn ghost"
+                        to={detailLink}
+                        onMouseEnter={prefetchCurrentProduct}
+                        onFocus={prefetchCurrentProduct}
+                        onTouchStart={prefetchCurrentProduct}
+                      >
                         View Details
                       </Link>
                     </div>
@@ -354,7 +382,7 @@ export default function Home() {
             })}
           </div>
         ) : (
-          <p className="field-hint">No featured products available right now.</p>
+          <p className="field-hint">Fresh featured pieces will appear here shortly.</p>
         )}
       </section>
 
@@ -365,10 +393,9 @@ export default function Home() {
           <div>
             <h2>About Us</h2>
             <p>
-              CraftzyGifts is a curated gifting marketplace that brings together
-              verified artisans and thoughtful hamper creators. We help you find
-              personalized, handcrafted gifts that feel memorable for every
-              occasion.
+              CraftzyGifts brings together verified artisans and thoughtful
+              hamper creators to offer gifts that feel personal, polished, and
+              memorable for every occasion.
             </p>
           </div>
         </div>

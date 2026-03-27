@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
 import ProductHoverImage from "../components/ProductHoverImage";
+import { optimizeImageFile } from "../utils/imageUpload";
 import { getProductImage } from "../utils/productMedia";
 import { prefetchProductDetail } from "../utils/productDetailCache";
 import {
@@ -112,14 +113,6 @@ const persistStoredUser = (nextUser) => {
   }
   window.dispatchEvent(new Event("user:updated"));
 };
-
-const readAsDataUrl = (file) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Unable to read file."));
-    reader.readAsDataURL(file);
-  });
 
 const getLocationText = (pickupAddress = {}) =>
   [pickupAddress?.city, pickupAddress?.state, pickupAddress?.pincode]
@@ -490,23 +483,17 @@ export default function SellerStore() {
   const sellerOwnerName = String(seller?.name || seller?.storeName || "Seller").trim();
   const sellerAbout =
     String(seller?.about || "").trim() ||
-    "Handmade gifting collections with curated items and custom options.";
+    "Thoughtfully curated handmade gifts, bespoke hampers, and elegant custom touches for memorable occasions.";
   const sellerInitial = sellerOwnerName.charAt(0).toUpperCase() || "S";
-  const sellerEmail = String(seller?.supportEmail || "").trim();
   const instagramUrl = String(seller?.instagramUrl || "").trim();
-  const supportEmailConfigured = Boolean(sellerEmail);
   const joinedText = formatDate(seller?.createdAt);
-  const locationText = getLocationText(seller?.pickupAddress) || "Location not shared";
+  const locationText = getLocationText(seller?.pickupAddress) || "Location details will be updated soon";
   const pickupAddressText =
-    getPickupAddressText(seller?.pickupAddress) || "Pickup address will be shared by seller";
-  const sellerSupportChannelLabel = isOwnerSeller
-    ? supportEmailConfigured
-      ? "Inbox active"
-      : "Inbox ready"
-    : "Private seller inbox";
+    getPickupAddressText(seller?.pickupAddress) || "Pickup details will be confirmed once your enquiry is received";
+  const sellerSupportChannelLabel = isOwnerSeller ? "Seller dashboard inbox" : "Private store inbox";
   const sellerSupportMessage = isOwnerSeller
-    ? "Customer messages stay private and show up in your seller dashboard."
-    : "Send a secure message and our team will contact you soon.";
+    ? "Customer enquiries arrive directly inside your seller dashboard."
+    : "Your enquiry is delivered directly to the seller's private dashboard.";
   const listedProducts = Number(storeData?.stats?.totalProducts || products.length || 0);
   const totalFeedbacks = Number(storeData?.stats?.totalFeedbacks || feedbacks.length || 0);
   const avgRating = Number(storeData?.stats?.avgRating || 0);
@@ -640,7 +627,11 @@ export default function SellerStore() {
       return;
     }
     try {
-      const dataUrl = await readAsDataUrl(file);
+      const dataUrl = await optimizeImageFile(file, {
+        maxWidth: field === "storeCoverImage" ? 1800 : 1000,
+        maxHeight: field === "storeCoverImage" ? 1200 : 1000,
+        quality: 0.82,
+      });
       setDraft((prev) => ({ ...prev, [field]: dataUrl }));
       setEditError("");
     } catch {
@@ -984,7 +975,7 @@ export default function SellerStore() {
         <div className="seller-store-headline">
           <div>
             <h2>{sellerName}</h2>
-            <p>Storefront with live products and profile details.</p>
+            <p>A refined storefront for live collections, handcrafted details, and trusted seller information.</p>
           </div>
           <div className="seller-store-headline-actions">
             <Link className="btn ghost" to={backCatalogPath}>
@@ -994,7 +985,7 @@ export default function SellerStore() {
             {isOwnerSeller && !editMode ? (
               <button className="btn primary" type="button" onClick={beginEditMode}>
                 <StoreActionIcon name="edit" />
-                Edit store
+                Edit storefront
               </button>
             ) : null}
             {isOwnerSeller && editMode ? (
@@ -1005,7 +996,7 @@ export default function SellerStore() {
                 </button>
                 <button className="btn primary" type="button" onClick={saveStoreEdits} disabled={saving}>
                   <StoreActionIcon name="save" />
-                  {saving ? "Saving..." : "Save"}
+                  {saving ? "Saving..." : "Save changes"}
                 </button>
               </>
             ) : null}
@@ -1017,7 +1008,7 @@ export default function SellerStore() {
 
         {loading && (
           <section className="seller-store-status">
-            <p>Loading store...</p>
+            <p>Preparing the storefront...</p>
           </section>
         )}
 
@@ -1216,7 +1207,7 @@ export default function SellerStore() {
                       <circle cx="12" cy="12" r="3.4" />
                       <circle cx="17.2" cy="6.8" r="1.05" fill="currentColor" stroke="none" />
                     </svg>
-                    {isOwnerSeller ? "Open your Instagram" : "View Instagram"}
+                    {isOwnerSeller ? "Open Instagram" : "View Instagram"}
                   </a>
                 ) : null}
                 {contactNotice ? (
@@ -1234,10 +1225,10 @@ export default function SellerStore() {
                     <button
                       className="btn seller-store-owner-email-btn"
                       type="button"
-                      onClick={() => navigate("/seller/messages")}
+                      onClick={() => navigate("/seller/dashboard#customer-messages")}
                     >
                       <StoreActionIcon name="view" />
-                      Open support chat
+                      View inbox
                     </button>
                   </div>
                 ) : contactOpen ? (
@@ -1270,7 +1261,7 @@ export default function SellerStore() {
                       <textarea
                         value={contactForm.message}
                         onChange={handleContactField("message")}
-                        placeholder="Tell the store team what you need help with."
+                        placeholder="Share the occasion, what you need, or any custom details."
                         rows={4}
                         minLength={10}
                         maxLength={1200}
@@ -1278,7 +1269,7 @@ export default function SellerStore() {
                       />
                     </label>
                     <p className="seller-store-contact-disclaimer">
-                      Your message stays inside the seller&apos;s private dashboard.
+                      Your enquiry stays private and lands directly inside the seller&apos;s dashboard.
                     </p>
                     <div className="seller-store-owner-actions seller-store-contact-actions">
                       <button
@@ -1287,7 +1278,7 @@ export default function SellerStore() {
                         disabled={contactSubmitting}
                       >
                         <StoreActionIcon name="email" />
-                        {contactSubmitting ? "Sending..." : "Send message"}
+                        {contactSubmitting ? "Sending..." : "Send enquiry"}
                       </button>
                       <button
                         className="btn ghost seller-store-owner-cancel-btn"
@@ -1829,7 +1820,7 @@ export default function SellerStore() {
                     <strong>Contact channel:</strong> {sellerSupportChannelLabel}
                   </p>
                   <p>
-                    <strong>Support team:</strong> {sellerSupportMessage}
+                    <strong>How it works:</strong> {sellerSupportMessage}
                   </p>
                 </div>
               ) : selectedTab === STORE_TABS[3] ? (
@@ -1888,7 +1879,7 @@ export default function SellerStore() {
                     <strong>{sellerSupportChannelLabel}</strong>
                   </p>
                   <p>
-                    <span>Support team</span>
+                    <span>How it works</span>
                     <strong>{sellerSupportMessage}</strong>
                   </p>
                   <p>

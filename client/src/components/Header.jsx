@@ -6,6 +6,7 @@ import logoCartPng from "../assets/logo-cart.png";
 import { getCart } from "../utils/cart";
 import { getWishlist } from "../utils/wishlist";
 import { logoutSession } from "../utils/authSession";
+import { readStoredSessionClaims } from "../utils/authRoute";
 import { openNotificationStream } from "../utils/notificationStream";
 import {
   DEFAULT_CATEGORY_TREE,
@@ -256,6 +257,7 @@ const HeaderBottomNavIcon = ({ kind }) => {
 export default function Header({ variant, onFilterClick, isFilterActive = false }) {
   const [user, setUser] = useState(readStoredUser);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [accountMenuStyle, setAccountMenuStyle] = useState(null);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [notificationItems, setNotificationItems] = useState([]);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
@@ -283,7 +285,8 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const navigate = useNavigate();
   const location = useLocation();
   const headerRef = useRef(null);
-  const accountRef = useRef(null);
+  const accountButtonRef = useRef(null);
+  const accountDropdownRef = useRef(null);
   const notificationButtonRef = useRef(null);
   const notificationMobileButtonRef = useRef(null);
   const notificationDropdownRef = useRef(null);
@@ -391,7 +394,12 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   useEffect(() => {
     if (!accountOpen) return undefined;
     const handleOutsideClick = (event) => {
-      if (accountRef.current && !accountRef.current.contains(event.target)) {
+      if (!(event.target instanceof Node)) return;
+      const insideTrigger =
+        accountButtonRef.current && accountButtonRef.current.contains(event.target);
+      const insideDropdown =
+        accountDropdownRef.current && accountDropdownRef.current.contains(event.target);
+      if (!insideTrigger && !insideDropdown) {
         setAccountOpen(false);
       }
     };
@@ -432,6 +440,36 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
 
   const closeAccount = () => setAccountOpen(false);
 
+  const getAccountAnchor = () => {
+    const anchor = accountButtonRef.current;
+    if (!anchor) return null;
+    return anchor.offsetParent !== null ? anchor : accountButtonRef.current;
+  };
+
+  const updateAccountMenuPosition = () => {
+    if (typeof window === "undefined") return;
+    const anchor = getAccountAnchor();
+    if (!anchor) return;
+
+    const rect = anchor.getBoundingClientRect();
+    const viewportWidth = Math.max(
+      window.innerWidth || 0,
+      document.documentElement?.clientWidth || 0
+    );
+    const minWidth = isSellerNav ? 180 : 240;
+    const maxWidth = isSellerNav ? 220 : 320;
+    const width = Math.max(minWidth, Math.min(maxWidth, viewportWidth - 24));
+    const left = Math.max(12, Math.min(rect.right - width, viewportWidth - width - 12));
+
+    setAccountMenuStyle({
+      position: "fixed",
+      top: `${Math.round(rect.bottom + 10)}px`,
+      left: `${Math.round(left)}px`,
+      right: "auto",
+      width: `${Math.round(width)}px`,
+    });
+  };
+
   const getNotificationAnchor = () => {
     const candidates = [notificationButtonRef.current, notificationMobileButtonRef.current];
     const visibleNode = candidates.find((node) => node && node.offsetParent !== null);
@@ -470,6 +508,20 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     setUser(null);
     closeAccount();
     navigate("/");
+  };
+
+  const toggleAccountMenu = () => {
+    if (!user) {
+      navigate("/login");
+      return;
+    }
+    setAccountOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        updateAccountMenuPosition();
+      }
+      return next;
+    });
   };
 
   const handleProtectedNav = (path) => {
@@ -519,12 +571,19 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     user?.profileImage || user?.avatar || user?.photo || user?.image || user?.imageUrl || "";
   const accountAvatarInitial =
     ((user?.name || user?.storeName || "U").trim().slice(0, 1).toUpperCase() || "U");
+  const effectiveUserRole = String(user?.role || readStoredSessionClaims().role || "")
+    .trim()
+    .toLowerCase();
+  const accountMenuUsesStore = isSellerNav || effectiveUserRole === "seller";
   const sellerNameLabel = (user?.storeName || user?.name || "Seller").trim() || "Seller";
   const sellerAvatarSrc =
     user?.profileImage || user?.avatar || user?.photo || user?.image || user?.imageUrl || "";
   const sellerAvatarInitial = sellerNameLabel.slice(0, 1).toUpperCase() || "S";
   const sellerId = String(user?.id || user?._id || readUserIdFromToken()).trim();
   const sellerStorePath = sellerId ? `/store/${sellerId}` : "/seller/dashboard";
+  const accountMenuPath = accountMenuUsesStore ? sellerStorePath : "/profile";
+  const accountMenuLabel = accountMenuUsesStore ? "My Store" : "My Profile";
+  const accountMenuIcon = accountMenuUsesStore ? "seller" : "profile";
   const scrollCategoryLinks = (direction = 1) => {
     const node = categoryLinksRef.current;
     if (!node) return;
@@ -552,7 +611,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     { label: "About Us", href: "/#about-us" },
     { label: "Contact", href: "/#support" },
   ];
-  const isCustomerUser = Boolean(user) && (!user.role || user.role === "customer");
+  const isCustomerUser = Boolean(user) && (!effectiveUserRole || effectiveUserRole === "customer");
   const showCustomerNotification = isCustomerUser && !isSellerNav && !isAuthNav;
   const showNotificationMenu = isSellerNav || showCustomerNotification;
   const customerBottomNavItems = [
@@ -570,10 +629,14 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       active: location.pathname === "/wishlist",
     },
     {
-      label: user ? "Profile" : "Login",
-      to: user ? "/profile" : "/login",
+      label: user ? (accountMenuUsesStore ? "Store" : "Profile") : "Login",
+      to: user ? accountMenuPath : "/login",
       icon: "profile",
-      active: user ? location.pathname === "/profile" : location.pathname === "/login",
+      active: user
+        ? accountMenuUsesStore
+          ? location.pathname.startsWith("/store/") || location.pathname.startsWith("/seller/")
+          : location.pathname === "/profile"
+        : location.pathname === "/login",
     },
   ];
   const showMobileCategoryTabs = location.pathname === "/products";
@@ -757,6 +820,21 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     };
   }, [notificationOpen]);
 
+  useEffect(() => {
+    if (!accountOpen) return undefined;
+
+    updateAccountMenuPosition();
+    const syncPosition = () => updateAccountMenuPosition();
+
+    window.addEventListener("resize", syncPosition);
+    window.addEventListener("scroll", syncPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", syncPosition);
+      window.removeEventListener("scroll", syncPosition, true);
+    };
+  }, [accountOpen, isSellerNav]);
+
   const notificationDropdown =
     showNotificationMenu && notificationOpen && typeof document !== "undefined"
       ? createPortal(
@@ -826,6 +904,67 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           document.body
         )
       : null;
+
+  const accountDropdown =
+    accountOpen && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            ref={accountDropdownRef}
+            className={`account-dropdown ${isSellerNav ? "seller-account-dropdown" : ""}`}
+            role="menu"
+            style={
+              accountMenuStyle || {
+                position: "fixed",
+                top: isSellerNav ? "64px" : "76px",
+                right: "12px",
+                left: "auto",
+                width: isSellerNav
+                  ? "min(220px, calc(100vw - 24px))"
+                  : "min(240px, calc(100vw - 24px))",
+              }
+            }
+          >
+            {user ? (
+              <>
+                <button
+                  className="dropdown-item with-icon"
+                  type="button"
+                  onClick={() => handleProtectedNav("/")}
+                >
+                  <HeaderMenuIcon kind="home" />
+                  Home
+                </button>
+                <button
+                  className="dropdown-item with-icon"
+                  type="button"
+                  onClick={() => handleProtectedNav(accountMenuPath)}
+                >
+                  <HeaderMenuIcon kind={accountMenuIcon} />
+                  {accountMenuLabel}
+                </button>
+                <button
+                  className={`dropdown-item with-icon ${isSellerNav ? "danger" : ""}`}
+                  type="button"
+                  onClick={handleLogout}
+                >
+                  <HeaderMenuIcon kind="logout" />
+                  Logout
+                </button>
+              </>
+            ) : (
+              <button
+                className="dropdown-item with-icon"
+                type="button"
+                onClick={() => handleProtectedNav("/login")}
+              >
+                <HeaderMenuIcon kind="login" />
+                Login
+              </button>
+            )}
+          </div>,
+          document.body
+        )
+      : null;
   const customerBottomNavPortal =
     !isCartRoute && typeof document !== "undefined"
       ? createPortal(
@@ -855,6 +994,10 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
 
   useEffect(() => {
     setAllCategoriesOpen(false);
+    setAccountOpen(false);
+    setNotificationOpen(false);
+    setAccountMenuStyle(null);
+    setNotificationMenuStyle(null);
   }, [location.pathname, location.search]);
 
   useEffect(() => {
@@ -1080,22 +1223,17 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
             </a>
             <span className="seller-profile-name">{sellerNameLabel}</span>
             <div className="icon-group seller-icon-group">
-              <div className="account-menu seller-account-menu" ref={accountRef}>
+              <div className="account-menu seller-account-menu">
                 <button
+                  ref={accountButtonRef}
                   className={`icon-btn profile-icon-btn ${sellerAvatarSrc ? "has-avatar" : ""} ${
                     accountOpen ? "active" : ""
                   }`}
                   type="button"
-                  aria-label="Profile menu"
+                  aria-label="Account menu"
                   aria-haspopup="menu"
                   aria-expanded={accountOpen}
-                  onClick={() => {
-                    if (!user) {
-                      navigate("/login");
-                      return;
-                    }
-                    setAccountOpen((prev) => !prev);
-                  }}
+                  onClick={toggleAccountMenu}
                 >
                   {sellerAvatarSrc ? (
                     <img className="seller-avatar-thumb" src={sellerAvatarSrc} alt={sellerNameLabel} />
@@ -1103,39 +1241,11 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                     <span className="seller-avatar-fallback">{sellerAvatarInitial}</span>
                   )}
                 </button>
-                {accountOpen && (
-                  <div className="account-dropdown seller-account-dropdown" role="menu">
-                    {user ? (
-                      <>
-                        <button
-                          className="dropdown-item with-icon"
-                          type="button"
-                          onClick={() => handleProtectedNav("/")}
-                        >
-                          <HeaderMenuIcon kind="home" />
-                          Home
-                        </button>
-                        <button className="dropdown-item with-icon danger" type="button" onClick={handleLogout}>
-                          <HeaderMenuIcon kind="logout" />
-                          Logout
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        className="dropdown-item with-icon"
-                        type="button"
-                        onClick={() => handleProtectedNav("/login")}
-                      >
-                        <HeaderMenuIcon kind="login" />
-                        Login
-                      </button>
-                    )}
-                  </div>
-                )}
               </div>
             </div>
           </div>
           {notificationDropdown}
+          {accountDropdown}
 
         <nav className="nav-links">
           <Link
@@ -1211,13 +1321,13 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               <circle cx="7" cy="17" r="1.4" />
               <circle cx="17" cy="17" r="1.4" />
             </svg>
-            Free Shipping over ₹499
+            Complimentary shipping on orders above ₹499
           </span>
           <span className="utility-item">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 3l7 3v5c0 4.4-2.8 8.4-7 10-4.2-1.6-7-5.6-7-10V6l7-3z" />
             </svg>
-            100% Handmade Guarantee
+            Artfully handcrafted quality
           </span>
           <span className="utility-item">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1226,7 +1336,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               <path d="M20 8a7 7 0 0 0-12-3L4 8" />
               <path d="M4 16a7 7 0 0 0 12 3l4-3" />
             </svg>
-            Easy Returns
+            Easy returns with thoughtful support
           </span>
         </div>
         <div className="utility-right">
@@ -1250,7 +1360,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
             <input
               className="search-input header-search-input"
               type="search"
-              placeholder="Search for handmade gifts, hampers, crafts..."
+              placeholder="Search artisanal gifts, curated hampers, keepsakes..."
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
             />
@@ -1282,18 +1392,14 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                 </Link>
               </div>
             ) : (
-              <div className="account-menu" ref={accountRef}>
+              <div className="account-menu">
                 <button
+                  ref={accountButtonRef}
                   className={`header-auth-link ${user ? "account-trigger" : "with-icon"}`}
                   type="button"
+                  aria-haspopup="menu"
                   aria-expanded={accountOpen}
-                  onClick={() => {
-                    if (!user) {
-                      navigate("/login");
-                      return;
-                    }
-                    setAccountOpen((prev) => !prev);
-                  }}
+                  onClick={toggleAccountMenu}
                 >
                   {user ? (
                     <>
@@ -1317,43 +1423,6 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                     </>
                   )}
                 </button>
-                {accountOpen && (
-                  <div className="account-dropdown" role="menu">
-                    {user ? (
-                      <>
-                        <button
-                          className="dropdown-item with-icon"
-                          type="button"
-                          onClick={() => handleProtectedNav("/")}
-                        >
-                          <HeaderMenuIcon kind="home" />
-                          Home
-                        </button>
-                        <button
-                          className="dropdown-item with-icon"
-                          type="button"
-                          onClick={() => handleProtectedNav("/profile")}
-                        >
-                          <HeaderMenuIcon kind="profile" />
-                          My Profile
-                        </button>
-                        <button className="dropdown-item with-icon" type="button" onClick={handleLogout}>
-                          <HeaderMenuIcon kind="logout" />
-                          Logout
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        className="dropdown-item with-icon"
-                        type="button"
-                        onClick={() => handleProtectedNav("/login")}
-                      >
-                        <HeaderMenuIcon kind="login" />
-                        Login
-                      </button>
-                    )}
-                  </div>
-                )}
               </div>
             )}
 
@@ -1532,8 +1601,8 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           <div className="header-mobile-links">
             {user ? (
               <>
-                <Link className="header-mobile-link" to="/profile" onClick={closeMobileMenu}>
-                  My Profile
+                <Link className="header-mobile-link" to={accountMenuPath} onClick={closeMobileMenu}>
+                  {accountMenuLabel}
                 </Link>
                 <button
                   className="header-mobile-link header-mobile-link-button"
@@ -1726,6 +1795,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       )}
       </header>
       {notificationDropdown}
+      {accountDropdown}
       {customerBottomNavPortal}
     </>
   );
