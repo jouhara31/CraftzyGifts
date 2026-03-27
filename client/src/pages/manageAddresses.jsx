@@ -90,7 +90,7 @@ export default function ManageAddresses() {
           </svg>
         </Link>
         <h1 className="manage-addresses-title">Manage Addresses</h1>
-        <Link className="manage-addresses-edit" to="/edit-profile#saved-addresses">
+        <Link className="manage-addresses-edit" to="/profile-info?edit=1#saved-addresses">
           Edit Addresses
         </Link>
       </div>
@@ -122,7 +122,10 @@ export default function ManageAddresses() {
                     {formatAddressLabel(entry) || "No address details yet."}
                   </p>
                 </div>
-                <Link className="manage-addresses-item-action" to="/edit-profile#saved-addresses">
+                <Link
+                  className="manage-addresses-item-action"
+                  to="/profile-info?edit=1#saved-addresses"
+                >
                   Edit
                 </Link>
               </div>

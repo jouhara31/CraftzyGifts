@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
 import logoPng from "../assets/logo.png";
-import { getWishlist } from "../utils/wishlist";
+import { addToCart } from "../utils/cart";
+import { getProductImage } from "../utils/productMedia";
+import { getWishlist, toggleWishlist } from "../utils/wishlist";
 
 import { API_URL } from "../apiBase";
 import { clearAuthSession, logoutSession } from "../utils/authSession";
@@ -21,6 +23,19 @@ const ACTIVE_ORDER_STATUSES = new Set([
   "shipped",
   "return_requested",
 ]);
+const CUSTOMER_ACCOUNT_DEFAULT_TAB = "profile";
+const CUSTOMER_ACCOUNT_TABS = new Set(["profile", "addresses", "orders", "wishlist"]);
+const CUSTOMER_ORDER_STATUS_LABELS = {
+  pending_payment: "Awaiting payment",
+  placed: "Order placed",
+  processing: "Processing",
+  shipped: "Shipped",
+  delivered: "Delivered",
+  return_requested: "Return requested",
+  return_rejected: "Return rejected",
+  refunded: "Refunded",
+  cancelled: "Cancelled",
+};
 
 const formatMoney = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 const formatJoinedDate = (value) => {
@@ -29,6 +44,41 @@ const formatJoinedDate = (value) => {
   if (Number.isNaN(date.getTime())) return "Not available";
   return date.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 };
+const formatFullDate = (value) => {
+  if (!value) return "Not set";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not set";
+  return date.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+};
+const formatAccountAddress = (address = {}) =>
+  [
+    address?.line1,
+    address?.line2,
+    address?.city,
+    address?.state,
+    address?.pincode,
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(", ") || "Not set";
+const formatAccountStatus = (value) => {
+  const status = String(value || "").trim();
+  if (!status) return "Unknown";
+  return (
+    CUSTOMER_ORDER_STATUS_LABELS[status] ||
+    status.replace(/_/g, " ").replace(/\b\w/g, (match) => match.toUpperCase())
+  );
+};
+const normalizeCustomerTab = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CUSTOMER_ACCOUNT_TABS.has(normalized) ? normalized : CUSTOMER_ACCOUNT_DEFAULT_TAB;
+};
+const buildCustomerTabPath = (tab) =>
+  tab === CUSTOMER_ACCOUNT_DEFAULT_TAB ? "/profile" : `/profile?tab=${tab}`;
 
 
 const loadImageFromSource = (source) =>
@@ -234,16 +284,16 @@ const buildSidebarSections = (role) => {
     {
       title: "Shopping",
       items: [
-        { label: "Orders", path: "/orders" },
-        { label: "Wishlist", path: "/wishlist" },
+        { label: "Orders", tab: "orders" },
+        { label: "Wishlist", tab: "wishlist" },
         { label: "Cart", path: "/cart" },
       ],
     },
     {
       title: "Account",
       items: [
-        { label: "Profile Information", path: "/profile-info" },
-        { label: "Manage Addresses", path: "/manage-addresses" },
+        { label: "Profile Information", tab: "profile" },
+        { label: "Manage Addresses", tab: "addresses" },
       ],
     },
   ];
@@ -438,17 +488,19 @@ const fetchRoleOverview = async (role, token) => {
 
 export default function Profile() {
   const [profile, setProfile] = useState(null);
-  const [form, setForm] = useState({ name: "", phone: "", storeName: "" });
   const [overview, setOverview] = useState({ cards: [], rowsTitle: "", rows: [] });
+  const [customerOrders, setCustomerOrders] = useState([]);
+  const [customerOrdersError, setCustomerOrdersError] = useState("");
+  const [wishlistItems, setWishlistItems] = useState(() => getWishlist());
   const [overviewError, setOverviewError] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
   const [profileImageModalOpen, setProfileImageModalOpen] = useState(false);
   const [profileImageDraft, setProfileImageDraft] = useState("");
   const [profileImageDraftName, setProfileImageDraftName] = useState("");
   const [imageUpdating, setImageUpdating] = useState(false);
   const profileImageInputRef = useRef(null);
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const role = profile?.role || "customer";
   const headerVariant =
@@ -462,6 +514,7 @@ export default function Profile() {
     role === "customer" ? "page profile-page customer-profile" : "page profile-page";
   const profileImageActionLabel = isCustomerProfile ? "Save" : "Update";
   const profileImageActionLoadingLabel = isCustomerProfile ? "Saving..." : "Updating...";
+  const selectedCustomerTab = normalizeCustomerTab(searchParams.get("tab"));
   const pickupAddressLabel = [
     profile?.pickupAddress?.line1,
     profile?.pickupAddress?.city,
@@ -531,18 +584,17 @@ export default function Profile() {
           }
         }
         setProfile(data);
-        setForm({
-          name: data.name || "",
-          phone: data.phone || "",
-          storeName: data.storeName || "",
-        });
         setOverviewError("");
-        try {
-          const roleOverview = await fetchRoleOverview(data.role, token);
-          setOverview(roleOverview);
-        } catch (overviewLoadError) {
+        if (data.role === "customer") {
           setOverview({ cards: [], rowsTitle: "", rows: [] });
-          setOverviewError(overviewLoadError.message || "Unable to load role summary.");
+        } else {
+          try {
+            const roleOverview = await fetchRoleOverview(data.role, token);
+            setOverview(roleOverview);
+          } catch (overviewLoadError) {
+            setOverview({ cards: [], rowsTitle: "", rows: [] });
+            setOverviewError(overviewLoadError.message || "Unable to load role summary.");
+          }
         }
         persistUserToStorage(nextUserSnapshot);
       } catch {
@@ -551,6 +603,62 @@ export default function Profile() {
     };
     load();
   }, [clearSessionAndRedirect, navigate]);
+
+  useEffect(() => {
+    if (!isCustomerProfile || !profile) {
+      setCustomerOrders([]);
+      setCustomerOrdersError("");
+      return;
+    }
+
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    let cancelled = false;
+    const loadCustomerOrders = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/orders/my`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await readApiPayload(res);
+        if (cancelled) return;
+        if (res.status === 401) {
+          clearSessionAndRedirect("/login");
+          return;
+        }
+        if (!res.ok) {
+          setCustomerOrders([]);
+          setCustomerOrdersError(data.message || "Unable to load orders.");
+          return;
+        }
+        setCustomerOrders(Array.isArray(data) ? data : []);
+        setCustomerOrdersError("");
+      } catch {
+        if (!cancelled) {
+          setCustomerOrders([]);
+          setCustomerOrdersError("Unable to load orders.");
+        }
+      }
+    };
+
+    loadCustomerOrders();
+    return () => {
+      cancelled = true;
+    };
+  }, [clearSessionAndRedirect, isCustomerProfile, profile]);
+
+  useEffect(() => {
+    if (!isCustomerProfile) return undefined;
+
+    const syncWishlist = () => setWishlistItems(getWishlist());
+    syncWishlist();
+    window.addEventListener("wishlist:updated", syncWishlist);
+    window.addEventListener("storage", syncWishlist);
+    return () => {
+      window.removeEventListener("wishlist:updated", syncWishlist);
+      window.removeEventListener("storage", syncWishlist);
+    };
+  }, [isCustomerProfile]);
 
   useEffect(() => {
     if (!profileImageModalOpen) return undefined;
@@ -563,8 +671,61 @@ export default function Profile() {
     return () => document.removeEventListener("keydown", onEscape);
   }, [profileImageModalOpen]);
 
-  const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+  const customerShippingAddressLabel = formatAccountAddress(profile?.shippingAddress);
+  const customerBillingAddressLabel = profile?.billingSameAsShipping
+    ? customerShippingAddressLabel === "Not set"
+      ? "Not set"
+      : "Same as shipping"
+    : formatAccountAddress(profile?.billingAddress);
+  const customerGenderLabel = profile?.gender
+    ? profile.gender === "prefer_not"
+      ? "Prefer not to say"
+      : profile.gender.replace(/_/g, " ").replace(/\b\w/g, (match) => match.toUpperCase())
+    : "Not set";
+  const customerSavedAddresses = Array.isArray(profile?.savedAddresses) ? profile.savedAddresses : [];
+  const customerProfileRows = [
+    { label: "Full Name", value: profile?.name || "Not set" },
+    { label: "Email", value: profile?.email || "Not set" },
+    { label: "Phone", value: profile?.phone || "Not set" },
+    { label: "Gender", value: customerGenderLabel },
+    { label: "Date of Birth", value: formatFullDate(profile?.dateOfBirth) },
+    { label: "Shipping Address", value: customerShippingAddressLabel },
+    { label: "Billing Address", value: customerBillingAddressLabel },
+    { label: "Password", value: <span className="profile-password-mask">••••••••</span> },
+  ];
+  const customerActiveOrders = customerOrders.filter((order) =>
+    ACTIVE_ORDER_STATUSES.has(String(order?.status || "").trim())
+  ).length;
+  const customerDeliveredOrders = customerOrders.filter(
+    (order) => String(order?.status || "").trim() === "delivered"
+  ).length;
+  const customerOverviewCards = [
+    { label: "Total orders", value: String(customerOrders.length) },
+    { label: "Active orders", value: String(customerActiveOrders) },
+    { label: "Delivered", value: String(customerDeliveredOrders) },
+    { label: "Wishlist items", value: String(wishlistItems.length) },
+  ];
+  const customerRecentOrders = customerOrders.slice(0, 4);
+
+  const removeWishlistItem = (item) => {
+    setWishlistItems(toggleWishlist(item));
+    setNotice("Wishlist updated.");
+  };
+
+  const addWishlistItemToCart = (item) => {
+    addToCart({
+      id: item?.id || item?._id,
+      name: item?.name,
+      price: item?.price,
+      mrp: item?.mrp,
+      image: getProductImage(item),
+      category: item?.category || item?.tag,
+      tag: item?.tag,
+      deliveryMinDays: item?.deliveryMinDays,
+      deliveryMaxDays: item?.deliveryMaxDays,
+      seller: item?.seller,
+    });
+    setNotice("Added to cart.");
   };
 
   const openProfileImageModal = () => {
@@ -772,60 +933,223 @@ export default function Profile() {
     }
   };
 
-  const saveProfile = async () => {
-    setNotice("");
-    setError("");
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
-      return;
+  const renderCustomerContent = () => {
+    if (selectedCustomerTab === "addresses") {
+      return (
+        <>
+          <div className="profile-card profile-account-panel">
+            <div className="profile-section-header profile-account-head">
+              <h3>Addresses</h3>
+              <Link className="btn ghost profile-inline-action" to="/profile-info?edit=1#saved-addresses">
+                Edit
+              </Link>
+            </div>
+            <div className="account-address-grid">
+              <div className="account-address-card">
+                <p className="profile-menu-title">Shipping</p>
+                <p className="account-address-text">{customerShippingAddressLabel}</p>
+              </div>
+              <div className="account-address-card">
+                <p className="profile-menu-title">Billing</p>
+                <p className="account-address-text">{customerBillingAddressLabel}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="profile-card profile-account-panel">
+            <div className="profile-section-header profile-account-head">
+              <h3>Saved Addresses</h3>
+              <span className="chip account-meta-pill">{customerSavedAddresses.length} saved</span>
+            </div>
+            {customerSavedAddresses.length === 0 ? (
+              <p className="field-hint">No saved addresses yet.</p>
+            ) : (
+              <div className="account-address-list">
+                {customerSavedAddresses.map((entry, index) => (
+                  <div
+                    key={entry.id || entry._id || `saved-address-${index}`}
+                    className="account-address-card account-address-card-saved"
+                  >
+                    <p className="account-address-label">{entry.label || `Address ${index + 1}`}</p>
+                    <p className="account-address-text">{formatAccountAddress(entry)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      );
     }
 
-    setSaving(true);
-    try {
-      const res = await fetch(`${API_URL}/api/users/me`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          name: form.name,
-          phone: form.phone,
-          storeName: form.storeName,
-        }),
-      });
-      const data = await readApiPayload(res);
-      if (!res.ok) {
-        if (res.status === 401) {
-          clearSessionAndRedirect("/login");
-          return;
-        }
-        setError(data.message || "Unable to save profile.");
-        return;
-      }
-      setProfile(data);
-      setForm({
-        name: data.name || "",
-        phone: data.phone || "",
-        storeName: data.storeName || "",
-      });
-      persistUserToStorage({
-        id: data.id,
-        name: data.name,
-        email: data.email,
-        role: data.role,
-        sellerStatus: data.sellerStatus,
-        storeName: data.storeName,
-        phone: data.phone,
-        profileImage: data.profileImage,
-      });
-      setNotice("Profile updated.");
-    } catch {
-      setError("Unable to save profile.");
-    } finally {
-      setSaving(false);
+    if (selectedCustomerTab === "orders") {
+      return (
+        <div className="profile-card profile-account-panel">
+          <div className="profile-section-header profile-account-head">
+            <h3>Orders</h3>
+            <Link className="btn ghost profile-inline-action" to="/orders">
+              Full Page
+            </Link>
+          </div>
+          {customerOrdersError && <p className="field-hint">{customerOrdersError}</p>}
+          {!customerOrdersError && customerOrders.length === 0 && (
+            <p className="field-hint">No orders yet.</p>
+          )}
+          {!customerOrdersError && customerOrders.length > 0 && (
+            <div className="account-order-list">
+              {customerOrders.map((order) => {
+                const orderId = String(order?._id || "").trim();
+                const quantity = Math.max(1, Number(order?.quantity || 1));
+                const paymentStatus = String(order?.paymentStatus || "").trim();
+                const productName = order?.product?.name || "Gift order";
+
+                return (
+                  <article key={orderId || productName} className="account-order-card">
+                    <div className="account-order-top">
+                      <div>
+                        <p className="account-order-code">
+                          {orderId ? `#${orderId.slice(-8).toUpperCase()}` : "#ORDER"}
+                        </p>
+                        <h4>{productName}</h4>
+                      </div>
+                      <span className="chip account-order-status">
+                        {formatAccountStatus(order?.status)}
+                      </span>
+                    </div>
+                    <div className="account-order-meta">
+                      <span>{formatFullDate(order?.createdAt)}</span>
+                      <span>{quantity} item{quantity === 1 ? "" : "s"}</span>
+                      <span>{paymentStatus ? `Payment: ${formatAccountStatus(paymentStatus)}` : "Payment pending"}</span>
+                    </div>
+                    <div className="account-order-bottom">
+                      <div>
+                        <p className="account-order-total-label">Total</p>
+                        <strong className="account-order-total">{formatMoney(order?.total)}</strong>
+                      </div>
+                      <Link className="btn ghost profile-inline-action" to="/orders">
+                        View Details
+                      </Link>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
     }
+
+    if (selectedCustomerTab === "wishlist") {
+      return (
+        <div className="profile-card profile-account-panel">
+          <div className="profile-section-header profile-account-head">
+            <h3>Wishlist</h3>
+            <Link className="btn ghost profile-inline-action" to="/products">
+              Browse Products
+            </Link>
+          </div>
+          {wishlistItems.length === 0 ? (
+            <p className="field-hint">No wishlist items yet.</p>
+          ) : (
+            <div className="account-wishlist-list">
+              {wishlistItems.map((item) => {
+                const productId = String(item?.id || item?._id || "").trim();
+                const productPath = productId ? `/products/${productId}` : "/products";
+
+                return (
+                  <article key={productId || item?.name} className="account-wishlist-card">
+                    <Link className="account-wishlist-media" to={productPath}>
+                      <img src={getProductImage(item)} alt={item?.name || "Wishlist item"} />
+                    </Link>
+                    <div className="account-wishlist-body">
+                      <div className="account-wishlist-top">
+                        <div>
+                          <h4>{item?.name || "Saved item"}</h4>
+                          <p className="account-wishlist-note">{item?.tag || "Saved item"}</p>
+                        </div>
+                        <strong className="account-wishlist-price">{formatMoney(item?.price)}</strong>
+                      </div>
+                      <div className="account-wishlist-actions">
+                        <Link className="btn ghost profile-inline-action" to={productPath}>
+                          View
+                        </Link>
+                        <button
+                          className="btn ghost profile-inline-action"
+                          type="button"
+                          onClick={() => addWishlistItemToCart(item)}
+                        >
+                          Add to Cart
+                        </button>
+                        <button
+                          className="btn ghost profile-inline-action account-remove-action"
+                          type="button"
+                          onClick={() => removeWishlistItem(item)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <div className="profile-card profile-account-panel" id="profile-details">
+          <div className="profile-section-header profile-account-head">
+            <h3>Profile Information</h3>
+            <Link className="btn ghost profile-inline-action" to="/profile-info?edit=1">
+              Edit
+            </Link>
+          </div>
+          <div className="classic-profile-list">
+            {customerProfileRows.map((row) => (
+              <div key={row.label} className="classic-profile-row">
+                <p className="classic-profile-label">{row.label}</p>
+                <p className="classic-profile-value">{row.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="profile-card profile-account-panel">
+          <div className="profile-section-header profile-account-head">
+            <h3>Overview</h3>
+          </div>
+          <div className="stat-grid">
+            {customerOverviewCards.map((card) => (
+              <div key={card.label} className="stat-card">
+                <p className="stat-label">{card.label}</p>
+                <p className="stat-value">{card.value}</p>
+              </div>
+            ))}
+          </div>
+          {customerOrdersError && <p className="field-hint">{customerOrdersError}</p>}
+          {!customerOrdersError && customerRecentOrders.length > 0 && (
+            <div className="profile-role-table account-compact-table">
+              <p className="profile-menu-title">Recent Orders</p>
+              {customerRecentOrders.map((order) => {
+                const orderId = String(order?._id || "").trim();
+                return (
+                  <div key={orderId || `${order?.createdAt}-${order?.total}`} className="profile-role-row">
+                    <span className="profile-role-key">
+                      {orderId ? `#${orderId.slice(-8).toUpperCase()}` : "Order"}
+                    </span>
+                    <span className="profile-role-value">
+                      {formatAccountStatus(order?.status)} • {formatMoney(order?.total)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </>
+    );
   };
 
   const logout = async () => {
@@ -856,15 +1180,12 @@ export default function Profile() {
       <div className="section-head">
         <div>
           <h2>{isSellerProfileViewOnly ? "Seller Profile" : "My Account"}</h2>
-          <p>
-            {isSellerProfileViewOnly
-              ? "View your seller details here. Use Store Settings to edit profile and pickup info."
-              : "Manage your personal information and saved settings."}
-          </p>
         </div>
-        <Link className="link" to={ordersPath}>
-          View orders
-        </Link>
+        {!isCustomerProfile && (
+          <Link className="link" to={ordersPath}>
+            View orders
+          </Link>
+        )}
       </div>
 
       {!profile && !error && <p className="field-hint">Loading profile...</p>}
@@ -923,7 +1244,7 @@ export default function Profile() {
                   <div className="customer-profile-copy">
                     <p className="profile-name">{profile.name}</p>
                     <p className="profile-role-meta">{profile.email}</p>
-                    <Link className="btn primary profile-edit-btn" to="/edit-profile">
+                    <Link className="btn primary profile-edit-btn" to="/profile-info?edit=1">
                       Edit Profile
                     </Link>
                   </div>
@@ -966,12 +1287,16 @@ export default function Profile() {
                       : item.desktopOnly
                         ? "desktop-only"
                         : "";
-                    if (item.path) {
+                    const isActiveCustomerItem = isCustomerProfile && item.tab === selectedCustomerTab;
+                    const targetPath = item.tab ? buildCustomerTabPath(item.tab) : item.path;
+                    if (targetPath) {
                       return (
                         <Link
                           key={item.key || item.label}
-                          className={`profile-link ${visibilityClass}`.trim()}
-                          to={item.path}
+                          className={`profile-link ${visibilityClass} ${
+                            isActiveCustomerItem ? "active" : ""
+                          }`.trim()}
+                          to={targetPath}
                         >
                           <span className="profile-link-icon" aria-hidden="true">
                             <ProfileMenuIcon name={item.label} />
@@ -1007,183 +1332,144 @@ export default function Profile() {
           </aside>
 
           <main className="profile-content">
-            {isSellerProfileViewOnly && (
-              <div className="profile-card seller-profile-hero-card">
-                <div className="seller-profile-hero-main">
-                  <div className="seller-profile-hero-avatar-wrap">
-                    <div className="seller-profile-hero-avatar">
-                      {profile.profileImage ? (
-                        <img src={profile.profileImage} alt={sellerDisplayName} />
-                      ) : (
-                        <span>{sellerDisplayName.slice(0, 1).toUpperCase()}</span>
-                      )}
+            {isCustomerProfile ? (
+              <>
+                {notice && <p className="field-hint">{notice}</p>}
+                {renderCustomerContent()}
+              </>
+            ) : (
+              <>
+                {isSellerProfileViewOnly && (
+                  <div className="profile-card seller-profile-hero-card">
+                    <div className="seller-profile-hero-main">
+                      <div className="seller-profile-hero-avatar-wrap">
+                        <div className="seller-profile-hero-avatar">
+                          {profile.profileImage ? (
+                            <img src={profile.profileImage} alt={sellerDisplayName} />
+                          ) : (
+                            <span>{sellerDisplayName.slice(0, 1).toUpperCase()}</span>
+                          )}
+                        </div>
+                        <button
+                          className="seller-profile-avatar-edit-btn"
+                          type="button"
+                          onClick={openProfileImageModal}
+                          aria-haspopup="dialog"
+                          aria-expanded={profileImageModalOpen}
+                          aria-label="Edit profile picture"
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              d="M4 16.5V20h3.5l9.6-9.6-3.5-3.5L4 16.5z"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.7"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                            <path
+                              d="M12.9 7.5l3.5 3.5"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.7"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                      <div className="seller-profile-hero-copy">
+                        <h3>{sellerDisplayName}</h3>
+                        <p>Joined: {sellerJoinedLabel}</p>
+                        <p>Location: {sellerLocationLabel}</p>
+                        <p className="seller-profile-hero-rating">
+                          Seller status: {profile.sellerStatus || "pending"}
+                        </p>
+                      </div>
                     </div>
-                    <button
-                      className="seller-profile-avatar-edit-btn"
-                      type="button"
-                      onClick={openProfileImageModal}
-                      aria-haspopup="dialog"
-                      aria-expanded={profileImageModalOpen}
-                      aria-label="Edit profile picture"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path
-                          d="M4 16.5V20h3.5l9.6-9.6-3.5-3.5L4 16.5z"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.7"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                        <path
-                          d="M12.9 7.5l3.5 3.5"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.7"
-                          strokeLinecap="round"
-                        />
-                      </svg>
-                    </button>
+                    <div className="seller-profile-hero-actions">
+                      <Link className="btn ghost" to="/seller/settings">
+                        Edit Store
+                      </Link>
+                    </div>
                   </div>
-                  <div className="seller-profile-hero-copy">
-                    <h3>{sellerDisplayName}</h3>
-                    <p>Joined: {sellerJoinedLabel}</p>
-                    <p>Location: {sellerLocationLabel}</p>
-                    <p className="seller-profile-hero-rating">
-                      Seller status: {profile.sellerStatus || "pending"}
-                    </p>
-                  </div>
-                </div>
-                <div className="seller-profile-hero-actions">
-                  <Link className="btn ghost" to="/seller/settings">
-                    Edit Store
-                  </Link>
-                </div>
-              </div>
-            )}
+                )}
 
-            <div className="profile-card" id="profile-details">
-              <div className="profile-section-header">
-                <h3>{isSellerProfileViewOnly ? "Profile Details" : "Personal Information"}</h3>
-              </div>
-              {notice && <p className="field-hint">{notice}</p>}
-              {isSellerProfileViewOnly ? (
-                <div className="classic-profile-list">
-                  <div className="classic-profile-row">
-                    <p className="classic-profile-label">Owner Name</p>
-                    <p className="classic-profile-value">{profile.name || "Not set"}</p>
+                <div className="profile-card" id="profile-details">
+                  <div className="profile-section-header">
+                    <h3>Profile Details</h3>
                   </div>
-                  <div className="classic-profile-row">
-                    <p className="classic-profile-label">Email</p>
-                    <p className="classic-profile-value">{profile.email || "Not set"}</p>
-                  </div>
-                  <div className="classic-profile-row">
-                    <p className="classic-profile-label">Phone</p>
-                    <p className="classic-profile-value">{profile.phone || "Not set"}</p>
-                  </div>
-                  <div className="classic-profile-row">
-                    <p className="classic-profile-label">Store Name</p>
-                    <p className="classic-profile-value">{profile.storeName || "Not set"}</p>
-                  </div>
-                  <div className="classic-profile-row">
-                    <p className="classic-profile-label">Support Email</p>
-                    <p className="classic-profile-value">{profile.supportEmail || "Not set"}</p>
-                  </div>
-                  <div className="classic-profile-row">
-                    <p className="classic-profile-label">Seller Status</p>
-                    <p className="classic-profile-value">{profile.sellerStatus || "pending"}</p>
-                  </div>
-                  <div className="classic-profile-row">
-                    <p className="classic-profile-label">About Store</p>
-                    <p className="classic-profile-value">{profile.about || "Not added yet"}</p>
-                  </div>
-                  <div className="classic-profile-row">
-                    <p className="classic-profile-label">Pickup Address</p>
-                    <p className="classic-profile-value">{pickupAddressLabel || "Not set"}</p>
-                  </div>
-                  <div className="classic-profile-row">
-                    <p className="classic-profile-label">Pickup Window</p>
-                    <p className="classic-profile-value">
-                      {profile.pickupAddress?.pickupWindow || "Not set"}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="profile-grid">
-                    <div className="field">
-                      <label>Full name</label>
-                      <input name="name" value={form.name} onChange={handleChange} />
+                  {notice && <p className="field-hint">{notice}</p>}
+                  <div className="classic-profile-list">
+                    <div className="classic-profile-row">
+                      <p className="classic-profile-label">Owner Name</p>
+                      <p className="classic-profile-value">{profile.name || "Not set"}</p>
                     </div>
-                    <div className="field">
-                      <label>Email</label>
-                      <input value={profile.email} disabled />
+                    <div className="classic-profile-row">
+                      <p className="classic-profile-label">Email</p>
+                      <p className="classic-profile-value">{profile.email || "Not set"}</p>
                     </div>
-                  </div>
-                  <div className="profile-grid">
-                    <div className="field">
-                      <label>Mobile number</label>
-                      <input
-                        name="phone"
-                        value={form.phone}
-                        onChange={handleChange}
-                      />
+                    <div className="classic-profile-row">
+                      <p className="classic-profile-label">Phone</p>
+                      <p className="classic-profile-value">{profile.phone || "Not set"}</p>
                     </div>
-                  </div>
-                  {profile.role === "seller" && (
-                    <div className="field">
-                      <label>Store name</label>
-                      <input
-                        name="storeName"
-                        value={form.storeName}
-                        onChange={handleChange}
-                      />
-                      <p className="field-hint">
-                        Seller status: {profile.sellerStatus}
+                    <div className="classic-profile-row">
+                      <p className="classic-profile-label">Store Name</p>
+                      <p className="classic-profile-value">{profile.storeName || "Not set"}</p>
+                    </div>
+                    <div className="classic-profile-row">
+                      <p className="classic-profile-label">Support Email</p>
+                      <p className="classic-profile-value">{profile.supportEmail || "Not set"}</p>
+                    </div>
+                    <div className="classic-profile-row">
+                      <p className="classic-profile-label">Seller Status</p>
+                      <p className="classic-profile-value">{profile.sellerStatus || "pending"}</p>
+                    </div>
+                    <div className="classic-profile-row">
+                      <p className="classic-profile-label">About Store</p>
+                      <p className="classic-profile-value">{profile.about || "Not added yet"}</p>
+                    </div>
+                    <div className="classic-profile-row">
+                      <p className="classic-profile-label">Pickup Address</p>
+                      <p className="classic-profile-value">{pickupAddressLabel || "Not set"}</p>
+                    </div>
+                    <div className="classic-profile-row">
+                      <p className="classic-profile-label">Pickup Window</p>
+                      <p className="classic-profile-value">
+                        {profile.pickupAddress?.pickupWindow || "Not set"}
                       </p>
                     </div>
-                  )}
-                  <div className="hero-actions">
-                    <button
-                      className="btn primary"
-                      type="button"
-                      onClick={saveProfile}
-                      disabled={saving}
-                    >
-                      {saving ? "Saving..." : "Save changes"}
-                    </button>
                   </div>
-                </>
-              )}
-            </div>
+                </div>
 
-            <div className="profile-card">
-              <div className="card-head">
-                <h3 className="card-title">{roleLabel} Overview</h3>
-              </div>
-              {overviewError && <p className="field-hint">{overviewError}</p>}
-              {!overviewError && overview.cards.length > 0 && (
-                <div className="stat-grid">
-                  {overview.cards.map((card) => (
-                    <div key={card.label} className="stat-card">
-                      <p className="stat-label">{card.label}</p>
-                      <p className="stat-value">{card.value}</p>
+                <div className="profile-card">
+                  <div className="card-head">
+                    <h3 className="card-title">{roleLabel} Overview</h3>
+                  </div>
+                  {overviewError && <p className="field-hint">{overviewError}</p>}
+                  {!overviewError && overview.cards.length > 0 && (
+                    <div className="stat-grid">
+                      {overview.cards.map((card) => (
+                        <div key={card.label} className="stat-card">
+                          <p className="stat-label">{card.label}</p>
+                          <p className="stat-value">{card.value}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
-              {!overviewError && overview.rows.length > 0 && (
-                <div className="profile-role-table">
-                  <p className="profile-menu-title">{overview.rowsTitle}</p>
-                  {overview.rows.map((row) => (
-                    <div key={`${row.key}-${row.value}`} className="profile-role-row">
-                      <span className="profile-role-key">{row.key}</span>
-                      <span className="profile-role-value">{row.value}</span>
+                  )}
+                  {!overviewError && overview.rows.length > 0 && (
+                    <div className="profile-role-table">
+                      <p className="profile-menu-title">{overview.rowsTitle}</p>
+                      {overview.rows.map((row) => (
+                        <div key={`${row.key}-${row.value}`} className="profile-role-row">
+                          <span className="profile-role-key">{row.key}</span>
+                          <span className="profile-role-value">{row.value}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
+              </>
+            )}
           </main>
         </div>
       )}

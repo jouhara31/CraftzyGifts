@@ -160,7 +160,7 @@ export default function Wishlist() {
                   <div className="product-price wishlist-price-row">
                     <strong>₹{item.price}</strong>
                     <div className="wishlist-card-actions wishlist-card-actions-desktop">
-                      <Link className="btn ghost" to={productPath}>
+                      <Link className="btn ghost wishlist-view-btn" to={productPath}>
                         View item
                       </Link>
                       <button
