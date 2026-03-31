@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
 import logoPng from "../assets/logo.png";
@@ -8,6 +8,10 @@ import { getWishlist } from "../utils/wishlist";
 import { logoutSession } from "../utils/authSession";
 import { readStoredSessionClaims } from "../utils/authRoute";
 import { openNotificationStream } from "../utils/notificationStream";
+import {
+  buildSellerHeaderNavItems,
+  isWorkspacePathActive,
+} from "../utils/sellerWorkspace";
 import {
   DEFAULT_CATEGORY_TREE,
   buildCategoryPath,
@@ -446,7 +450,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     return anchor.offsetParent !== null ? anchor : accountButtonRef.current;
   };
 
-  const updateAccountMenuPosition = () => {
+  const updateAccountMenuPosition = useCallback(() => {
     if (typeof window === "undefined") return;
     const anchor = getAccountAnchor();
     if (!anchor) return;
@@ -468,7 +472,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       right: "auto",
       width: `${Math.round(width)}px`,
     });
-  };
+  }, [isSellerNav]);
 
   const getNotificationAnchor = () => {
     const candidates = [notificationButtonRef.current, notificationMobileButtonRef.current];
@@ -476,7 +480,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     return visibleNode || candidates.find(Boolean);
   };
 
-  const updateNotificationMenuPosition = () => {
+  const updateNotificationMenuPosition = useCallback(() => {
     if (typeof window === "undefined") return;
     const anchor = getNotificationAnchor();
     if (!anchor) return;
@@ -496,7 +500,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       right: "auto",
       width: `${Math.round(width)}px`,
     });
-  };
+  }, []);
 
   const syncNotificationState = (items = [], unreadCount = 0) => {
     setNotificationItems(Array.isArray(items) ? items : []);
@@ -580,7 +584,8 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     user?.profileImage || user?.avatar || user?.photo || user?.image || user?.imageUrl || "";
   const sellerAvatarInitial = sellerNameLabel.slice(0, 1).toUpperCase() || "S";
   const sellerId = String(user?.id || user?._id || readUserIdFromToken()).trim();
-  const sellerStorePath = sellerId ? `/store/${sellerId}` : "/seller/dashboard";
+  const sellerStorePath = sellerId ? `/seller/store/${sellerId}` : "/seller/dashboard";
+  const sellerHeaderNavItems = buildSellerHeaderNavItems({ sellerStorePath });
   const accountMenuPath = accountMenuUsesStore ? sellerStorePath : "/profile";
   const accountMenuLabel = accountMenuUsesStore ? "My Store" : "My Profile";
   const accountMenuIcon = accountMenuUsesStore ? "seller" : "profile";
@@ -634,7 +639,9 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       icon: "profile",
       active: user
         ? accountMenuUsesStore
-          ? location.pathname.startsWith("/store/") || location.pathname.startsWith("/seller/")
+          ? location.pathname.startsWith("/seller/store/") ||
+            location.pathname.startsWith("/store/") ||
+            location.pathname.startsWith("/seller/")
           : location.pathname === "/profile"
         : location.pathname === "/login",
     },
@@ -818,7 +825,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       window.removeEventListener("resize", syncPosition);
       window.removeEventListener("scroll", syncPosition, true);
     };
-  }, [notificationOpen]);
+  }, [notificationOpen, updateNotificationMenuPosition]);
 
   useEffect(() => {
     if (!accountOpen) return undefined;
@@ -833,7 +840,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       window.removeEventListener("resize", syncPosition);
       window.removeEventListener("scroll", syncPosition, true);
     };
-  }, [accountOpen, isSellerNav]);
+  }, [accountOpen, isSellerNav, updateAccountMenuPosition]);
 
   const notificationDropdown =
     showNotificationMenu && notificationOpen && typeof document !== "undefined"
@@ -1218,9 +1225,9 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                 )}
               </button>
             </div>
-            <a className="seller-help-link" href="/#support">
-              Help
-            </a>
+            <Link className="seller-help-link" to="/seller/messages">
+              Support
+            </Link>
             <span className="seller-profile-name">{sellerNameLabel}</span>
             <div className="icon-group seller-icon-group">
               <div className="account-menu seller-account-menu">
@@ -1247,59 +1254,18 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           {notificationDropdown}
           {accountDropdown}
 
-        <nav className="nav-links">
-          <Link
-            className={`nav-link ${sellerActive("/seller/dashboard") ? "active" : ""}`}
-            to="/seller/dashboard"
-            onClick={closeMobileMenu}
-          >
-            Overview
-          </Link>
-          <Link
-            className={`nav-link ${
-              sellerActive("/seller/store") || location.pathname.startsWith("/store/") ? "active" : ""
-            }`}
-            to={sellerStorePath}
-            onClick={closeMobileMenu}
-          >
-            My Store
-          </Link>
-          <Link
-            className={`nav-link ${sellerActive("/seller/products") ? "active" : ""}`}
-            to="/seller/products"
-            onClick={closeMobileMenu}
-          >
-            Products
-          </Link>
-          <Link
-            className={`nav-link ${sellerActive("/seller/listed-items") ? "active" : ""}`}
-            to="/seller/listed-items"
-            onClick={closeMobileMenu}
-          >
-            Custom Hamper Items
-          </Link>
-          <Link
-            className={`nav-link ${sellerActive("/seller/orders") ? "active" : ""}`}
-            to="/seller/orders"
-            onClick={closeMobileMenu}
-          >
-            Orders
-          </Link>
-          <Link
-            className={`nav-link ${sellerActive("/seller/payments") ? "active" : ""}`}
-            to="/seller/payments"
-            onClick={closeMobileMenu}
-          >
-            Payments
-          </Link>
-          <Link
-            className={`nav-link ${sellerActive("/seller/messages") ? "active" : ""}`}
-            to="/seller/messages"
-            onClick={closeMobileMenu}
-          >
-            Messages
-          </Link>
-        </nav>
+          <nav className="nav-links">
+            {sellerHeaderNavItems.map((item) => (
+              <Link
+                key={item.id}
+                className={`nav-link ${isWorkspacePathActive(location, item) ? "active" : ""}`}
+                to={item.path}
+                onClick={closeMobileMenu}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
       </header>
     );
   }

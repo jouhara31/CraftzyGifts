@@ -134,6 +134,10 @@ export default function Cart() {
     (sum, item) => sum + getCustomizationCharge(item) * item.quantity,
     0
   );
+  const customizationChargeLabel =
+    items.length > 0 && items.every((item) => isGenericHamperItem(item))
+      ? "Making charge"
+      : "Customization charges";
   const itemsTotal = subtotal + customizationTotal;
   const deliveryCharge = itemsTotal >= 999 ? 0 : 99;
   const payableTotal = itemsTotal + deliveryCharge;
@@ -259,10 +263,12 @@ export default function Cart() {
           <div className="cart-list modern">
           {items.map((item) => {
             const productId = String(item?.id || item?._id || "").trim();
+            const cartItemKey = String(item?.cartItemKey || productId).trim();
             const basePrice = getItemPrice(item);
             const customizationCharge = getCustomizationCharge(item);
             const unitPrice = basePrice + customizationCharge;
             const lineTotal = unitPrice * item.quantity;
+            const variantLabel = String(item?.selectedVariant?.label || "").trim();
             const selectedOptions = Object.values(
               item.customization?.selectedOptions || {}
             ).filter(Boolean);
@@ -273,7 +279,7 @@ export default function Cart() {
             const hasBaseSelection = getCustomizationBaseItems(item.customization).length > 0;
 
             return (
-              <article key={productId || item.name} className="cart-line-item">
+              <article key={cartItemKey || item.name} className="cart-line-item">
                 <Link to={productId ? `/products/${productId}` : "/products"}>
                   <img
                     className="cart-line-thumb"
@@ -288,7 +294,7 @@ export default function Cart() {
                     <button
                       className="cart-line-remove"
                       type="button"
-                      onClick={() => setItems(removeFromCart(productId))}
+                      onClick={() => setItems(removeFromCart(cartItemKey))}
                       aria-label={`Remove ${item.name}`}
                     >
                       x
@@ -297,6 +303,7 @@ export default function Cart() {
 
                   <p className="cart-line-delivery">{getDeliveryText(item)}</p>
                   <p className="cart-line-unit">₹{formatPrice(unitPrice)} each</p>
+                  {variantLabel ? <p className="cart-line-meta">Variant: {variantLabel}</p> : null}
 
                   {selectedOptions.length > 0 && (
                     <p className="cart-line-meta">
@@ -342,7 +349,7 @@ export default function Cart() {
                       value={item.quantity}
                       onChange={(event) => {
                         const qty = Number(event.target.value) || 1;
-                        setItems(updateQuantity(productId, qty));
+                        setItems(updateQuantity(cartItemKey, qty));
                       }}
                     >
                       {Array.from({ length: 10 }, (_, idx) => idx + 1).map((qty) => (
@@ -400,7 +407,7 @@ export default function Cart() {
               </div>
               {customizationTotal > 0 && (
                 <div className="cart-summary-line">
-                <span>Customization charges</span>
+                <span>{customizationChargeLabel}</span>
                 <span>₹{formatPrice(customizationTotal)}</span>
                 </div>
               )}

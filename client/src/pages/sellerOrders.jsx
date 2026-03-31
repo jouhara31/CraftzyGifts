@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import Header from "../components/Header";
+import {
+  formatBaseSelectionLabel,
+  getBulkBaseSelections,
+  getBulkHamperCount,
+  getCustomizationAddonItems,
+  isBulkHamperCustomization,
+} from "../utils/hamperBuildSummary";
+import {
+  downloadInvoiceDocument,
+  downloadPdfDocument,
+  prepareInvoiceDocumentWindow,
+  preparePdfDocumentWindow,
+} from "../utils/orderInvoice";
 
 import { API_URL } from "../apiBase";
 const LEGACY_OPTION_LABELS = {
@@ -30,6 +42,15 @@ const asNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
+const buildAddressLabel = (address = {}) =>
+  [address?.line1, address?.line2, address?.city, address?.state, address?.pincode]
+    .map(asText)
+    .filter(Boolean)
+    .join(", ");
+const shipmentStageLabel = (shipment = {}) =>
+  asText(shipment?.status || "")
+    .replace(/_/g, " ")
+    .trim() || "pending";
 
 const getReferenceImages = (customization) => {
   if (!customization) return [];
@@ -152,6 +173,8 @@ export default function SellerOrders() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [actingId, setActingId] = useState("");
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState("");
+  const [downloadingLabelId, setDownloadingLabelId] = useState("");
   const [expandedOrders, setExpandedOrders] = useState({});
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -282,10 +305,107 @@ export default function SellerOrders() {
     }
   };
 
-  return (
-    <div className="page seller-page">
-      <Header variant="seller" />
+  const handleInvoiceDownload = async (orderId) => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
 
+    const invoiceWindow = prepareInvoiceDocumentWindow();
+    setDownloadingInvoiceId(orderId);
+    setError("");
+    setNotice("");
+    try {
+      const res = await fetch(`${API_URL}/api/orders/${orderId}/invoice`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        if (invoiceWindow && !invoiceWindow.closed) {
+          invoiceWindow.close();
+        }
+        navigate("/login");
+        return;
+      }
+      if (!res.ok) {
+        let message = "Unable to download invoice.";
+        const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+        if (contentType.includes("application/json")) {
+          const data = await res.json().catch(() => null);
+          message = data?.message || message;
+        }
+        if (invoiceWindow && !invoiceWindow.closed) {
+          invoiceWindow.close();
+        }
+        setError(message);
+        return;
+      }
+      await downloadInvoiceDocument(res, invoiceWindow);
+      setNotice("Invoice opened.");
+    } catch {
+      if (invoiceWindow && !invoiceWindow.closed) {
+        invoiceWindow.close();
+      }
+      setError("Unable to download invoice.");
+    } finally {
+      setDownloadingInvoiceId("");
+    }
+  };
+
+  const handleShippingLabelDownload = async (orderId) => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    const labelWindow = preparePdfDocumentWindow({
+      title: "Preparing shipping label",
+      message: "Preparing shipping label PDF...",
+    });
+    setDownloadingLabelId(orderId);
+    setError("");
+    setNotice("");
+    try {
+      const res = await fetch(`${API_URL}/api/orders/${orderId}/shipping-label`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        if (labelWindow && !labelWindow.closed) {
+          labelWindow.close();
+        }
+        navigate("/login");
+        return;
+      }
+      if (!res.ok) {
+        let message = "Unable to download shipping label.";
+        const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+        if (contentType.includes("application/json")) {
+          const data = await res.json().catch(() => null);
+          message = data?.message || message;
+        }
+        if (labelWindow && !labelWindow.closed) {
+          labelWindow.close();
+        }
+        setError(message);
+        return;
+      }
+      await downloadPdfDocument(res, labelWindow, {
+        subtitle: "Backend-generated shipping label PDF",
+      });
+      setNotice("Shipping label opened.");
+    } catch {
+      if (labelWindow && !labelWindow.closed) {
+        labelWindow.close();
+      }
+      setError("Unable to download shipping label.");
+    } finally {
+      setDownloadingLabelId("");
+    }
+  };
+
+  return (
+    <div className="seller-shell-view seller-orders-page">
       <div className="section-head">
         <div>
           <h2>Order management</h2>
@@ -331,10 +451,11 @@ export default function SellerOrders() {
           const orderStatus = asText(order?.status);
           const next = SELLER_NEXT_STATUS[orderStatus] || [];
           const customization = order.customization || {};
-          const selectedItems = Array.isArray(customization.selectedItems)
-            ? customization.selectedItems
-            : [];
-          const selectedItemCount = selectedItems.reduce(
+          const baseSelections = getBulkBaseSelections(customization);
+          const selectedAddonItems = getCustomizationAddonItems(customization);
+          const bulkHamperCount = getBulkHamperCount(customization);
+          const isBulkBuild = isBulkHamperCustomization(customization);
+          const selectedItemCount = selectedAddonItems.reduce(
             (sum, item) => sum + asNumber(item?.quantity, 0),
             0
           );
@@ -351,6 +472,7 @@ export default function SellerOrders() {
             (reference) => !isImageReference(reference)
           );
           const hasCustomizationDetails =
+            baseSelections.length > 0 ||
             selectedItemCount > 0 ||
             selectedOptionCount > 0 ||
             Boolean(asText(customization.wishCardText)) ||
@@ -360,10 +482,14 @@ export default function SellerOrders() {
             referenceImageTexts.length > 0;
           const isExpanded = Boolean(expandedOrders[orderId]);
           const detailsId = `order-customization-${orderId || "unknown"}`;
-          const hasExpandableDetails = hasCustomizationDetails;
+          const hasExpandableDetails = true;
           const customizationBadge =
-            selectedItemCount > 0
+            isBulkBuild && bulkHamperCount > 0
+              ? `${bulkHamperCount} hamper${bulkHamperCount === 1 ? "" : "s"}`
+              : selectedItemCount > 0
               ? `${selectedItemCount} custom item(s)`
+              : baseSelections.length > 0
+                ? `${baseSelections.length} base selection${baseSelections.length === 1 ? "" : "s"}`
               : selectedOptionCount > 0
                 ? `${selectedOptionCount} option(s)`
                 : "";
@@ -377,6 +503,12 @@ export default function SellerOrders() {
             asText(order?.paymentStatus) || "-"
           }`;
           const totalAmount = asNumber(order?.total, 0).toLocaleString("en-IN");
+          const paymentStatus = asText(order?.paymentStatus).toLowerCase();
+          const invoiceAvailable =
+            orderStatus !== "pending_payment" &&
+            !(orderStatus === "cancelled" && ["pending", "failed"].includes(paymentStatus));
+          const shippingLabelAvailable =
+            orderStatus !== "pending_payment" && orderStatus !== "cancelled";
 
           return (
             <article key={orderId || `order-${index}`} className="order-card">
@@ -395,7 +527,7 @@ export default function SellerOrders() {
                       aria-expanded={isExpanded}
                       aria-controls={detailsId}
                     >
-                      {isExpanded ? "Hide customization details" : "View customization details"}
+                      {isExpanded ? "Hide order details" : "View order details"}
                     </button>
                   )}
                 </span>
@@ -440,13 +572,53 @@ export default function SellerOrders() {
                       </button>
                     </span>
                   )}
+                  <span className="dropdown-inline">
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      disabled={!invoiceAvailable || downloadingInvoiceId === orderId}
+                      onClick={() => handleInvoiceDownload(orderId)}
+                    >
+                      {downloadingInvoiceId === orderId ? (
+                        "Preparing invoice..."
+                      ) : (
+                        <>
+                          <svg
+                            viewBox="0 0 24 24"
+                            aria-hidden="true"
+                            focusable="false"
+                            width="16"
+                            height="16"
+                          >
+                            <path
+                              d="M12 3v10m0 0 4-4m-4 4-4-4M5 15v4h14v-4"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>{" "}
+                          Invoice
+                        </>
+                      )}
+                    </button>
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      disabled={!shippingLabelAvailable || downloadingLabelId === orderId}
+                      onClick={() => handleShippingLabelDownload(orderId)}
+                    >
+                      {downloadingLabelId === orderId ? "Preparing label..." : "Shipping label"}
+                    </button>
+                  </span>
                 </span>
                 <span className="order-total" data-label="Total">₹{totalAmount}</span>
               </div>
 
               {hasExpandableDetails && isExpanded && (
                 <div id={detailsId} className="order-customization">
-                  <p className="mini-title">Customization details</p>
+                  <p className="mini-title">Order details</p>
                   <div className="order-customization-grid">
                     {selectedOptionEntries.length > 0 && (
                       <section className="order-customization-block">
@@ -464,11 +636,35 @@ export default function SellerOrders() {
                       </section>
                     )}
 
-                    {selectedItems.length > 0 && (
+                    {baseSelections.length > 0 && (
                       <section className="order-customization-block">
-                        <p className="mini-sub">Selected hamper items</p>
+                        <p className="mini-sub">
+                          {isBulkBuild ? "Base distribution" : "Selected base"}
+                        </p>
                         <ul className="order-customization-list">
-                          {selectedItems.map((item) => (
+                          {baseSelections.map((item) => (
+                            <li key={`base-${item.id || item.name}`}>
+                              <span>
+                                {formatBaseSelectionLabel(item)}
+                                {" x"}
+                                {Number(item.quantity || 0)}
+                              </span>
+                              {Number(item.price || 0) > 0 && (
+                                <strong>₹{Number(item.price || 0).toLocaleString("en-IN")}</strong>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    )}
+
+                    {selectedAddonItems.length > 0 && (
+                      <section className="order-customization-block">
+                        <p className="mini-sub">
+                          {isBulkBuild ? "Shared hamper items" : "Selected hamper items"}
+                        </p>
+                        <ul className="order-customization-list">
+                          {selectedAddonItems.map((item) => (
                             <li key={item.id || item.name}>
                               <span>
                                 {[
@@ -573,6 +769,57 @@ export default function SellerOrders() {
                         )}
                       </section>
                     )}
+
+                    <section className="order-customization-block">
+                      <p className="mini-sub">Customer details</p>
+                      <p className="order-customization-copy">
+                        {customerName}
+                        {asText(order?.customer?.email) ? ` • ${asText(order.customer.email)}` : ""}
+                        {asText(order?.customer?.phone) ? ` • ${asText(order.customer.phone)}` : ""}
+                      </p>
+                    </section>
+
+                    <section className="order-customization-block">
+                      <p className="mini-sub">Shipping address</p>
+                      <p className="order-customization-copy">
+                        {buildAddressLabel(order?.shippingAddress) || "Address not available"}
+                      </p>
+                    </section>
+
+                    <section className="order-customization-block">
+                      <p className="mini-sub">Payment & invoice</p>
+                      <p className="order-customization-copy">
+                        Method: {asText(order?.paymentMode).toUpperCase() || "-"} | Status:{" "}
+                        {asText(order?.paymentStatus) || "-"} | Invoice:{" "}
+                        {asText(order?.invoice?.number) || "Generated on demand"}
+                      </p>
+                    </section>
+
+                    <section className="order-customization-block">
+                      <p className="mini-sub">Tracking & shipment</p>
+                      <p className="order-customization-copy">
+                        Stage: {shipmentStageLabel(order?.shipment)} | Courier:{" "}
+                        {asText(order?.shipment?.courierName) || "Not assigned"} | Tracking:{" "}
+                        {asText(order?.shipment?.trackingId) || "Pending"} | AWB:{" "}
+                        {asText(order?.shipment?.awbNumber) || "Pending"}
+                      </p>
+                      {asText(order?.shipment?.packagingNotes) ? (
+                        <p className="order-customization-copy">
+                          Packaging notes: {asText(order.shipment.packagingNotes)}
+                        </p>
+                      ) : null}
+                    </section>
+
+                    {asText(order?.returnReason || order?.cancellationReason) ? (
+                      <section className="order-customization-block">
+                        <p className="mini-sub">
+                          {orderStatus === "cancelled" ? "Cancellation reason" : "Return reason"}
+                        </p>
+                        <p className="order-customization-copy">
+                          {asText(order?.returnReason || order?.cancellationReason)}
+                        </p>
+                      </section>
+                    ) : null}
                   </div>
                 </div>
               )}
@@ -583,4 +830,3 @@ export default function SellerOrders() {
     </div>
   );
 }
-

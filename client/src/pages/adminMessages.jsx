@@ -4,15 +4,20 @@ import AdminSidebarLayout from "../components/AdminSidebarLayout";
 import SupportAvatar from "../components/SupportAvatar";
 import SupportChatPanel from "../components/SupportChatPanel";
 import { clearAuthSession } from "../utils/authSession";
+import { optimizeImageFile } from "../utils/imageUpload";
 import {
   MESSAGE_REFRESH_INTERVAL_MS,
   fetchConversation,
   fetchConversationList,
   fetchConversationMessages,
+  fetchSupportTicketMessages,
+  fetchSupportTickets,
   formatConversationTimestamp,
   getConversationDisplayName,
   getConversationPreview,
+  replyToSupportTicket,
   sendConversationMessage,
+  updateSupportTicketStatus,
 } from "../utils/messaging";
 
 const DEFAULT_VISIBLE_SELLERS = 7;
@@ -131,12 +136,24 @@ export default function AdminMessages() {
   const [sending, setSending] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [showAllSellers, setShowAllSellers] = useState(false);
+  const [supportTickets, setSupportTickets] = useState([]);
+  const [ticketListLoading, setTicketListLoading] = useState(true);
+  const [ticketListError, setTicketListError] = useState("");
+  const [activeTicket, setActiveTicket] = useState(null);
+  const [ticketMessages, setTicketMessages] = useState([]);
+  const [ticketMessagesLoading, setTicketMessagesLoading] = useState(false);
+  const [ticketMessagesError, setTicketMessagesError] = useState("");
+  const [ticketDraft, setTicketDraft] = useState("");
+  const [ticketAttachment, setTicketAttachment] = useState("");
+  const [ticketSending, setTicketSending] = useState(false);
+  const [ticketStatusUpdating, setTicketStatusUpdating] = useState(false);
 
   const clearAndRedirect = useCallback(() => {
     clearAuthSession();
     navigate("/login", { replace: true });
   }, [navigate]);
   const requestedConversationId = String(searchParams.get("conversation") || "").trim();
+  const requestedSupportTicketId = String(searchParams.get("supportTicket") || "").trim();
   const replaceConversationQuery = useCallback(
     (conversationId) => {
       const normalizedConversationId = String(conversationId || "").trim();
@@ -150,6 +167,37 @@ export default function AdminMessages() {
     },
     [searchParams, setSearchParams]
   );
+  const replaceSupportTicketQuery = useCallback(
+    (ticketId) => {
+      const normalizedTicketId = String(ticketId || "").trim();
+      const next = new URLSearchParams(searchParams);
+      if (normalizedTicketId) {
+        next.set("supportTicket", normalizedTicketId);
+      } else {
+        next.delete("supportTicket");
+      }
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
+
+  const handleAttachmentFile = useCallback(async (event) => {
+    const file = event.target?.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const optimized = await optimizeImageFile(file, {
+        maxWidth: 1400,
+        maxHeight: 1400,
+        quality: 0.82,
+      });
+      setTicketAttachment(optimized);
+      setTicketMessagesError("");
+    } catch (fileError) {
+      setTicketMessagesError(fileError?.message || "Unable to process this image attachment.");
+    }
+  }, []);
 
   const loadConversationList = useCallback(async () => {
     setListLoading(true);
@@ -183,15 +231,47 @@ export default function AdminMessages() {
     }
   }, [clearAndRedirect, requestedConversationId]);
 
+  const loadSupportTicketList = useCallback(async () => {
+    setTicketListLoading(true);
+    setTicketListError("");
+
+    try {
+      const data = await fetchSupportTickets();
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const requestedItem = requestedSupportTicketId
+        ? items.find((item) => String(item?.id || "").trim() === requestedSupportTicketId)
+        : null;
+
+      setSupportTickets(items);
+      setActiveTicket((prev) => {
+        if (requestedItem) return requestedItem;
+        if (prev && items.some((item) => String(item?.id || "").trim() === String(prev?.id || "").trim())) {
+          return items.find((item) => String(item?.id || "").trim() === String(prev?.id || "").trim()) || null;
+        }
+        return null;
+      });
+    } catch (loadError) {
+      if (loadError?.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      setTicketListError(loadError?.message || "Unable to load support tickets.");
+    } finally {
+      setTicketListLoading(false);
+    }
+  }, [clearAndRedirect, requestedSupportTicketId]);
+
   useEffect(() => {
     loadConversationList();
+    loadSupportTicketList();
 
     const intervalId = window.setInterval(() => {
       loadConversationList();
+      loadSupportTicketList();
     }, 20000);
 
     return () => window.clearInterval(intervalId);
-  }, [loadConversationList]);
+  }, [loadConversationList, loadSupportTicketList]);
 
   const selectedItem = useMemo(
     () =>
@@ -199,6 +279,7 @@ export default function AdminMessages() {
       null,
     [conversations, selectedSellerId]
   );
+  const activePanel = activeTicket ? "ticket" : "chat";
   const filteredConversations = useMemo(() => {
     const query = String(searchText || "").trim().toLowerCase();
     if (!query) return conversations;
@@ -210,6 +291,17 @@ export default function AdminMessages() {
       return storeName.includes(query) || sellerName.includes(query) || preview.includes(query);
     });
   }, [conversations, searchText]);
+  const filteredSupportTickets = useMemo(() => {
+    const query = String(searchText || "").trim().toLowerCase();
+    if (!query) return supportTickets;
+
+    return supportTickets.filter((item) => {
+      const title = String(item?.title || "").toLowerCase();
+      const sellerName = String(item?.seller?.storeName || item?.seller?.name || "").toLowerCase();
+      const preview = String(item?.lastMessagePreview || "").toLowerCase();
+      return title.includes(query) || sellerName.includes(query) || preview.includes(query);
+    });
+  }, [searchText, supportTickets]);
   const visibleConversations = useMemo(() => {
     const query = String(searchText || "").trim();
     if (
@@ -288,6 +380,55 @@ export default function AdminMessages() {
     [clearAndRedirect, replaceConversationQuery, selectedSellerId]
   );
 
+  const syncActiveTicket = useCallback(
+    async ({ background = false, ticketId: overrideTicketId = "" } = {}) => {
+      const ticketId = String(
+        overrideTicketId || activeTicket?.id || requestedSupportTicketId || ""
+      ).trim();
+      if (!ticketId) {
+        setTicketMessages([]);
+        return;
+      }
+
+      if (!background) {
+        setTicketMessagesLoading(true);
+      }
+      setTicketMessagesError("");
+
+      try {
+        const data = await fetchSupportTicketMessages(ticketId);
+        setActiveTicket(data?.ticket || null);
+        setTicketMessages(Array.isArray(data?.messages) ? data.messages : []);
+        setSupportTickets((prev) => {
+          const nextItems = Array.isArray(prev) ? [...prev] : [];
+          const nextTicket = data?.ticket;
+          if (!nextTicket?.id) return nextItems;
+          const existingIndex = nextItems.findIndex(
+            (item) => String(item?.id || "").trim() === String(nextTicket.id || "").trim()
+          );
+          if (existingIndex >= 0) {
+            nextItems[existingIndex] = nextTicket;
+          } else {
+            nextItems.unshift(nextTicket);
+          }
+          return nextItems;
+        });
+        replaceSupportTicketQuery(ticketId);
+      } catch (loadError) {
+        if (loadError?.status === 401) {
+          clearAndRedirect();
+          return;
+        }
+        setTicketMessagesError(loadError?.message || "Unable to load this support ticket.");
+      } finally {
+        if (!background) {
+          setTicketMessagesLoading(false);
+        }
+      }
+    },
+    [activeTicket?.id, clearAndRedirect, replaceSupportTicketQuery, requestedSupportTicketId]
+  );
+
   useEffect(() => {
     if (!selectedSellerId) return undefined;
 
@@ -298,6 +439,17 @@ export default function AdminMessages() {
 
     return () => window.clearInterval(intervalId);
   }, [selectedSellerId, syncActiveConversation]);
+
+  useEffect(() => {
+    if (!requestedSupportTicketId && !activeTicket?.id) return undefined;
+
+    syncActiveTicket();
+    const intervalId = window.setInterval(() => {
+      syncActiveTicket({ background: true });
+    }, MESSAGE_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [activeTicket?.id, requestedSupportTicketId, syncActiveTicket]);
 
   const handleSend = useCallback(async () => {
     const text = String(draft || "").trim();
@@ -331,53 +483,221 @@ export default function AdminMessages() {
       setSending(false);
     }
   }, [clearAndRedirect, conversation?.id, draft, replaceConversationQuery, selectedSellerId]);
-  const headerActions = selectedItem ? (
-    <>
-      <button
-        className="support-chat-head-icon"
-        type="button"
-        aria-label="Refresh conversation"
-        title="Refresh conversation"
-        onClick={() => syncActiveConversation()}
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M20 7.5V4h-3.5" />
-          <path d="M4 16.5V20h3.5" />
-          <path d="M19.4 10A7 7 0 0 0 7 6.6L4 9.5" />
-          <path d="M4.6 14A7 7 0 0 0 17 17.4l3-2.9" />
-        </svg>
-      </button>
-      <button
-        className="support-chat-head-icon"
-        type="button"
-        aria-label="Open seller store"
-        title="Open seller store"
-        onClick={() => navigate(`/store/${selectedItem?.seller?.id || ""}`)}
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 10h16" />
-          <path d="M6 10v8h12v-8" />
-          <path d="m6 10 1.8-4h8.4l1.8 4" />
-        </svg>
-      </button>
-      {selectedItem?.seller?.instagramUrl ? (
-        <a
-          className="support-chat-head-icon"
-          href={selectedItem.seller.instagramUrl}
-          target="_blank"
-          rel="noreferrer"
-          aria-label="Open Instagram profile"
-          title="Open Instagram profile"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="4.5" y="4.5" width="15" height="15" rx="4.2" />
-            <circle cx="12" cy="12" r="3.4" />
-            <circle cx="17.2" cy="6.8" r="1.05" fill="currentColor" stroke="none" />
-          </svg>
-        </a>
-      ) : null}
-    </>
-  ) : null;
+  const openConversation = (sellerId) => {
+    setActiveTicket(null);
+    setTicketMessages([]);
+    setTicketDraft("");
+    setTicketAttachment("");
+    replaceSupportTicketQuery("");
+    setSelectedSellerId(String(sellerId || "").trim());
+  };
+
+  const openSupportTicket = useCallback(
+    async (ticketId) => {
+      const normalizedTicketId = String(ticketId || "").trim();
+      if (!normalizedTicketId) return;
+      const summary =
+        supportTickets.find((item) => String(item?.id || "").trim() === normalizedTicketId) || null;
+      setActiveTicket(summary);
+      setTicketDraft("");
+      setTicketAttachment("");
+      if (summary?.seller?.id) {
+        setSelectedSellerId(String(summary.seller.id || "").trim());
+      }
+      replaceSupportTicketQuery(normalizedTicketId);
+      await syncActiveTicket({ ticketId: normalizedTicketId });
+    },
+    [replaceSupportTicketQuery, supportTickets, syncActiveTicket]
+  );
+
+  const handleSendTicketReply = useCallback(async () => {
+    const text = String(ticketDraft || "").trim();
+    if ((!text && !ticketAttachment) || !activeTicket?.id) return;
+
+    setTicketSending(true);
+    setTicketMessagesError("");
+    try {
+      const response = await replyToSupportTicket({
+        ticketId: activeTicket.id,
+        text: text || "Attachment shared.",
+        attachmentUrl: ticketAttachment,
+      });
+      if (response?.ticket) {
+        setActiveTicket(response.ticket);
+        setSupportTickets((prev) => {
+          const nextItems = Array.isArray(prev) ? [...prev] : [];
+          const existingIndex = nextItems.findIndex(
+            (item) => String(item?.id || "").trim() === String(response.ticket.id || "").trim()
+          );
+          if (existingIndex >= 0) {
+            nextItems[existingIndex] = response.ticket;
+          } else {
+            nextItems.unshift(response.ticket);
+          }
+          return nextItems;
+        });
+      }
+      setTicketMessages(Array.isArray(response?.messages) ? response.messages : []);
+      setTicketDraft("");
+      setTicketAttachment("");
+    } catch (sendError) {
+      if (sendError?.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      setTicketMessagesError(sendError?.message || "Unable to reply to this support ticket.");
+    } finally {
+      setTicketSending(false);
+    }
+  }, [activeTicket?.id, clearAndRedirect, ticketAttachment, ticketDraft]);
+
+  const handleTicketStatusChange = useCallback(
+    async (nextStatus) => {
+      if (!activeTicket?.id || !nextStatus) return;
+      setTicketStatusUpdating(true);
+      setTicketMessagesError("");
+      try {
+        const response = await updateSupportTicketStatus({
+          ticketId: activeTicket.id,
+          status: nextStatus,
+        });
+        if (response?.ticket) {
+          setActiveTicket(response.ticket);
+          setSupportTickets((prev) =>
+            (Array.isArray(prev) ? prev : []).map((item) =>
+              String(item?.id || "").trim() === String(response.ticket.id || "").trim()
+                ? response.ticket
+                : item
+            )
+          );
+        }
+      } catch (statusError) {
+        if (statusError?.status === 401) {
+          clearAndRedirect();
+          return;
+        }
+        setTicketMessagesError(statusError?.message || "Unable to update this ticket status.");
+      } finally {
+        setTicketStatusUpdating(false);
+      }
+    },
+    [activeTicket?.id, clearAndRedirect]
+  );
+  const headerActions = activePanel === "ticket"
+    ? (
+        <>
+          <button
+            className="support-chat-head-icon"
+            type="button"
+            aria-label="Refresh support ticket"
+            title="Refresh support ticket"
+            onClick={() => syncActiveTicket()}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 7.5V4h-3.5" />
+              <path d="M4 16.5V20h3.5" />
+              <path d="M19.4 10A7 7 0 0 0 7 6.6L4 9.5" />
+              <path d="M4.6 14A7 7 0 0 0 17 17.4l3-2.9" />
+            </svg>
+          </button>
+          <label className="support-chat-status-select">
+            <span className="sr-only">Ticket status</span>
+            <select
+              value={activeTicket?.status || "open"}
+              onChange={(event) => handleTicketStatusChange(event.target.value)}
+              disabled={ticketStatusUpdating}
+            >
+              <option value="open">Open</option>
+              <option value="in_progress">In progress</option>
+              <option value="resolved">Resolved</option>
+              <option value="closed">Closed</option>
+            </select>
+          </label>
+        </>
+      )
+    : selectedItem
+      ? (
+          <>
+            <button
+              className="support-chat-head-icon"
+              type="button"
+              aria-label="Refresh conversation"
+              title="Refresh conversation"
+              onClick={() => syncActiveConversation()}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 7.5V4h-3.5" />
+                <path d="M4 16.5V20h3.5" />
+                <path d="M19.4 10A7 7 0 0 0 7 6.6L4 9.5" />
+                <path d="M4.6 14A7 7 0 0 0 17 17.4l3-2.9" />
+              </svg>
+            </button>
+            <button
+              className="support-chat-head-icon"
+              type="button"
+              aria-label="Open seller store"
+              title="Open seller store"
+              onClick={() => navigate(`/store/${selectedItem?.seller?.id || ""}`)}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 10h16" />
+                <path d="M6 10v8h12v-8" />
+                <path d="m6 10 1.8-4h8.4l1.8 4" />
+              </svg>
+            </button>
+            {selectedItem?.seller?.instagramUrl ? (
+              <a
+                className="support-chat-head-icon"
+                href={selectedItem.seller.instagramUrl}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open Instagram profile"
+                title="Open Instagram profile"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="4.5" y="4.5" width="15" height="15" rx="4.2" />
+                  <circle cx="12" cy="12" r="3.4" />
+                  <circle cx="17.2" cy="6.8" r="1.05" fill="currentColor" stroke="none" />
+                </svg>
+              </a>
+            ) : null}
+          </>
+        )
+      : null;
+
+  const currentMessages = activePanel === "ticket" ? ticketMessages : messages;
+  const currentHeading =
+    activePanel === "ticket"
+      ? activeTicket?.title || "Support ticket"
+      : selectedItem
+        ? getConversationDisplayName(selectedItem)
+        : "Select a seller";
+  const currentSubheading =
+    activePanel === "ticket"
+      ? `${String(activeTicket?.seller?.storeName || activeTicket?.seller?.name || "Seller").trim()}`
+      : selectedItem
+        ? `${String(selectedItem?.seller?.sellerStatus || "seller").trim()} seller`
+        : "Choose a seller or a support ticket from the left.";
+  const currentParticipantName =
+    activePanel === "ticket"
+      ? String(activeTicket?.seller?.storeName || activeTicket?.seller?.name || "Seller").trim() || "Seller"
+      : selectedItem
+        ? getConversationDisplayName(selectedItem)
+        : "Seller support";
+  const currentParticipantSubtitle =
+    activePanel === "ticket"
+      ? `Support ticket · ${String(activeTicket?.category || "general").replace(/_/g, " ")}`
+      : selectedItem
+        ? `${String(selectedItem?.seller?.name || "").trim() || "Store owner"}`
+        : "Marketplace conversation";
+  const currentBadge =
+    activePanel === "ticket"
+      ? formatTicketStatus(activeTicket?.status)
+      : selectedItem?.seller?.instagramUrl
+        ? "Instagram linked"
+        : selectedItem
+          ? "Marketplace seller"
+          : "";
 
   return (
     <AdminSidebarLayout
@@ -387,8 +707,8 @@ export default function AdminMessages() {
         <aside className="support-conversation-list">
           <div className="support-conversation-list-head">
             <div>
-              <h3>Messages</h3>
-              <p>Seller inbox</p>
+              <h3>Support desk</h3>
+              <p>Seller inbox and support ticket queue</p>
             </div>
           </div>
           <label className="support-conversation-search">
@@ -406,10 +726,10 @@ export default function AdminMessages() {
 
           {listLoading ? <p className="field-hint">Loading seller conversations...</p> : null}
           {!listLoading && listError ? <p className="field-hint">{listError}</p> : null}
-          {!listLoading && !listError && filteredConversations.length === 0 ? (
+          {!listLoading && !listError && filteredConversations.length === 0 && filteredSupportTickets.length === 0 ? (
             <div className="support-chat-empty compact">
-              <strong>No matching chats</strong>
-              <p>Try another seller name or wait for new messages.</p>
+              <strong>No matching items</strong>
+              <p>Try another seller name, ticket title, or wait for new updates.</p>
             </div>
           ) : null}
 
@@ -421,7 +741,7 @@ export default function AdminMessages() {
                   key={String(item?.seller?.id || item?.id || "seller")}
                   className={`support-conversation-card ${active ? "active" : ""}`.trim()}
                   type="button"
-                  onClick={() => setSelectedSellerId(String(item?.seller?.id || "").trim())}
+                  onClick={() => openConversation(String(item?.seller?.id || "").trim())}
                 >
                   <div className="support-conversation-card-layout">
                     <SupportAvatar
@@ -449,6 +769,37 @@ export default function AdminMessages() {
               );
             })}
           </div>
+          <div className="seller-support-ticket-strip admin-support-ticket-strip">
+            <strong>Support tickets</strong>
+            <span className="field-hint">{filteredSupportTickets.length} visible</span>
+          </div>
+          {ticketListLoading ? <p className="field-hint">Loading support tickets...</p> : null}
+          {!ticketListLoading && ticketListError ? <p className="field-hint">{ticketListError}</p> : null}
+          <div className="seller-support-ticket-list">
+            {filteredSupportTickets.map((ticket) => (
+              <button
+                key={ticket.id}
+                type="button"
+                className={`seller-support-ticket-card ${
+                  activeTicket?.id === ticket.id ? "active" : ""
+                }`.trim()}
+                onClick={() => openSupportTicket(ticket.id)}
+              >
+                <div className="seller-support-ticket-head">
+                  <strong>{ticket.title}</strong>
+                  <span>{formatTicketStatus(ticket.status)}</span>
+                </div>
+                <p>{ticket.lastMessagePreview || "No updates yet."}</p>
+                <small>
+                  {String(ticket?.seller?.storeName || ticket?.seller?.name || "Seller").trim()} ·{" "}
+                  {formatConversationTimestamp(ticket.updatedAt)}
+                </small>
+              </button>
+            ))}
+            {!ticketListLoading && filteredSupportTickets.length === 0 ? (
+              <p className="field-hint">No support tickets yet.</p>
+            ) : null}
+          </div>
           {filteredConversations.length > DEFAULT_VISIBLE_SELLERS &&
           !String(searchText || "").trim() ? (
             <div className="support-conversation-footer">
@@ -466,39 +817,44 @@ export default function AdminMessages() {
         </aside>
 
         <SupportChatPanel
-          heading={selectedItem ? getConversationDisplayName(selectedItem) : "Select a seller"}
-          subheading={
-            selectedItem
-              ? `${String(selectedItem?.seller?.sellerStatus || "seller").trim()} seller`
-              : "Choose a seller from the left to open the chat."
+          heading={currentHeading}
+          subheading={currentSubheading}
+          participantName={currentParticipantName}
+          participantSubtitle={currentParticipantSubtitle}
+          participantAvatar={
+            activePanel === "ticket"
+              ? activeTicket?.seller?.profileImage || ""
+              : selectedItem?.seller?.profileImage || ""
           }
-          participantName={selectedItem ? getConversationDisplayName(selectedItem) : "Seller support"}
-          participantSubtitle={
-            selectedItem
-              ? `${String(selectedItem?.seller?.name || "").trim() || "Store owner"}`
-              : "Marketplace conversation"
-          }
-          participantAvatar={selectedItem?.seller?.profileImage || ""}
-          badge={
-            selectedItem?.seller?.instagramUrl
-              ? "Instagram linked"
-              : selectedItem
-                ? "Marketplace seller"
-                : ""
-          }
+          badge={currentBadge}
           headerActions={headerActions}
-          messages={messages}
+          messages={currentMessages}
           currentRole="admin"
-          loading={messagesLoading}
-          error={messagesError}
-          emptyTitle="No chat history yet"
-          emptyText="Send the first support reply to begin this seller conversation."
-          draft={draft}
-          sending={sending}
-          disabled={!selectedItem}
-          onDraftChange={setDraft}
-          onSend={handleSend}
-          onRetry={() => syncActiveConversation()}
+          loading={activePanel === "ticket" ? ticketMessagesLoading : messagesLoading}
+          error={activePanel === "ticket" ? ticketMessagesError : messagesError}
+          emptyTitle={
+            activePanel === "ticket" ? "No ticket replies yet" : "No chat history yet"
+          }
+          emptyText={
+            activePanel === "ticket"
+              ? "Reply here to continue this support ticket."
+              : "Send the first support reply to begin this seller conversation."
+          }
+          draft={activePanel === "ticket" ? ticketDraft : draft}
+          attachment={activePanel === "ticket" ? ticketAttachment : ""}
+          sending={activePanel === "ticket" ? ticketSending : sending}
+          disabled={activePanel === "ticket" ? !activeTicket : !selectedItem}
+          onDraftChange={activePanel === "ticket" ? setTicketDraft : setDraft}
+          onAttachmentFileChange={
+            activePanel === "ticket" ? handleAttachmentFile : undefined
+          }
+          onAttachmentClear={
+            activePanel === "ticket" ? () => setTicketAttachment("") : undefined
+          }
+          onSend={activePanel === "ticket" ? handleSendTicketReply : handleSend}
+          onRetry={() =>
+            activePanel === "ticket" ? syncActiveTicket() : syncActiveConversation()
+          }
         />
       </div>
     </AdminSidebarLayout>

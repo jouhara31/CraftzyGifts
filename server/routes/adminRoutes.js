@@ -16,7 +16,11 @@ const {
   getAdminPlatformSettings,
   updateAdminPlatformSettings,
 } = require("../controllers/adminController");
-const { updateOrderStatus } = require("../controllers/orderController");
+const {
+  updateOrderStatus,
+  getAdminPayoutBatches,
+  updateAdminPayoutStatus,
+} = require("../controllers/orderController");
 const { auth, requireRole } = require("../middleware/auth");
 const { createRateLimiter } = require("../middleware/rateLimit");
 
@@ -94,6 +98,14 @@ router.patch(
   requireRole("admin"),
   adminWriteRateLimit,
   updateOrderStatus
+);
+router.get("/finance/payouts", auth, requireRole("admin"), getAdminPayoutBatches);
+router.patch(
+  "/finance/payouts/:batchId",
+  auth,
+  requireRole("admin"),
+  adminWriteRateLimit,
+  updateAdminPayoutStatus
 );
 
 module.exports = router;

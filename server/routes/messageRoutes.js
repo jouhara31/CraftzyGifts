@@ -5,6 +5,11 @@ const {
   listConversations,
   getMessages,
   sendMessage,
+  listSupportTickets,
+  createSupportTicket,
+  getSupportTicketMessages,
+  replyToSupportTicket,
+  updateSupportTicketStatus,
 } = require("../controllers/messageController");
 const { auth, requireRole } = require("../middleware/auth");
 const { createRateLimiter } = require("../middleware/rateLimit");
@@ -31,6 +36,61 @@ router.get(
     message: "Too many message refreshes. Please try again shortly.",
   }),
   listConversations
+);
+
+router.get(
+  "/support-tickets",
+  createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 60,
+    keyPrefix: "messages:support-tickets",
+    message: "Please wait a moment before refreshing support tickets again.",
+  }),
+  listSupportTickets
+);
+
+router.post(
+  "/support-tickets",
+  createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 20,
+    keyPrefix: "messages:support-ticket-create",
+    message: "Please wait a moment before creating another support ticket.",
+  }),
+  createSupportTicket
+);
+
+router.get(
+  "/support-tickets/:ticketId",
+  createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 80,
+    keyPrefix: "messages:support-ticket-view",
+    message: "Please wait a moment before refreshing this support ticket again.",
+  }),
+  getSupportTicketMessages
+);
+
+router.post(
+  "/support-tickets/:ticketId/messages",
+  createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 40,
+    keyPrefix: "messages:support-ticket-send",
+    message: "You are sending support ticket messages too quickly. Please slow down for a moment.",
+  }),
+  replyToSupportTicket
+);
+
+router.patch(
+  "/support-tickets/:ticketId",
+  createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 40,
+    keyPrefix: "messages:support-ticket-status",
+    message: "Too many support ticket status updates. Please slow down for a moment.",
+  }),
+  updateSupportTicketStatus
 );
 
 router.get(

@@ -8,10 +8,22 @@ const { maybeCreateInventoryNotifications } = require("../utils/sellerNotificati
 const MAX_SELLING_PRICE = 200000;
 const MAX_MRP = 500000;
 const MAX_SURCHARGE = 50000;
+const MAX_SKU_LENGTH = 48;
+const MAX_HSN_LENGTH = 8;
+const MAX_TAX_RATE = 50;
 const MAX_PRODUCT_NAME_LENGTH = 120;
 const MAX_PRODUCT_DESCRIPTION_LENGTH = 2000;
 const MAX_CATEGORY_NAME_LENGTH = 60;
 const MAX_SUBCATEGORY_NAME_LENGTH = 60;
+const MAX_BRAND_LENGTH = 80;
+const MAX_PRODUCT_TYPE_LENGTH = 60;
+const MAX_PRODUCT_TAGS = 12;
+const MAX_TAG_LENGTH = 32;
+const MAX_SHIPPING_INFO_LENGTH = 400;
+const MAX_RETURN_POLICY_LENGTH = 500;
+const MAX_VARIANTS = 20;
+const MAX_VARIANT_TEXT_LENGTH = 60;
+const MAX_STOCK_HISTORY_ITEMS = 24;
 const MIN_PRODUCT_IMAGES = 3;
 const RATING_PRIOR_COUNT = 8;
 const GLOBAL_RATING_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -26,6 +38,8 @@ let globalRatingSummaryCache = {
   expiresAt: 0,
   value: null,
 };
+const SKU_PATTERN = /^[A-Z0-9][A-Z0-9._/-]{0,47}$/;
+const HSN_CODE_PATTERN = /^[0-9]{4,8}$/;
 
 const escapeRegex = (value = "") =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -66,6 +80,7 @@ const getGlobalRatingSummary = async () => {
     {
       $match: {
         "review.rating": { $gte: 1, $lte: 5 },
+        ...VISIBLE_REVIEW_MATCH,
       },
     },
     {
@@ -101,6 +116,12 @@ const buildRatingBreakdown = (source = {}, totalFeedbacks = 0) =>
     };
     return acc;
   }, {});
+const VISIBLE_REVIEW_MATCH = {
+  $or: [
+    { "review.visibleToStorefront": { $ne: false } },
+    { "review.visibleToStorefront": { $exists: false } },
+  ],
+};
 const buildProductReviewStats = (summary = {}) => {
   const totalFeedbacks = Math.max(0, Number(summary?.totalFeedbacks || 0));
   const avgRating = roundRating(Number(summary?.avgRating || 0));
@@ -131,6 +152,7 @@ const withProductReviewStats = async (products = []) => {
       $match: {
         product: { $in: productIds },
         "review.rating": { $gte: 1, $lte: 5 },
+        ...VISIBLE_REVIEW_MATCH,
       },
     },
     {
@@ -196,6 +218,39 @@ const parseBoundedInt = (
   return Math.min(Math.max(parsed, min), max);
 };
 
+const parseSku = (value, fallback = "") => {
+  const text = String(value || "").trim().toUpperCase();
+  return text ? text.slice(0, MAX_SKU_LENGTH) : fallback;
+};
+
+const parseHsnCode = (value, fallback = "") => {
+  const text = String(value || "").trim();
+  return text ? text.slice(0, MAX_HSN_LENGTH) : fallback;
+};
+
+const parseTaxRate = (value, fallback = 0) => {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return Number.NaN;
+  return roundMoney(parsed);
+};
+
+const validateInvoiceMetadata = ({ sku = "", hsnCode = "", taxRate = 0 } = {}) => {
+  if (sku && !SKU_PATTERN.test(sku)) {
+    return `SKU can use only letters, numbers, dot, slash, underscore, or hyphen and must be at most ${MAX_SKU_LENGTH} characters.`;
+  }
+  if (hsnCode && !HSN_CODE_PATTERN.test(hsnCode)) {
+    return `HSN code must be ${4}-${MAX_HSN_LENGTH} digits.`;
+  }
+  if (!Number.isFinite(taxRate) || taxRate < 0) {
+    return "Tax rate must be a valid number.";
+  }
+  if (taxRate > MAX_TAX_RATE) {
+    return `Tax rate cannot exceed ${MAX_TAX_RATE}%.`;
+  }
+  return "";
+};
+
 const parseStringList = (value, fallback = [], maxItems = 12) => {
   const source = Array.isArray(value)
     ? value
@@ -210,6 +265,296 @@ const parseStringList = (value, fallback = [], maxItems = 12) => {
         .filter(Boolean)
     )
   ).slice(0, maxItems);
+};
+
+const parseShortText = (value, fallback = "", maxLength = 120) => {
+  const text = String(value || "").trim();
+  return text ? text.slice(0, maxLength) : fallback;
+};
+
+const parseMeasure = (value, fallback = 0, max = 100000) => {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.min(Math.round(parsed * 100) / 100, max);
+};
+
+const parseTags = (value, fallback = []) =>
+  parseStringList(value, fallback, MAX_PRODUCT_TAGS).map((entry) =>
+    String(entry || "").trim().slice(0, MAX_TAG_LENGTH)
+  );
+
+const parseProductDimensions = (value, fallback = {}) => {
+  const source = value && typeof value === "object" ? value : {};
+  const current = fallback && typeof fallback === "object" ? fallback : {};
+  return {
+    lengthCm: parseMeasure(source.lengthCm, Number(current.lengthCm || 0), 10000),
+    widthCm: parseMeasure(source.widthCm, Number(current.widthCm || 0), 10000),
+    heightCm: parseMeasure(source.heightCm, Number(current.heightCm || 0), 10000),
+  };
+};
+
+const parseVariants = (value, fallback = []) => {
+  if (!Array.isArray(value)) return Array.isArray(fallback) ? fallback : [];
+
+  return value
+    .map((variant, index) => {
+      const size = parseShortText(variant?.size, "", MAX_VARIANT_TEXT_LENGTH);
+      const color = parseShortText(variant?.color, "", MAX_VARIANT_TEXT_LENGTH);
+      const material = parseShortText(variant?.material, "", MAX_VARIANT_TEXT_LENGTH);
+      const sku = parseSku(variant?.sku, "");
+      const price = parseMoneyInput(variant?.price, 0);
+      const stock = parseStock(variant?.stock, 0);
+      const active = parseBoolean(variant?.active, true);
+      if (!size && !color && !material && !sku) return null;
+      return {
+        id: parseShortText(variant?.id, `variant_${index + 1}`, 80),
+        size,
+        color,
+        material,
+        sku,
+        price: Number.isFinite(price) && price >= 0 ? price : 0,
+        stock,
+        active,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, MAX_VARIANTS);
+};
+
+const validateVariantList = (variants = []) => {
+  if (!Array.isArray(variants)) return "Variants must be a valid array.";
+  if (variants.length > MAX_VARIANTS) {
+    return `You can add up to ${MAX_VARIANTS} variants only.`;
+  }
+
+  const seenSkus = new Set();
+  for (const variant of variants) {
+    const label =
+      [variant?.size, variant?.color, variant?.material].filter(Boolean).join(" / ") ||
+      variant?.sku ||
+      "Variant";
+    const sku = String(variant?.sku || "").trim();
+    if (sku) {
+      if (!SKU_PATTERN.test(sku)) {
+        return `Variant "${label}" has an invalid SKU.`;
+      }
+      const normalizedSku = sku.toLowerCase();
+      if (seenSkus.has(normalizedSku)) {
+        return "Variant SKUs must be unique.";
+      }
+      seenSkus.add(normalizedSku);
+    }
+    if (!Number.isFinite(Number(variant?.price || 0)) || Number(variant?.price || 0) < 0) {
+      return `Variant "${label}" has an invalid price.`;
+    }
+    if (!Number.isFinite(Number(variant?.stock || 0)) || Number(variant?.stock || 0) < 0) {
+      return `Variant "${label}" has an invalid stock quantity.`;
+    }
+  }
+
+  return "";
+};
+
+const deriveEffectiveStock = (stock = 0, variants = []) => {
+  const activeVariants = (Array.isArray(variants) ? variants : []).filter(
+    (variant) => variant?.active !== false
+  );
+  if (activeVariants.length === 0) {
+    return parseStock(stock, 0);
+  }
+  return activeVariants.reduce(
+    (sum, variant) => sum + parseStock(variant?.stock, 0),
+    0
+  );
+};
+
+const parseDelimitedList = (value = "", maxItems = 20) =>
+  Array.from(
+    new Set(
+      String(value || "")
+        .split(/[|\n]+/)
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+    )
+  ).slice(0, maxItems);
+
+const parseCsvRows = (csvText = "") => {
+  const text = String(csvText || "").replace(/\r\n/g, "\n").trim();
+  if (!text) return [];
+
+  const rows = [];
+  let current = "";
+  let currentRow = [];
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const nextChar = text[index + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      currentRow.push(current);
+      current = "";
+      continue;
+    }
+
+    if (char === "\n" && !inQuotes) {
+      currentRow.push(current);
+      rows.push(currentRow);
+      current = "";
+      currentRow = [];
+      continue;
+    }
+
+    current += char;
+  }
+
+  currentRow.push(current);
+  rows.push(currentRow);
+
+  const [headerRow, ...dataRows] = rows.filter((row) =>
+    Array.isArray(row) ? row.some((cell) => String(cell || "").trim()) : false
+  );
+  const headers = (Array.isArray(headerRow) ? headerRow : []).map((cell) =>
+    String(cell || "").trim()
+  );
+
+  return dataRows.map((row) =>
+    headers.reduce((acc, header, index) => {
+      if (!header) return acc;
+      acc[header] = String(row?.[index] || "").trim();
+      return acc;
+    }, {})
+  );
+};
+
+const parseVariantsFromCsv = (value = "") => {
+  const text = String(value || "").trim();
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return text
+      .split("|")
+      .map((entry, index) => {
+        const [size = "", color = "", material = "", sku = "", price = "", stock = ""] = String(
+          entry || ""
+        )
+          .split("/")
+          .map((part) => part.trim());
+        if (!size && !color && !material && !sku) return null;
+        return {
+          id: `variant_${index + 1}`,
+          size,
+          color,
+          material,
+          sku,
+          price,
+          stock,
+          active: true,
+        };
+      })
+      .filter(Boolean);
+  }
+};
+
+const buildInventorySnapshot = (value = {}, fallback = {}) => {
+  const source = value && typeof value === "object" ? value : {};
+  const current = fallback && typeof fallback === "object" ? fallback : {};
+  const existingHistory = Array.isArray(current.stockHistory) ? current.stockHistory : [];
+  return {
+    lowStockThreshold: parseStock(
+      source.lowStockThreshold,
+      parseStock(current.lowStockThreshold, 5)
+    ),
+    stockHistory: existingHistory,
+  };
+};
+
+const appendStockHistoryEntry = (
+  inventory = {},
+  { previousStock = 0, nextStock = 0, note = "", source = "manual" } = {}
+) => {
+  const history = Array.isArray(inventory.stockHistory) ? inventory.stockHistory : [];
+  const entry = {
+    previousStock: Math.max(0, Number(previousStock || 0)),
+    nextStock: Math.max(0, Number(nextStock || 0)),
+    note: parseShortText(note, "", 200),
+    source: parseShortText(source, "manual", 60),
+    changedAt: new Date(),
+  };
+  return {
+    ...(inventory || {}),
+    stockHistory: [entry, ...history].slice(0, MAX_STOCK_HISTORY_ITEMS),
+  };
+};
+
+const buildSellerOrderStatsByProduct = async (productIds = []) => {
+  const ids = (Array.isArray(productIds) ? productIds : []).filter(Boolean);
+  if (ids.length === 0) return new Map();
+
+  const rows = await Order.aggregate([
+    {
+      $match: {
+        product: { $in: ids },
+      },
+    },
+    {
+      $group: {
+        _id: "$product",
+        reservedStock: {
+          $sum: {
+            $cond: [
+              { $in: ["$status", ["placed", "processing", "shipped", "return_requested"]] },
+              { $ifNull: ["$quantity", 1] },
+              0,
+            ],
+          },
+        },
+        salesCount: {
+          $sum: {
+            $cond: [
+              {
+                $in: [
+                  "$status",
+                  ["placed", "processing", "shipped", "delivered", "return_requested", "return_rejected"],
+                ],
+              },
+              { $ifNull: ["$quantity", 1] },
+              0,
+            ],
+          },
+        },
+      },
+    },
+  ]);
+
+  return new Map(
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => {
+        const productId = String(row?._id || "").trim();
+        if (!productId) return null;
+        return [
+          productId,
+          {
+            reservedStock: Math.max(0, Number(row?.reservedStock || 0)),
+            salesCount: Math.max(0, Number(row?.salesCount || 0)),
+          },
+        ];
+      })
+      .filter(Boolean)
+  );
 };
 
 const parsePackagingStyles = (value, fallback = []) => {
@@ -265,7 +610,7 @@ const validatePackagingStylesInput = (value) => {
 
 const parseProductStatus = (value, fallback = "active") => {
   const text = String(value || "").trim().toLowerCase();
-  if (text === "inactive") return "inactive";
+  if (text === "inactive" || text === "draft") return "inactive";
   if (text === "active") return "active";
   return fallback;
 };
@@ -391,6 +736,9 @@ const parseCustomizationCatalog = (value, fallback = []) => {
               const itemId = String(item?.id || `${categoryId}_item_${itemIndex}`).trim();
               if (!normalizedName) return null;
 
+              const price = parseMakingCharge(item?.price, 0);
+              const mrp = parseMoneyInput(item?.mrp, 0);
+
               return {
                 id: itemId,
                 name: normalizedName,
@@ -398,7 +746,8 @@ const parseCustomizationCatalog = (value, fallback = []) => {
                 subItem,
                 type: parseItemType(item?.type, "item"),
                 size: parseItemSize(item?.size, ""),
-                price: parseMakingCharge(item?.price, 0),
+                price,
+                mrp: mrp > 0 && mrp >= price ? mrp : 0,
                 stock: parseStock(item?.stock, 0),
                 image: parseImageSource(item?.image, ""),
                 source: parseItemSource(item?.source, "custom"),
@@ -677,6 +1026,7 @@ exports.getProductById = async (req, res) => {
     const ratingsMatch = {
       $and: [
         { "review.rating": { $gte: 1, $lte: 5 } },
+        VISIBLE_REVIEW_MATCH,
         { $or: productMatchers },
       ],
     };
@@ -829,12 +1179,73 @@ exports.getProductById = async (req, res) => {
 
 exports.getSellerProducts = async (req, res) => {
   try {
-    const products = await Product.find({ seller: req.user.id }).sort({
-      createdAt: -1,
-    });
-    res.json(products);
+    const products = await Product.find({ seller: req.user.id })
+      .sort({
+        createdAt: -1,
+      })
+      .lean();
+    const productIds = products.map((entry) => entry?._id).filter(Boolean);
+    const statsByProduct = await buildSellerOrderStatsByProduct(productIds);
+    res.json(
+      products.map((product) => {
+        const stats = statsByProduct.get(String(product?._id || "").trim()) || {};
+        const currentStock = Math.max(0, Number(product?.stock || 0));
+        const reservedStock = Math.max(0, Number(stats?.reservedStock || 0));
+        return {
+          ...product,
+          salesCount: Math.max(0, Number(stats?.salesCount || 0)),
+          reservedStock,
+          availableStock: Math.max(0, currentStock - reservedStock),
+          inventory: {
+            ...(product?.inventory || {}),
+            lowStockThreshold: parseStock(product?.inventory?.lowStockThreshold, 5),
+            stockHistory: Array.isArray(product?.inventory?.stockHistory)
+              ? product.inventory.stockHistory
+              : [],
+          },
+          viewsCount: Math.max(0, Number(product?.viewsCount || 0)),
+        };
+      })
+    );
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.saveSellerCustomizationCatalog = async (req, res) => {
+  try {
+    const customizableProducts = await Product.find({
+      seller: req.user.id,
+      isCustomizable: true,
+    })
+      .select("_id")
+      .lean();
+
+    if (!Array.isArray(customizableProducts) || customizableProducts.length === 0) {
+      return res.status(400).json({
+        message:
+          "No customizable products found. Create at least one customizable product first.",
+      });
+    }
+
+    const customizationCatalog = parseCustomizationCatalog(req.body.customizationCatalog, []);
+
+    await Product.updateMany(
+      {
+        seller: req.user.id,
+        isCustomizable: true,
+      },
+      {
+        $set: { customizationCatalog },
+      }
+    );
+
+    return res.json({
+      customizationCatalog,
+      publishedCount: customizableProducts.length,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 };
 
@@ -957,6 +1368,7 @@ exports.getPublicSellerStore = async (req, res) => {
     const ratingsMatch = {
       seller: seller._id,
       "review.rating": { $gte: 1, $lte: 5 },
+      ...VISIBLE_REVIEW_MATCH,
     };
     const now = new Date();
 
@@ -1161,6 +1573,19 @@ exports.createProduct = async (req, res) => {
     const description = String(req.body?.description || "").trim();
     const category = String(req.body?.category || "").trim();
     const subcategory = String(req.body?.subcategory || "").trim();
+    const brand = parseShortText(req.body?.brand, "", MAX_BRAND_LENGTH);
+    const productType = parseShortText(req.body?.productType, "", MAX_PRODUCT_TYPE_LENGTH);
+    const tags = parseTags(req.body?.tags, []);
+    const shippingInfo = parseShortText(
+      req.body?.shippingInfo,
+      "",
+      MAX_SHIPPING_INFO_LENGTH
+    );
+    const returnPolicy = parseShortText(
+      req.body?.returnPolicy,
+      "",
+      MAX_RETURN_POLICY_LENGTH
+    );
     const textValidationError = validateProductTextFields({
       name,
       description,
@@ -1184,7 +1609,7 @@ exports.createProduct = async (req, res) => {
       });
     }
 
-    const stock = parseStock(req.body.stock, 0);
+    const requestedStock = parseStock(req.body.stock, 0);
     const isCustomizable = parseBoolean(req.body.isCustomizable, false);
     const makingChargeInput = isCustomizable
       ? parseMoneyInput(req.body.makingCharge, 0)
@@ -1220,6 +1645,15 @@ exports.createProduct = async (req, res) => {
       });
     }
     const mrp = parsedMrp > 0 ? parsedMrp : 0;
+    const sku = parseSku(req.body.sku, "");
+    const hsnCode = parseHsnCode(req.body.hsnCode, "");
+    const taxRate = parseTaxRate(req.body.taxRate, 0);
+    const weightGrams = parseMeasure(req.body?.weightGrams, 0, 500000);
+    const dimensions = parseProductDimensions(req.body?.dimensions, {});
+    const invoiceMetadataError = validateInvoiceMetadata({ sku, hsnCode, taxRate });
+    if (invoiceMetadataError) {
+      return res.status(400).json({ message: invoiceMetadataError });
+    }
     const deliveryMinDays = parseBoundedInt(req.body.deliveryMinDays, 0, {
       min: 0,
       max: 30,
@@ -1248,6 +1682,23 @@ exports.createProduct = async (req, res) => {
       });
     }
     const status = parseProductStatus(req.body.status, "active");
+    const variants = parseVariants(req.body.variants, []);
+    const variantValidationError = validateVariantList(variants);
+    if (variantValidationError) {
+      return res.status(400).json({ message: variantValidationError });
+    }
+    const stock = deriveEffectiveStock(requestedStock, variants);
+    const inventory = appendStockHistoryEntry(
+      buildInventorySnapshot(req.body.inventory, {
+        lowStockThreshold: req.body?.lowStockThreshold,
+      }),
+      {
+        previousStock: 0,
+        nextStock: stock,
+        note: "Initial stock created",
+        source: "seller_create",
+      }
+    );
     const customizationCatalog = isCustomizable
       ? parseCustomizationCatalog(req.body.customizationCatalog, [])
       : [];
@@ -1269,8 +1720,18 @@ exports.createProduct = async (req, res) => {
       description,
       category,
       subcategory,
+      brand,
+      productType,
       price,
       mrp,
+      sku,
+      hsnCode,
+      taxRate,
+      tags,
+      shippingInfo,
+      returnPolicy,
+      weightGrams,
+      dimensions,
       occasions,
       deliveryMinDays,
       deliveryMaxDays,
@@ -1278,8 +1739,10 @@ exports.createProduct = async (req, res) => {
       includedItems,
       highlights,
       stock,
+      inventory,
       isCustomizable,
       makingCharge,
+      variants,
       status,
       moderationStatus: moderation.status,
       moderationNotes: moderation.notes,
@@ -1295,6 +1758,212 @@ exports.createProduct = async (req, res) => {
     res.status(201).json(product);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.bulkImportProducts = async (req, res) => {
+  try {
+    const csvText = String(req.body?.csvText || "").trim();
+    if (!csvText) {
+      return res.status(400).json({ message: "CSV content is required." });
+    }
+
+    const rows = parseCsvRows(csvText);
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ message: "No product rows were found in the CSV file." });
+    }
+
+    const results = [];
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index] || {};
+      const rowNumber = index + 2;
+
+      try {
+        const name = String(row.name || "").trim();
+        const description = String(row.description || "").trim();
+        const category = String(row.category || "").trim();
+        const subcategory = String(row.subcategory || "").trim();
+        const brand = parseShortText(row.brand, "", MAX_BRAND_LENGTH);
+        const productType = parseShortText(row.productType, "", MAX_PRODUCT_TYPE_LENGTH);
+        const price = parseMoneyInput(row.price, 0);
+        const parsedMrp = parseMoneyInput(row.mrp, 0);
+        const tags = parseTags(parseDelimitedList(row.tags, MAX_PRODUCT_TAGS), []);
+        const shippingInfo = parseShortText(
+          row.shippingInfo,
+          "",
+          MAX_SHIPPING_INFO_LENGTH
+        );
+        const returnPolicy = parseShortText(
+          row.returnPolicy,
+          "",
+          MAX_RETURN_POLICY_LENGTH
+        );
+        const requestedStock = parseStock(row.stock, 0);
+        const variants = parseVariants(parseVariantsFromCsv(row.variants), []);
+        const variantValidationError = validateVariantList(variants);
+        if (variantValidationError) {
+          throw new Error(variantValidationError);
+        }
+        const stock = deriveEffectiveStock(requestedStock, variants);
+        const sku = parseSku(row.sku, "");
+        const hsnCode = parseHsnCode(row.hsnCode, "");
+        const taxRate = parseTaxRate(row.taxRate, 0);
+        const weightGrams = parseMeasure(row.weightGrams, 0, 500000);
+        const dimensions = parseProductDimensions({
+          lengthCm: row.lengthCm,
+          widthCm: row.widthCm,
+          heightCm: row.heightCm,
+        });
+        const deliveryMinDays = parseBoundedInt(row.deliveryMinDays, 0, {
+          min: 0,
+          max: 30,
+        });
+        const deliveryMaxDays = parseBoundedInt(row.deliveryMaxDays, deliveryMinDays, {
+          min: 0,
+          max: 45,
+        });
+        const status = parseProductStatus(row.status, "active");
+        const isCustomizable = parseBoolean(row.isCustomizable, false);
+        const makingCharge = isCustomizable ? parseMoneyInput(row.makingCharge, 0) : 0;
+        const occasions = parseStringList(parseDelimitedList(row.occasions, 8), [], 8);
+        const includedItems = parseStringList(
+          parseDelimitedList(row.includedItems, 20),
+          [],
+          20
+        );
+        const highlights = parseStringList(
+          parseDelimitedList(row.highlights, 20),
+          [],
+          20
+        );
+        const images = parseImageUrls(String(row.images || "").replace(/\|/g, ","), []);
+
+        const textValidationError = validateProductTextFields({
+          name,
+          description,
+          category,
+          subcategory,
+        });
+        if (textValidationError) throw new Error(textValidationError);
+        if (!Number.isFinite(price) || price <= 0) {
+          throw new Error("Price must be greater than zero.");
+        }
+        if (price > MAX_SELLING_PRICE) {
+          throw new Error(
+            `Price cannot exceed ₹${MAX_SELLING_PRICE.toLocaleString("en-IN")}.`
+          );
+        }
+        if (!Number.isFinite(parsedMrp) || parsedMrp < 0) {
+          throw new Error("MRP must be a valid non-negative number.");
+        }
+        if (parsedMrp > 0 && parsedMrp < price) {
+          throw new Error("MRP must be greater than or equal to selling price.");
+        }
+        if (parsedMrp > MAX_MRP) {
+          throw new Error(`MRP cannot exceed ₹${MAX_MRP.toLocaleString("en-IN")}.`);
+        }
+        if (images.length < MIN_PRODUCT_IMAGES) {
+          throw new Error(`Provide at least ${MIN_PRODUCT_IMAGES} image URLs in the images column.`);
+        }
+        const invoiceMetadataError = validateInvoiceMetadata({ sku, hsnCode, taxRate });
+        if (invoiceMetadataError) throw new Error(invoiceMetadataError);
+        if (!Number.isFinite(makingCharge) || makingCharge < 0) {
+          throw new Error("Making charge must be a valid non-negative number.");
+        }
+
+        const inventory = appendStockHistoryEntry(
+          buildInventorySnapshot({
+            lowStockThreshold: row.lowStockThreshold,
+          }),
+          {
+            previousStock: 0,
+            nextStock: stock,
+            note: "Bulk import created",
+            source: "seller_bulk_import",
+          }
+        );
+
+        const moderation = await deriveAutoModeration({
+          candidate: {
+            name,
+            description,
+            category,
+            subcategory,
+            price,
+            images,
+          },
+          sellerId: req.user.id,
+        });
+
+        const product = await Product.create({
+          name,
+          description,
+          category,
+          subcategory,
+          brand,
+          productType,
+          price,
+          mrp: parsedMrp > 0 ? parsedMrp : 0,
+          sku,
+          hsnCode,
+          taxRate,
+          stock,
+          inventory,
+          weightGrams,
+          dimensions,
+          deliveryMinDays,
+          deliveryMaxDays: deliveryMinDays > 0 ? Math.max(deliveryMaxDays, deliveryMinDays) : deliveryMaxDays,
+          tags,
+          shippingInfo,
+          returnPolicy,
+          occasions,
+          includedItems,
+          highlights,
+          packagingStyles: [],
+          variants,
+          isCustomizable,
+          makingCharge: isCustomizable ? makingCharge : 0,
+          images,
+          status,
+          customizationCatalog: [],
+          moderationStatus: moderation.status,
+          moderationNotes: moderation.notes,
+          seller: req.user.id,
+        });
+
+        await syncCategoryMaster({
+          category: product.category,
+          subcategory: product.subcategory,
+        });
+
+        results.push({
+          rowNumber,
+          status: "created",
+          productId: String(product._id || "").trim(),
+          name: product.name,
+          message: `Created successfully${moderation.status !== "approved" ? " and queued for review" : ""}.`,
+        });
+      } catch (error) {
+        results.push({
+          rowNumber,
+          status: "failed",
+          name: String(row.name || "").trim(),
+          message: error?.message || "Unable to import this row.",
+        });
+      }
+    }
+
+    const createdCount = results.filter((item) => item.status === "created").length;
+    const failedCount = results.length - createdCount;
+
+    return res.json({
+      createdCount,
+      failedCount,
+      items: results,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 };
 
@@ -1326,6 +1995,27 @@ exports.updateProduct = async (req, res) => {
     }
     if (has("subcategory")) {
       updates.subcategory = String(updates.subcategory || "").trim();
+    }
+    if (has("brand")) {
+      updates.brand = parseShortText(updates.brand, "", MAX_BRAND_LENGTH);
+    }
+    if (has("productType")) {
+      updates.productType = parseShortText(updates.productType, "", MAX_PRODUCT_TYPE_LENGTH);
+    }
+    if (has("tags")) {
+      updates.tags = parseTags(updates.tags, product.tags || []);
+    }
+    if (has("shippingInfo")) {
+      updates.shippingInfo = parseShortText(updates.shippingInfo, "", MAX_SHIPPING_INFO_LENGTH);
+    }
+    if (has("returnPolicy")) {
+      updates.returnPolicy = parseShortText(updates.returnPolicy, "", MAX_RETURN_POLICY_LENGTH);
+    }
+    if (has("weightGrams")) {
+      updates.weightGrams = parseMeasure(updates.weightGrams, 0, 500000);
+    }
+    if (has("dimensions")) {
+      updates.dimensions = parseProductDimensions(updates.dimensions, product.dimensions || {});
     }
     if (has("name") || has("description") || has("category") || has("subcategory")) {
       const textValidationError = validateProductTextFields({
@@ -1384,6 +2074,25 @@ exports.updateProduct = async (req, res) => {
         });
       }
     }
+    if (has("sku")) {
+      updates.sku = parseSku(updates.sku, "");
+    }
+    if (has("hsnCode")) {
+      updates.hsnCode = parseHsnCode(updates.hsnCode, "");
+    }
+    if (has("taxRate")) {
+      updates.taxRate = parseTaxRate(updates.taxRate, 0);
+    }
+    if (has("sku") || has("hsnCode") || has("taxRate")) {
+      const invoiceMetadataError = validateInvoiceMetadata({
+        sku: has("sku") ? updates.sku : parseSku(product.sku, ""),
+        hsnCode: has("hsnCode") ? updates.hsnCode : parseHsnCode(product.hsnCode, ""),
+        taxRate: has("taxRate") ? updates.taxRate : Number(product.taxRate || 0),
+      });
+      if (invoiceMetadataError) {
+        return res.status(400).json({ message: invoiceMetadataError });
+      }
+    }
     if (has("status")) {
       updates.status = parseProductStatus(updates.status, product.status || "active");
     }
@@ -1435,6 +2144,17 @@ exports.updateProduct = async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(updates, "stock")) {
       updates.stock = parseStock(updates.stock, product.stock || 0);
     }
+    if (has("inventory") || has("lowStockThreshold")) {
+      const inventorySource =
+        has("inventory") && updates.inventory && typeof updates.inventory === "object"
+          ? {
+              ...updates.inventory,
+              lowStockThreshold:
+                updates.inventory.lowStockThreshold ?? updates.lowStockThreshold,
+            }
+          : { lowStockThreshold: updates.lowStockThreshold };
+      updates.inventory = buildInventorySnapshot(inventorySource, product.inventory || {});
+    }
     if (Object.prototype.hasOwnProperty.call(updates, "isCustomizable")) {
       updates.isCustomizable = nextCustomizable;
     }
@@ -1477,6 +2197,18 @@ exports.updateProduct = async (req, res) => {
         product.customizationCatalog || []
       );
     }
+    if (Object.prototype.hasOwnProperty.call(updates, "variants")) {
+      updates.variants = parseVariants(updates.variants, product.variants || []);
+      const variantValidationError = validateVariantList(updates.variants);
+      if (variantValidationError) {
+        return res.status(400).json({ message: variantValidationError });
+      }
+    }
+    if (has("stock") || has("variants")) {
+      const requestedStock = has("stock") ? updates.stock : product.stock || 0;
+      const nextVariants = has("variants") ? updates.variants : product.variants || [];
+      updates.stock = deriveEffectiveStock(requestedStock, nextVariants);
+    }
 
     if (!nextCustomizable) {
       updates.makingCharge = 0;
@@ -1488,7 +2220,23 @@ exports.updateProduct = async (req, res) => {
     );
 
     const previousStock = Math.max(0, Number(product.stock || 0));
+    const shouldTrackStockChange = has("stock") || has("variants");
     Object.assign(product, updates);
+    if (!product.inventory || typeof product.inventory !== "object") {
+      product.inventory = buildInventorySnapshot({}, {});
+    }
+    if (shouldTrackStockChange && previousStock !== Math.max(0, Number(product.stock || 0))) {
+      product.inventory = appendStockHistoryEntry(product.inventory, {
+        previousStock,
+        nextStock: Math.max(0, Number(product.stock || 0)),
+        note: parseShortText(
+          req.body?.stockUpdateNote,
+          has("variants") && !has("stock") ? "Variant stock synced" : "Seller stock adjustment",
+          200
+        ),
+        source: "seller_update",
+      });
+    }
 
     if (shouldReModerate) {
       const moderation = await deriveAutoModeration({
@@ -1507,13 +2255,14 @@ exports.updateProduct = async (req, res) => {
       product.moderationNotes = moderation.notes;
     }
 
+    const currentStock = Math.max(0, Number(product.stock || 0));
     await product.save();
-    if (Object.prototype.hasOwnProperty.call(updates, "stock")) {
+    if (shouldTrackStockChange && previousStock !== currentStock) {
       await maybeCreateInventoryNotifications({
         sellerId: product.seller,
         product,
         previousStock,
-        currentStock: Math.max(0, Number(product.stock || 0)),
+        currentStock,
       });
     }
     await syncCategoryMaster({

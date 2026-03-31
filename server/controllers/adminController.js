@@ -574,6 +574,9 @@ exports.updateAdminPlatformSettings = async (req, res) => {
     settings.platformName = next.platformName;
     settings.currencyCode = next.currencyCode;
     settings.lowStockThreshold = next.lowStockThreshold;
+    settings.sellerCommissionPercent = next.sellerCommissionPercent;
+    settings.settlementDelayDays = next.settlementDelayDays;
+    settings.payoutSchedule = next.payoutSchedule;
     settings.autoApproveSellers = next.autoApproveSellers;
     settings.enableOrderEmailAlerts = next.enableOrderEmailAlerts;
     settings.maintenanceMode = next.maintenanceMode;

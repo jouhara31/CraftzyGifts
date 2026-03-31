@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import Header from "../components/Header";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { getProductImage } from "../utils/productMedia";
+import useHashScroll from "../utils/useHashScroll";
 
 import { API_URL } from "../apiBase";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
 const DASHBOARD_REFRESH_INTERVAL_MS = 60000;
+const CUSTOMER_MESSAGES_HASH = "#customer-messages";
+const CUSTOMER_MESSAGES_SECTION_ID = "customer-messages";
+const CONTACT_REQUEST_QUERY_KEY = "contactRequest";
+const SELLER_DASHBOARD_CACHE_KEY = "seller_dashboard_snapshot";
 
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 
@@ -63,6 +67,65 @@ const persistUserToStorage = (nextUser) => {
     }
   } catch {
     // Ignore localStorage failures.
+  }
+};
+
+const readSellerDashboardSnapshot = () => {
+  try {
+    const raw = sessionStorage.getItem(SELLER_DASHBOARD_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const currentUser = readStoredUser();
+    const snapshotUserId = String(parsed.userId || "").trim();
+    const currentUserId = String(currentUser?.id || currentUser?._id || "").trim();
+    if (snapshotUserId && currentUserId && snapshotUserId !== currentUserId) {
+      return null;
+    }
+
+    return {
+      sellerProfile:
+        parsed.sellerProfile && typeof parsed.sellerProfile === "object"
+          ? parsed.sellerProfile
+          : currentUser,
+      products: Array.isArray(parsed.products) ? parsed.products : [],
+      orders: Array.isArray(parsed.orders) ? parsed.orders : [],
+      notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
+      notificationUnreadCount: Math.max(0, Number(parsed.notificationUnreadCount || 0)),
+      contactRequests: Array.isArray(parsed.contactRequests) ? parsed.contactRequests : [],
+      contactRequestTotal: Math.max(0, Number(parsed.contactRequestTotal || 0)),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const persistSellerDashboardSnapshot = (snapshot = {}) => {
+  try {
+    sessionStorage.setItem(
+      SELLER_DASHBOARD_CACHE_KEY,
+      JSON.stringify({
+        userId: String(snapshot.userId || "").trim(),
+        sellerProfile: snapshot.sellerProfile || {},
+        products: Array.isArray(snapshot.products) ? snapshot.products : [],
+        orders: Array.isArray(snapshot.orders) ? snapshot.orders : [],
+        notifications: Array.isArray(snapshot.notifications) ? snapshot.notifications : [],
+        notificationUnreadCount: Math.max(0, Number(snapshot.notificationUnreadCount || 0)),
+        contactRequests: Array.isArray(snapshot.contactRequests) ? snapshot.contactRequests : [],
+        contactRequestTotal: Math.max(0, Number(snapshot.contactRequestTotal || 0)),
+      })
+    );
+  } catch {
+    // Ignore sessionStorage failures.
+  }
+};
+
+const clearSellerDashboardSnapshot = () => {
+  try {
+    sessionStorage.removeItem(SELLER_DASHBOARD_CACHE_KEY);
+  } catch {
+    // Ignore sessionStorage failures.
   }
 };
 
@@ -176,26 +239,51 @@ const NotificationTypeIcon = ({ type }) => {
 };
 
 export default function SellerDashboard() {
-  const [sellerProfile, setSellerProfile] = useState(readStoredUser);
-  const [products, setProducts] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [notifications, setNotifications] = useState([]);
-  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
-  const [contactRequests, setContactRequests] = useState([]);
-  const [contactRequestTotal, setContactRequestTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const location = useLocation();
+  const initialDashboardSnapshot = useMemo(() => readSellerDashboardSnapshot(), []);
+  const hasHydratedDashboardRef = useRef(Boolean(initialDashboardSnapshot));
+  const [sellerProfile, setSellerProfile] = useState(
+    () => initialDashboardSnapshot?.sellerProfile || readStoredUser()
+  );
+  const [products, setProducts] = useState(() => initialDashboardSnapshot?.products || []);
+  const [orders, setOrders] = useState(() => initialDashboardSnapshot?.orders || []);
+  const [notifications, setNotifications] = useState(
+    () => initialDashboardSnapshot?.notifications || []
+  );
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(
+    () => initialDashboardSnapshot?.notificationUnreadCount || 0
+  );
+  const [contactRequests, setContactRequests] = useState(
+    () => initialDashboardSnapshot?.contactRequests || []
+  );
+  const [contactRequestTotal, setContactRequestTotal] = useState(
+    () => initialDashboardSnapshot?.contactRequestTotal || 0
+  );
+  const [loading, setLoading] = useState(() => !initialDashboardSnapshot);
+  const [hasLoadedDashboard, setHasLoadedDashboard] = useState(() => Boolean(initialDashboardSnapshot));
   const [notificationsBusy, setNotificationsBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const navigate = useNavigate();
+  useHashScroll();
   const clearSessionAndRedirect = useCallback(() => {
+    clearSellerDashboardSnapshot();
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
     window.dispatchEvent(new Event("user:updated"));
     navigate("/login");
   }, [navigate]);
-
+  const focusedContactRequestId = useMemo(
+    () => String(new URLSearchParams(location.search).get(CONTACT_REQUEST_QUERY_KEY) || "").trim(),
+    [location.search]
+  );
+  const sellerStorePath = useMemo(() => {
+    const sellerId = String(
+      sellerProfile?.id || sellerProfile?._id || readUserIdFromToken()
+    ).trim();
+    return sellerId ? `/seller/store/${sellerId}` : "/seller/dashboard";
+  }, [sellerProfile]);
   const loadDashboard = useCallback(async ({ silent = false } = {}) => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -203,17 +291,21 @@ export default function SellerDashboard() {
       return;
     }
 
-    if (!silent) {
+    if (!silent && !hasHydratedDashboardRef.current) {
       setLoading(true);
     }
     setError("");
     try {
       const headers = { Authorization: `Bearer ${token}` };
+      const contactQuery = new URLSearchParams({ limit: "5" });
+      if (focusedContactRequestId) {
+        contactQuery.set(CONTACT_REQUEST_QUERY_KEY, focusedContactRequestId);
+      }
       const [profileRes, productsRes, ordersRes, contactRes, notificationsRes] = await Promise.all([
         fetch(`${API_URL}/api/users/me`, { headers }),
         fetch(`${API_URL}/api/products/seller/me`, { headers }),
         fetch(`${API_URL}/api/orders/seller`, { headers }),
-        fetch(`${API_URL}/api/users/me/contact-requests?limit=5`, { headers }),
+        fetch(`${API_URL}/api/users/me/contact-requests?${contactQuery.toString()}`, { headers }),
         fetch(`${API_URL}/api/users/me/notifications?limit=8`, { headers }),
       ]);
       const [profileData, productsData, ordersData, contactData, notificationsData] = await Promise.all([
@@ -284,15 +376,32 @@ export default function SellerDashboard() {
         storeCoverImage: profileData.storeCoverImage,
         sellerPendingOrders: pendingOrders,
       });
+      persistSellerDashboardSnapshot({
+        userId: profileData.id,
+        sellerProfile: profileData || {},
+        products: Array.isArray(productsData) ? productsData : [],
+        orders: Array.isArray(ordersData) ? ordersData : [],
+        notifications:
+          notificationsRes.ok && Array.isArray(notificationsData?.items)
+            ? notificationsData.items
+            : [],
+        notificationUnreadCount:
+          notificationsRes.ok ? Number(notificationsData?.unreadCount || 0) : 0,
+        contactRequests:
+          contactRes.ok && Array.isArray(contactData?.items) ? contactData.items : [],
+        contactRequestTotal: contactRes.ok ? Number(contactData?.total || 0) : 0,
+      });
       window.dispatchEvent(new Event("user:updated"));
     } catch {
       setError("Unable to load seller dashboard.");
     } finally {
+      hasHydratedDashboardRef.current = true;
+      setHasLoadedDashboard(true);
       if (!silent) {
         setLoading(false);
       }
     }
-  }, [clearSessionAndRedirect]);
+  }, [clearSessionAndRedirect, focusedContactRequestId]);
 
   useEffect(() => {
     loadDashboard();
@@ -317,6 +426,25 @@ export default function SellerDashboard() {
     };
   }, [loadDashboard]);
 
+  useEffect(() => {
+    if (location.hash !== CUSTOMER_MESSAGES_HASH) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      const target = focusedContactRequestId
+        ? document.getElementById(`contact-request-${focusedContactRequestId}`)
+        : document.getElementById(CUSTOMER_MESSAGES_SECTION_ID);
+      if (!target) return;
+      target.scrollIntoView({
+        behavior: "smooth",
+        block: focusedContactRequestId ? "center" : "start",
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [contactRequests.length, focusedContactRequestId, loading, location.hash]);
+
   const sellerName = sellerProfile?.name || "Seller";
   const sellerStatus = sellerProfile?.sellerStatus || "approved";
   const storeName = sellerProfile?.storeName || "CraftzyGifts Studio";
@@ -331,6 +459,7 @@ export default function SellerDashboard() {
       .join(", ") || "Location not shared";
   const sellerJoinedLabel = fullDateLabel(sellerProfile?.createdAt);
   const sellerSupportLabel = "Private seller inbox";
+  const showDashboardLoading = loading && !hasLoadedDashboard;
 
   const orderStatusClass = (status) => {
     if (["placed", "pending_payment", "return_requested"].includes(status)) return "warning";
@@ -652,14 +781,12 @@ export default function SellerDashboard() {
       setError("Unable to open store now. Please refresh dashboard once.");
       return;
     }
-    navigate(`/store/${ownSellerId}${withEdit ? "?edit=1" : ""}`);
+    navigate(`/seller/store/${ownSellerId}${withEdit ? "?edit=1" : ""}`);
   };
 
   return (
-    <div className="page seller-page seller-dashboard-page">
-      <Header variant="seller" />
-
-      <section className="seller-hero seller-dashboard-hero">
+    <div className="seller-shell-view seller-dashboard-page">
+      <section className="seller-hero seller-dashboard-hero" id="dashboard-overview">
         <div className="seller-dashboard-hero-main">
           <p className="seller-kicker">Seller Hub</p>
           <h2>Welcome back, {sellerName}</h2>
@@ -709,14 +836,14 @@ export default function SellerDashboard() {
         </div>
       )}
 
-      {loading && <p className="field-hint">Loading seller dashboard...</p>}
+      {showDashboardLoading && <p className="field-hint">Loading seller dashboard...</p>}
       {error && <p className="field-hint">{error}</p>}
       {notice && <p className="field-hint">{notice}</p>}
 
       <div className="seller-main seller-dashboard-main">
         <div className="seller-overview seller-dashboard-grid">
           <div className="seller-dashboard-primary">
-            <div className="seller-panel seller-dashboard-panel">
+            <div className="seller-panel seller-dashboard-panel seller-anchor-section" id="seller-dashboard-metrics">
               <div className="card-head seller-dashboard-head">
                 <div>
                   <h3 className="card-title">This month</h3>
@@ -737,7 +864,7 @@ export default function SellerDashboard() {
               </div>
             </div>
 
-            <div className="seller-panel seller-dashboard-panel">
+            <div className="seller-panel seller-dashboard-panel seller-anchor-section" id="seller-dashboard-orders">
               <div className="card-head seller-dashboard-head">
                 <div>
                   <h3 className="card-title">Orders in progress</h3>
@@ -774,13 +901,16 @@ export default function SellerDashboard() {
                     </div>
                   </article>
                 ))}
-                {!loading && insights.inProgressOrders.length === 0 && (
+                {hasLoadedDashboard && insights.inProgressOrders.length === 0 && (
                   <p className="field-hint">No in-progress orders right now.</p>
                 )}
               </div>
             </div>
 
-            <div className="seller-panel seller-dashboard-panel">
+            <div
+              className="seller-panel seller-dashboard-panel seller-anchor-section"
+              id={CUSTOMER_MESSAGES_SECTION_ID}
+            >
               <div className="card-head seller-dashboard-head">
                 <div>
                   <h3 className="card-title">Customer messages</h3>
@@ -792,7 +922,15 @@ export default function SellerDashboard() {
               </div>
               <div className="seller-dashboard-message-list">
                 {contactRequests.map((item) => (
-                  <article key={item.id} className="seller-dashboard-message-card">
+                  <article
+                    key={item.id}
+                    id={`contact-request-${item.id}`}
+                    className={`seller-dashboard-message-card ${
+                      focusedContactRequestId && item.id === focusedContactRequestId
+                        ? "is-focused"
+                        : ""
+                    }`.trim()}
+                  >
                     <div className="seller-dashboard-message-head">
                       <div className="seller-dashboard-message-meta">
                         <strong>{item.senderName || "Customer"}</strong>
@@ -809,7 +947,7 @@ export default function SellerDashboard() {
                     </a>
                   </article>
                 ))}
-                {!loading && contactRequests.length === 0 && (
+                {hasLoadedDashboard && contactRequests.length === 0 && (
                   <p className="field-hint">No customer messages yet.</p>
                 )}
               </div>
@@ -817,7 +955,10 @@ export default function SellerDashboard() {
           </div>
 
           <aside className="seller-dashboard-rail">
-            <div className="seller-panel seller-dashboard-panel">
+            <div
+              className="seller-panel seller-dashboard-panel seller-anchor-section"
+              id="seller-dashboard-notifications"
+            >
               <div className="card-head seller-dashboard-head">
                 <div>
                   <h3 className="card-title">Notifications</h3>
@@ -864,7 +1005,7 @@ export default function SellerDashboard() {
                     </div>
                   </article>
                 ))}
-                {!loading && notifications.length === 0 && (
+                {hasLoadedDashboard && notifications.length === 0 && (
                   <p className="field-hint">No notifications yet.</p>
                 )}
               </div>
@@ -964,7 +1105,7 @@ export default function SellerDashboard() {
                     </span>
                   </button>
                 ))}
-                {!loading && insights.topProducts.length === 0 && (
+                {hasLoadedDashboard && insights.topProducts.length === 0 && (
                   <p className="field-hint">No products yet. Add your first listing.</p>
                 )}
               </div>

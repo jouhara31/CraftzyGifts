@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Header from "../components/Header";
+import { optimizeImageFile } from "../utils/imageUpload";
 
 import { API_URL } from "../apiBase";
 
@@ -20,6 +20,13 @@ const composeItemName = (mainItem, subItem) =>
     .join(" - ");
 const formatCountLabel = (count, singular, plural = `${singular}s`) =>
   `${count} ${count === 1 ? singular : plural}`;
+const calculateOfferPercent = (mrp, price) => {
+  const livePrice = Number(price || 0);
+  const originalPrice = Number(mrp || 0);
+  if (!Number.isFinite(livePrice) || !Number.isFinite(originalPrice)) return 0;
+  if (originalPrice <= 0 || originalPrice <= livePrice) return 0;
+  return Math.round(((originalPrice - livePrice) / originalPrice) * 100);
+};
 const CUSTOM_MAIN_VALUE = "__custom_main__";
 const BASE_CATEGORY_KIND = "base_category";
 const ITEM_COLLECTION_KIND = "item_collection";
@@ -68,7 +75,7 @@ const BASE_CATEGORY_COPY = {
   imageLabel: "Upload base category image",
   emptyLabel: "No base categories added yet.",
   visibilityHint:
-    "Customers will see a base category only after you add at least one hamper base type inside it and publish the changes.",
+    "Customers will see a base category only after you add at least one hamper base type inside it.",
 };
 
 const getItemTypeMeta = (itemType) =>
@@ -170,6 +177,7 @@ const flattenProductItems = (product) =>
           type,
           size: normalizeItemSize(item?.size),
           price: Number(item?.price || 0),
+          mrp: Number(item?.mrp || 0),
           stock: Number(item?.stock || 0),
           image: String(item?.image || "").trim(),
           categoryId,
@@ -196,6 +204,12 @@ const toCatalogPayload = (baseCategories = [], items = []) => {
         type: normalizeItemType(item?.type),
         size: normalizeItemSize(item?.size),
         price: Number.isFinite(Number(item?.price)) ? Math.max(Number(item.price), 0) : 0,
+        mrp:
+          Number.isFinite(Number(item?.mrp)) &&
+          Math.max(Number(item.mrp), 0) >=
+            (Number.isFinite(Number(item?.price)) ? Math.max(Number(item.price), 0) : 0)
+            ? Math.max(Number(item.mrp), 0)
+            : 0,
         stock: Number.isFinite(Number(item?.stock))
           ? Math.max(Math.trunc(Number(item.stock)), 0)
           : 0,
@@ -259,6 +273,7 @@ const createEmptyForm = () => ({
   itemType: "item",
   size: "",
   price: "0",
+  mrp: "0",
   stock: "0",
   image: "",
   imageName: "",
@@ -340,7 +355,7 @@ export default function SellerListedItems() {
       setMainItemMode("select");
       if (customizableList.length === 0) {
         setNotice(
-          "Create at least one customizable product to publish seller-wide hamper items."
+          "Create at least one customizable product to use seller-wide hamper items."
         );
       }
     } catch {
@@ -380,7 +395,7 @@ export default function SellerListedItems() {
       return sameMain && sameSub && sameType && sameSize && sameCategoryId;
     });
     return exists
-      ? "Similar item already exists in draft. Use different size/name if needed."
+      ? "Similar item already exists. Use different size/name if needed."
       : "";
   }, [baseCategories, draftItems, editingItemId, form.categoryId, form.itemType, form.size, form.mainItem, form.subItem]);
 
@@ -457,7 +472,7 @@ export default function SellerListedItems() {
 
   const previewImage = form.image;
 
-  const onUploadImage = (event) => {
+  const onUploadImage = async (event) => {
     const file = event.target.files?.[0];
     if (!file) {
       setForm((prev) => ({ ...prev, image: "", imageName: "" }));
@@ -468,21 +483,24 @@ export default function SellerListedItems() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
+    try {
+      const result = await optimizeImageFile(file, {
+        maxWidth: 1200,
+        maxHeight: 1200,
+        quality: 0.82,
+      });
       setForm((prev) => ({
         ...prev,
         image: result,
         imageName: file.name,
       }));
       setError("");
-    };
-    reader.onerror = () => setError("Unable to read selected image.");
-    reader.readAsDataURL(file);
+    } catch {
+      setError("Unable to read selected image.");
+    }
   };
 
-  const onUploadBaseCategoryImage = (event) => {
+  const onUploadBaseCategoryImage = async (event) => {
     const file = event.target.files?.[0];
     if (!file) {
       setBaseCategoryForm((prev) => ({ ...prev, image: "", imageName: "" }));
@@ -493,18 +511,21 @@ export default function SellerListedItems() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
+    try {
+      const result = await optimizeImageFile(file, {
+        maxWidth: 1400,
+        maxHeight: 1400,
+        quality: 0.82,
+      });
       setBaseCategoryForm((prev) => ({
         ...prev,
         image: result,
         imageName: file.name,
       }));
       setError("");
-    };
-    reader.onerror = () => setError("Unable to read selected image.");
-    reader.readAsDataURL(file);
+    } catch {
+      setError("Unable to read selected image.");
+    }
   };
 
   const scrollToStudioEditor = () => {
@@ -562,11 +583,11 @@ export default function SellerListedItems() {
     nextBaseCategories,
     items,
     successNotice =
-      "Hamper studio changes published. Customers will see only base categories that have at least one hamper base type."
+      "Hamper studio changes saved. Customers will see only base categories that have at least one hamper base type."
   ) => {
     if (customizableProducts.length === 0) {
       setError(
-        "No customizable products found. Create one customizable product to publish these seller-wide hamper items."
+        "No customizable products found. Create one customizable product to save these seller-wide hamper items."
       );
       return false;
     }
@@ -582,82 +603,31 @@ export default function SellerListedItems() {
     setNotice("");
     try {
       const payloadCatalog = toCatalogPayload(nextBaseCategories, items);
-      const previousCatalogByProduct = new Map(
-        customizableProducts.map((product) => [
-          String(product._id || ""),
-          Array.isArray(product.customizationCatalog) ? product.customizationCatalog : [],
-        ])
-      );
-      const updated = [];
-      const updatedProductIds = [];
-      let saveErrorMessage = "";
+      const res = await fetch(`${API_URL}/api/products/seller/me/customization-catalog`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          customizationCatalog: payloadCatalog,
+        }),
+      });
+      const data = await res.json();
 
-      for (const product of customizableProducts) {
-        const res = await fetch(`${API_URL}/api/products/${product._id}`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            customizationCatalog: payloadCatalog,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          saveErrorMessage = data.message || "Unable to save custom hamper items.";
-          break;
-        }
-        updated.push(data);
-        updatedProductIds.push(String(product._id || ""));
-      }
-
-      if (saveErrorMessage) {
-        let rollbackFailed = false;
-
-        for (const productId of updatedProductIds) {
-          const previousCatalog = previousCatalogByProduct.get(productId) || [];
-          try {
-            const rollbackRes = await fetch(`${API_URL}/api/products/${productId}`, {
-              method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({
-                customizationCatalog: previousCatalog,
-              }),
-            });
-            if (!rollbackRes.ok) {
-              rollbackFailed = true;
-            }
-          } catch {
-            rollbackFailed = true;
-          }
-        }
-
-        setError(
-          rollbackFailed
-            ? `${saveErrorMessage} Some products may have partial updates. Please refresh.`
-            : `${saveErrorMessage} Applied changes were rolled back.`
-        );
+      if (!res.ok) {
+        setError(data.message || "Unable to save custom hamper items.");
         return false;
       }
 
       setProducts((current) =>
-        current.map((product) => {
-          const match = updated.find(
-            (entry) => String(entry?._id || "") === String(product?._id || "")
-          );
-          return match || product;
-        })
+        current.map((product) => ({
+          ...product,
+          customizationCatalog: product?.isCustomizable ? payloadCatalog : product?.customizationCatalog || [],
+        }))
       );
-      const refreshedSource =
-        updated.find((entry) => Array.isArray(entry?.customizationCatalog)) || {
-          customizationCatalog: payloadCatalog,
-        };
-      setBaseCategories(extractBaseCategories(refreshedSource));
-      setDraftItems(flattenProductItems(refreshedSource));
+      setBaseCategories(extractBaseCategories({ customizationCatalog: payloadCatalog }));
+      setDraftItems(flattenProductItems({ customizationCatalog: payloadCatalog }));
       setNotice(successNotice);
       return true;
     } catch {
@@ -705,32 +675,21 @@ export default function SellerListedItems() {
         : item
     );
 
-    setBaseCategories(nextBaseCategories);
-    setDraftItems(nextDraftItems);
-    setError("");
-
-    if (editingBaseCategoryId) {
-      const saved = await persistDraftCatalog(
-        nextBaseCategories,
-        nextDraftItems,
-        "Base category updated and saved."
-      );
-      if (saved) {
-        setEditingBaseCategoryId("");
-        setBaseCategoryForm(createEmptyBaseCategoryForm());
-        setShowBaseCategoryForm(false);
-      }
-      return;
-    }
+    const saved = await persistDraftCatalog(
+      nextBaseCategories,
+      nextDraftItems,
+      editingBaseCategoryId
+        ? "Base category updated."
+        : "Base category saved. Add at least one base type to make it visible to customers."
+    );
+    if (!saved) return;
 
     if (normalizeItemType(form.itemType) === "base") {
       setForm((prev) => ({ ...prev, categoryId: nextCategory.id }));
     }
+    setEditingBaseCategoryId("");
     setBaseCategoryForm(createEmptyBaseCategoryForm());
     setShowBaseCategoryForm(false);
-    setNotice(
-      "Base category added to draft. Now add at least one hamper base type under it, then click Save & Publish Changes."
-    );
   };
 
   const saveItemToDraft = async () => {
@@ -785,7 +744,15 @@ export default function SellerListedItems() {
     }
 
     const price = Number(form.price);
+    const mrp = Number(form.mrp);
     const stock = Number(form.stock);
+    const normalizedPrice = Number.isFinite(price) ? Math.max(price, 0) : 0;
+    const normalizedMrp =
+      itemType === "base" && Number.isFinite(mrp) ? Math.max(mrp, 0) : 0;
+    if (itemType === "base" && normalizedMrp > 0 && normalizedMrp < normalizedPrice) {
+      setError("MRP must be greater than or equal to rate.");
+      return;
+    }
     const nextItem = {
       id: editingItemId || createId("item"),
       categoryId:
@@ -797,7 +764,8 @@ export default function SellerListedItems() {
       subItem,
       type: itemType,
       size: itemSize,
-      price: Number.isFinite(price) ? Math.max(price, 0) : 0,
+      price: normalizedPrice,
+      mrp: normalizedMrp,
       stock: Number.isFinite(stock) ? Math.max(Math.trunc(stock), 0) : 0,
       image: form.image || "",
       source: "custom",
@@ -808,28 +776,21 @@ export default function SellerListedItems() {
     const nextDraftItems = editingItemId
       ? draftItems.map((item) => (item.id === editingItemId ? nextItem : item))
       : [...draftItems, nextItem];
-    setDraftItems(nextDraftItems);
+    const saved = await persistDraftCatalog(
+      baseCategories,
+      nextDraftItems,
+      editingItemId ? "Item updated." : "Item saved."
+    );
+    if (!saved) return;
+
     setError("");
-    if (editingItemId) {
-      const saved = await persistDraftCatalog(
-        baseCategories,
-        nextDraftItems,
-        "Item updated and saved."
-      );
-      if (saved) {
-        setEditingItemId("");
-        setForm(createEmptyForm());
-        setMainItemMode("select");
-      }
-      return;
-    }
+    setEditingItemId("");
     setForm((prev) => ({
       ...createEmptyForm(),
       itemType: prev.itemType,
       categoryId: itemType === "base" ? String(selectedCategory?.id || "").trim() : "",
     }));
     setMainItemMode("select");
-    setNotice("Item added to draft. Click Save & Publish Changes to make it live.");
   };
 
   const editBaseCategory = (category) => {
@@ -862,6 +823,7 @@ export default function SellerListedItems() {
       itemType: nextItemType,
       size: normalizeItemSize(item.size),
       price: String(Number(item.price || 0)),
+      mrp: String(Number(item.mrp || 0)),
       stock: String(Number(item.stock || 0)),
       image: String(item.image || "").trim(),
       imageName: "",
@@ -877,7 +839,7 @@ export default function SellerListedItems() {
     scrollToStudioEditor();
   };
 
-  const removeBaseCategory = (categoryId) => {
+  const removeBaseCategory = async (categoryId) => {
     const hasTypes = draftItems.some(
       (item) =>
         normalizeItemType(item?.type) === "base" &&
@@ -888,9 +850,12 @@ export default function SellerListedItems() {
       return;
     }
 
-    setBaseCategories((current) =>
-      current.filter((category) => String(category.id || "").trim() !== String(categoryId || "").trim())
+    const nextBaseCategories = baseCategories.filter(
+      (category) => String(category.id || "").trim() !== String(categoryId || "").trim()
     );
+    const saved = await persistDraftCatalog(nextBaseCategories, draftItems, "Base category removed.");
+    if (!saved) return;
+
     if (editingBaseCategoryId === categoryId) {
       setEditingBaseCategoryId("");
       setBaseCategoryForm(createEmptyBaseCategoryForm());
@@ -900,34 +865,37 @@ export default function SellerListedItems() {
       setForm((prev) => ({ ...prev, categoryId: "" }));
     }
     setError("");
-    setNotice("Base category removed from draft. Save changes to publish.");
   };
 
-  const removeDraftItem = (itemId) => {
-    setDraftItems((current) => current.filter((item) => item.id !== itemId));
+  const removeDraftItem = async (itemId) => {
+    const nextDraftItems = draftItems.filter((item) => item.id !== itemId);
+    const saved = await persistDraftCatalog(baseCategories, nextDraftItems, "Item removed.");
+    if (!saved) return;
+
     if (itemId === editingItemId) {
       setEditingItemId("");
       setForm(createEmptyForm());
       setMainItemMode("select");
     }
-    setNotice("");
-  };
-
-  const saveDraftItems = async () => {
-    await persistDraftCatalog(baseCategories, draftItems);
+    setError("");
   };
 
   return (
-    <div className="page seller-page">
-      <Header variant="seller" />
-
-      <div className="section-head">
-        <div>
-          <h2>Hamper Studio</h2>
-          <p>Add seller-wide hamper base categories, base names, and hamper items for customization.</p>
+    <div className="seller-shell-view seller-listed-items-page">
+      <div className="section-head seller-studio-head">
+        <div className="seller-studio-head-copy">
+          <div className="seller-studio-head-title-row">
+            <h2>Hamper Studio</h2>
+            <span className="seller-studio-head-badge">Auto-save</span>
+          </div>
+          <p>Manage base categories, base types, and hamper items in one place.</p>
+          <div className="seller-studio-head-meta">
+            <span className="seller-studio-head-pill">Seller-wide catalog</span>
+            <span className="seller-studio-head-pill soft">Empty categories stay hidden</span>
+          </div>
         </div>
-        <div className="seller-toolbar">
-          <div className="search wide">
+        <div className="seller-toolbar seller-studio-head-tools">
+          <div className="search wide seller-studio-search">
             <input
               className="search-input"
               type="search"
@@ -963,8 +931,15 @@ export default function SellerListedItems() {
       </div>
 
       {loading && <p className="field-hint">Loading custom hamper items...</p>}
+      {saving && <p className="field-hint">Saving hamper studio changes...</p>}
       {error && <p className="field-hint">{error}</p>}
       {notice && <p className="field-hint">{notice}</p>}
+      {products.length > 0 && customizableProducts.length === 0 && (
+        <p className="field-hint">
+          Mark at least one product as customizable to use seller-wide hamper items in customer
+          flows.
+        </p>
+      )}
 
       <section className="seller-panel seller-base-category-panel">
         <div className="card-head">
@@ -1039,6 +1014,7 @@ export default function SellerListedItems() {
                   ? `Selected: ${baseCategoryForm.imageName}`
                   : BASE_CATEGORY_COPY.imageLabel}
               </p>
+              <p className="field-hint">This image will be optimized automatically.</p>
             </div>
 
             <div className="seller-studio-actions">
@@ -1104,11 +1080,11 @@ export default function SellerListedItems() {
                     </div>
                     {categoryTypeCount === 0 ? (
                       <p className="seller-base-category-status pending">
-                        Hidden from customers until you add one hamper base type and publish.
+                        Hidden from customers until you add one hamper base type.
                       </p>
                     ) : (
                       <p className="seller-base-category-status live">
-                        Visible to customers after you publish the changes.
+                        Visible to customers now.
                       </p>
                     )}
                   </div>
@@ -1199,8 +1175,24 @@ export default function SellerListedItems() {
                     </div>
                     <p className="mini-sub">Category: {item.mainItem || "Not set"}</p>
                     <p className="mini-sub">{item.size || "No extra type detail added yet."}</p>
+                    <div className="seller-studio-price-stack">
+                      <div className="seller-studio-price-row">
+                        {Number(item.mrp || 0) > Number(item.price || 0) ? (
+                          <span className="seller-studio-price-old">
+                            ₹{Number(item.mrp || 0).toLocaleString("en-IN")}
+                          </span>
+                        ) : null}
+                        <span className="seller-studio-price-now">
+                          ₹{Number(item.price || 0).toLocaleString("en-IN")}
+                        </span>
+                        {calculateOfferPercent(item.mrp, item.price) > 0 ? (
+                          <span className="seller-studio-offer-pill">
+                            {calculateOfferPercent(item.mrp, item.price)}% off
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
                     <div className="seller-studio-meta-row">
-                      <span className="seller-studio-meta-pill">₹{Number(item.price || 0).toLocaleString("en-IN")}</span>
                       <span className="seller-studio-meta-pill">Stock {Number(item.stock || 0)}</span>
                     </div>
                   </div>
@@ -1390,6 +1382,18 @@ export default function SellerListedItems() {
                   />
                 </div>
                 <div className="field">
+                  <label htmlFor="studioMrp">MRP</label>
+                  <input
+                    id="studioMrp"
+                    type="number"
+                    min="0"
+                    value={form.mrp}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, mrp: event.target.value }))
+                    }
+                  />
+                </div>
+                <div className="field">
                   <label htmlFor="studioStock">Stock</label>
                   <input
                     id="studioStock"
@@ -1515,6 +1519,7 @@ export default function SellerListedItems() {
           <div className="seller-studio-upload">
             <input type="file" accept="image/*" onChange={onUploadImage} />
             <p>{form.imageName ? `Selected: ${form.imageName}` : itemTypeMeta.imageLabel}</p>
+            <p className="field-hint">This image will be optimized automatically.</p>
           </div>
 
           <div className="seller-studio-actions">
@@ -1551,42 +1556,6 @@ export default function SellerListedItems() {
         </aside>
       </section>
 
-      <section className="seller-panel seller-publish-panel">
-        <div className="card-head">
-          <div>
-            <h3 className="card-title">Publish hamper studio</h3>
-            <p className="field-hint">
-              Publish your base categories, base types, and hamper items from here after saving them.
-            </p>
-          </div>
-          <button
-            className="btn primary"
-            type="button"
-            onClick={saveDraftItems}
-            disabled={saving}
-          >
-            {saving ? "Saving..." : "Save & Publish Changes"}
-          </button>
-        </div>
-        {products.length === 0 && (
-          <p className="field-hint">
-            No products listed yet. You can keep adding items to draft and publish after creating a
-            product.
-          </p>
-        )}
-        {products.length > 0 && customizableProducts.length === 0 && (
-          <p className="field-hint">
-            Custom hamper items are seller-wide, but they are published only through customizable
-            products. Mark at least one product as customizable first.
-          </p>
-        )}
-        <p className="field-hint">
-          These items are shared across all customizable hamper flows in your store.
-        </p>
-        <p className="field-hint">
-          Base categories without hamper base types stay hidden on the customer side.
-        </p>
-      </section>
     </div>
   );
 }

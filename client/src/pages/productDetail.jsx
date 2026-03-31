@@ -102,6 +102,36 @@ const normalizePackagingStyles = (styles = []) =>
     })
     .filter((style) => style && style.active !== false);
 
+const normalizeProductVariants = (variants = []) =>
+  (Array.isArray(variants) ? variants : [])
+    .map((variant, index) => {
+      const id = String(variant?.id || `variant_${index + 1}`).trim();
+      if (!id || variant?.active === false) return null;
+      return {
+        id,
+        size: String(variant?.size || "").trim(),
+        color: String(variant?.color || "").trim(),
+        material: String(variant?.material || "").trim(),
+        sku: String(variant?.sku || "").trim(),
+        price: Number(variant?.price || 0),
+        stock: Math.max(0, Number(variant?.stock || 0)),
+      };
+    })
+    .filter(Boolean);
+
+const buildVariantLabel = (variant = {}) =>
+  [variant?.size, variant?.color, variant?.material]
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean)
+    .join(" / ");
+
+const getVariantUnitPrice = (product = {}, variant = null) => {
+  if (variant && Number.isFinite(Number(variant?.price)) && Number(variant.price) > 0) {
+    return Number(variant.price);
+  }
+  return parsePrice(product?.price);
+};
+
 const getRecoVisibleCount = () => {
   if (typeof window === "undefined") return 4;
   const width = window.innerWidth;
@@ -124,6 +154,7 @@ export default function ProductDetail() {
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [selectedOccasion, setSelectedOccasion] = useState("");
   const [selectedPackagingId, setSelectedPackagingId] = useState("");
+  const [selectedVariantId, setSelectedVariantId] = useState("");
   const [giftNote, setGiftNote] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [catalogPool, setCatalogPool] = useState([]);
@@ -253,10 +284,24 @@ export default function ProductDetail() {
 
   const isCustomizationEnabled = Boolean(product?.isCustomizable);
   const baseMakingCharge = Number(product?.makingCharge || 0);
-  const availableStock = Math.max(0, Number(product?.stock || 0));
+  const readyMadeVariants = useMemo(
+    () => normalizeProductVariants(product?.variants),
+    [product]
+  );
+  const hasSelectableVariants = readyMadeVariants.length > 0;
+  const selectedVariant = useMemo(
+    () => readyMadeVariants.find((variant) => variant.id === selectedVariantId) || null,
+    [readyMadeVariants, selectedVariantId]
+  );
+  const variantSelectionPending = hasSelectableVariants && !selectedVariant;
+  const availableStock = hasSelectableVariants
+    ? selectedVariant
+      ? Math.max(0, Number(selectedVariant.stock || 0))
+      : Math.max(0, Number(product?.stock || 0))
+    : Math.max(0, Number(product?.stock || 0));
   const isOutOfStock = availableStock <= 0;
   const maxQuantity = Math.max(1, availableStock);
-  const purchaseDisabled = isOutOfStock || isPurchaseBlocked;
+  const purchaseDisabled = isOutOfStock || isPurchaseBlocked || variantSelectionPending;
 
   useEffect(() => {
     setQuantity((prev) => Math.max(1, Math.min(prev, maxQuantity)));
@@ -279,6 +324,14 @@ export default function ProductDetail() {
   useEffect(() => {
     setActiveImageIndex(0);
   }, [product?._id]);
+
+  useEffect(() => {
+    const ids = readyMadeVariants.map((variant) => variant.id);
+    setSelectedVariantId((prev) => {
+      if (ids.includes(prev)) return prev;
+      return readyMadeVariants.length === 1 ? readyMadeVariants[0].id : "";
+    });
+  }, [readyMadeVariants]);
 
   const quantityChoices = Array.from(
     { length: Math.min(Math.max(maxQuantity, 1), 10) },
@@ -327,7 +380,9 @@ export default function ProductDetail() {
     sellerProfileImageRaw.startsWith("data:")
       ? sellerProfileImageRaw
       : `${API_URL}/${sellerProfileImageRaw.replace(/^\/+/, "")}`);
-  const unitPrice = parsePrice(product?.price);
+  const unitPrice = hasSelectableVariants
+    ? getVariantUnitPrice(product, selectedVariant)
+    : parsePrice(product?.price);
   const mrp = parsePrice(product?.mrp);
   const hasDiscount = mrp > unitPrice;
   const discountPercent = hasDiscount
@@ -375,6 +430,7 @@ export default function ProductDetail() {
       : 0
     : selectedPackagingCharge;
   const displayHamperPrice = unitPrice + selectedPackagingCharge;
+  const selectedVariantLabel = buildVariantLabel(selectedVariant);
 
   useEffect(() => {
     setSelectedOccasion((prev) =>
@@ -587,6 +643,20 @@ export default function ProductDetail() {
         storeName: String(sellerDisplayName || "").trim(),
         profileImage: String(sellerProfile?.profileImage || "").trim(),
       },
+      ...(selectedVariant
+        ? {
+            variantId: selectedVariant.id,
+            selectedVariant: {
+              id: selectedVariant.id,
+              size: selectedVariant.size,
+              color: selectedVariant.color,
+              material: selectedVariant.material,
+              sku: selectedVariant.sku,
+              price: getVariantUnitPrice(product, selectedVariant),
+              label: selectedVariantLabel,
+            },
+          }
+        : {}),
       ...(customizationPayload && Object.keys(customizationPayload).length > 0
         ? { customization: customizationPayload }
         : {}),
@@ -598,12 +668,20 @@ export default function ProductDetail() {
   };
 
   const handleAddCurrentItemToCart = () => {
+    if (variantSelectionPending) {
+      setNotice("Select a product variant before adding this item to cart.");
+      return;
+    }
     if (!guardPurchaseAction()) return;
     addCurrentItemToCart();
     setNotice("Added to cart");
   };
 
   const handleGiftNow = () => {
+    if (variantSelectionPending) {
+      setNotice("Select a product variant before continuing to checkout.");
+      return;
+    }
     if (!guardPurchaseAction()) return;
     const nextCheckoutItem = buildCurrentCheckoutItem();
     saveBuyNowCheckoutItem(nextCheckoutItem);
@@ -648,23 +726,43 @@ export default function ProductDetail() {
     return true;
   };
 
-  const toRecommendationCartItem = (item) => ({
-    id: item?._id || item?.id,
-    name: item?.name,
-    price: Number(item?.price || 0),
-    mrp: Number(item?.mrp || 0),
-    isCustomizable: Boolean(item?.isCustomizable),
-    category: item?.category,
-    deliveryMinDays: Number(item?.deliveryMinDays || 0),
-    deliveryMaxDays: Number(item?.deliveryMaxDays || 0),
-    image: getProductImage(item || {}),
-    seller: {
-      id: String(item?.seller?._id || item?.seller?.id || "").trim(),
-      name: String(item?.seller?.name || "").trim(),
-      storeName: String(item?.seller?.storeName || "").trim(),
-      profileImage: String(item?.seller?.profileImage || "").trim(),
-    },
-  });
+  const toRecommendationCartItem = (item) => {
+    const variants = normalizeProductVariants(item?.variants);
+    const preferredVariant = variants.length === 1 ? variants[0] : null;
+    return {
+      id: item?._id || item?.id,
+      name: item?.name,
+      price: preferredVariant
+        ? getVariantUnitPrice(item, preferredVariant)
+        : Number(item?.price || 0),
+      mrp: Number(item?.mrp || 0),
+      isCustomizable: Boolean(item?.isCustomizable),
+      category: item?.category,
+      deliveryMinDays: Number(item?.deliveryMinDays || 0),
+      deliveryMaxDays: Number(item?.deliveryMaxDays || 0),
+      image: getProductImage(item || {}),
+      seller: {
+        id: String(item?.seller?._id || item?.seller?.id || "").trim(),
+        name: String(item?.seller?.name || "").trim(),
+        storeName: String(item?.seller?.storeName || "").trim(),
+        profileImage: String(item?.seller?.profileImage || "").trim(),
+      },
+      ...(preferredVariant
+        ? {
+            variantId: preferredVariant.id,
+            selectedVariant: {
+              id: preferredVariant.id,
+              size: preferredVariant.size,
+              color: preferredVariant.color,
+              material: preferredVariant.material,
+              sku: preferredVariant.sku,
+              price: getVariantUnitPrice(item, preferredVariant),
+              label: buildVariantLabel(preferredVariant),
+            },
+          }
+        : {}),
+    };
+  };
 
   return (
     <div className="page product-detail-page">
@@ -841,6 +939,46 @@ export default function ProductDetail() {
             <div className="pdp-divider" />
 
           <div className="pdp-top-options">
+            {hasSelectableVariants ? (
+              <div className="pdp-option-group">
+                <div className="pdp-option-head">
+                  <p className="pdp-option-label">Choose variant</p>
+                  <span className="pdp-size-help">
+                    {selectedVariant
+                      ? `${Math.max(0, Number(selectedVariant.stock || 0))} in stock`
+                      : "Select one to continue"}
+                  </span>
+                </div>
+                <div className="pdp-variant-grid">
+                  {readyMadeVariants.map((variant) => {
+                    const variantLabel = buildVariantLabel(variant);
+                    const selected = selectedVariantId === variant.id;
+                    return (
+                      <button
+                        key={variant.id}
+                        type="button"
+                        className={`pdp-variant-card ${selected ? "active" : ""}`}
+                        onClick={() =>
+                          setSelectedVariantId((prev) => (prev === variant.id ? "" : variant.id))
+                        }
+                      >
+                        <strong>{variantLabel || variant.sku || `Variant ${variant.id}`}</strong>
+                        <span>
+                          SKU: {variant.sku || "Not set"} • {Math.max(0, Number(variant.stock || 0))} left
+                        </span>
+                        <span>₹{formatPrice(getVariantUnitPrice(product, variant))}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {variantSelectionPending ? (
+                  <p className="field-hint">
+                    Choose a size, color, or material option before adding this item to cart.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="pdp-option-group">
               <div className="pdp-option-head">
                 <p className="pdp-option-label">Best for occasion</p>
@@ -1025,7 +1163,9 @@ export default function ProductDetail() {
                     disabled={purchaseDisabled}
                     onClick={handleAddCurrentItemToCart}
                   >
-                    {isOutOfStock
+                    {variantSelectionPending
+                      ? "Select variant"
+                      : isOutOfStock
                       ? "Out of stock"
                       : isCustomizationEnabled
                         ? "Add to cart"

@@ -6,6 +6,12 @@ import { getProductImage } from "../utils/productMedia";
 import { clearBuyNowCheckoutItem } from "../utils/buyNowCheckout";
 import { addToCart, getCart, setCustomization } from "../utils/cart";
 import {
+  buildBaseSelectionSummary,
+  buildAddonItemSummary,
+  isBulkHamperCustomization,
+  formatBaseSelectionLabel,
+} from "../utils/hamperBuildSummary";
+import {
   getPurchaseBlockedMessage,
   isPurchaseBlockedRole,
   readStoredSessionClaims,
@@ -24,6 +30,13 @@ const GENERIC_HAMPER_LABEL = "Build Your Own Hamper";
 const BASE_CATEGORY_KIND = "base_category";
 
 const formatPrice = (value) => Number(value || 0).toLocaleString("en-IN");
+const calculateOfferPercent = (mrp, price) => {
+  const livePrice = Number(price || 0);
+  const originalPrice = Number(mrp || 0);
+  if (!Number.isFinite(livePrice) || !Number.isFinite(originalPrice)) return 0;
+  if (originalPrice <= 0 || originalPrice <= livePrice) return 0;
+  return Math.round(((originalPrice - livePrice) / originalPrice) * 100);
+};
 const normalizeItemType = (value) =>
   String(value || "").trim().toLowerCase() === "base" ? "base" : "item";
 const normalizeMainItem = (value, fallback = "") => String(value || "").trim() || fallback;
@@ -60,6 +73,7 @@ const getSellerCatalogCategories = (product) =>
             type: normalizeItemType(item?.type),
             size: String(item?.size || "").trim(),
             price: Number(item?.price || 0),
+            mrp: Number(item?.mrp || 0),
             stock: Number(item?.stock || 0),
             image: String(item?.image || "").trim(),
             source:
@@ -96,11 +110,22 @@ const getDefaultExistingCustomization = (product) => ({
 const inferSavedMode = (savedCustomization) => {
   if (!savedCustomization || typeof savedCustomization !== "object") return "";
   if (savedCustomization.mode === "existing") return "existing";
+  if (savedCustomization.mode === "build_bulk") return "build_bulk";
   if (savedCustomization.mode === "build") return "build";
 
   const savedItems = Array.isArray(savedCustomization.selectedItems)
     ? savedCustomization.selectedItems
     : [];
+  const baseItems = savedItems.filter(
+    (item) => String(item?.type || "").trim().toLowerCase() === "base"
+  );
+  if (
+    isBulkHamperCustomization(savedCustomization) ||
+    baseItems.length > 1 ||
+    baseItems.some((item) => Number(item?.quantity || 0) > 1)
+  ) {
+    return "build_bulk";
+  }
   if (savedItems.length > 0) return "build";
 
   const savedOptions = savedCustomization.selectedOptions || {};
@@ -193,6 +218,8 @@ export default function Customization() {
   const [selectedSellerBaseId, setSelectedSellerBaseId] = useState("");
   const [selectedSellerBaseMain, setSelectedSellerBaseMain] = useState("");
   const [showBaseVariants, setShowBaseVariants] = useState(false);
+  const [enableBulkBases, setEnableBulkBases] = useState(false);
+  const [bulkBaseQuantities, setBulkBaseQuantities] = useState({});
   const [selectedSellerAddonMain, setSelectedSellerAddonMain] = useState("");
   const [itemQuantities, setItemQuantities] = useState({});
   const [buildWishCardText, setBuildWishCardText] = useState("");
@@ -219,6 +246,13 @@ export default function Customization() {
       setSellerMinimumCharge(0);
       setProduct(null);
       setExistingProduct(null);
+      setEnableBulkBases(false);
+      setBulkBaseQuantities({});
+      setSelectedSellerBaseId("");
+      setSelectedSellerBaseMain("");
+      setShowBaseVariants(false);
+      setItemQuantities({});
+      setSelectedSellerAddonMain("");
 
       try {
         const searchParams = new URLSearchParams(location.search);
@@ -292,21 +326,24 @@ export default function Customization() {
         if (!savedCustomization) return;
 
         const savedMode = inferSavedMode(savedCustomization);
-        if (savedMode && !preferBuild) setCustomizationMode(savedMode);
+        if (savedMode && !preferBuild) {
+          setCustomizationMode(savedMode === "build_bulk" ? "build" : savedMode);
+        }
 
-        if (savedMode === "build") {
+        if (savedMode === "build" || savedMode === "build_bulk") {
           const sellerBaseIds = new Set(
             sellerItems
               .filter((item) => item.type === "base")
               .map((item) => item.id)
           );
+          setEnableBulkBases(savedMode === "build_bulk");
           setBuildWishCardText(savedCustomization.wishCardText || "");
           setBuildSpecialNote(savedCustomization.specialNote || "");
           setBuildIdeaDescription(savedCustomization.ideaDescription || "");
           setBuildReferenceImageNames(getReferenceImages(savedCustomization));
 
           const savedOptions = savedCustomization.selectedOptions || {};
-          if (hasSellerCatalog) {
+          if (hasSellerCatalog && savedMode !== "build_bulk") {
             const savedBase = String(savedOptions.hamperBase || "").trim();
             if (savedBase) setSelectedSellerBaseId(savedBase);
           }
@@ -318,13 +355,32 @@ export default function Customization() {
             if (!item?.id) return acc;
             const qty = Number(item.quantity || 0);
             if (hasSellerCatalog && sellerBaseIds.has(item.id) && qty > 0) {
+              if (savedMode === "build_bulk") {
+                acc[item.id] = qty;
+                return acc;
+              }
               setSelectedSellerBaseId(item.id);
               return acc;
             }
             if (qty > 0) acc[item.id] = qty;
             return acc;
           }, {});
-          setItemQuantities(restoredQuantities);
+          if (savedMode === "build_bulk") {
+            const nextBulkBaseQuantities = {};
+            const nextItemQuantities = {};
+            Object.entries(restoredQuantities).forEach(([itemId, qty]) => {
+              if (sellerBaseIds.has(itemId)) {
+                nextBulkBaseQuantities[itemId] = qty;
+                return;
+              }
+              nextItemQuantities[itemId] = qty;
+            });
+            setBulkBaseQuantities(nextBulkBaseQuantities);
+            setItemQuantities(nextItemQuantities);
+          } else {
+            setItemQuantities(restoredQuantities);
+            setBulkBaseQuantities({});
+          }
         } else if (savedMode === "existing" && !preferBuild) {
           const savedReferences = getReferenceImages(savedCustomization);
           const savedSelections = sanitizeExistingSelections(
@@ -479,6 +535,23 @@ export default function Customization() {
 
   useEffect(() => {
     if (!hasSellerBuildOptions) return;
+    if (Object.keys(bulkBaseQuantities).length === 0) return;
+    setBulkBaseQuantities((current) => {
+      const next = Object.entries(current).reduce((acc, [itemId, qty]) => {
+        const match = sellerBaseItems.find((item) => item.id === itemId);
+        if (!match || Number(match.stock || 0) <= 0) {
+          return acc;
+        }
+        const nextQty = Math.min(Number(qty || 0), Number(match.stock || 0));
+        if (nextQty > 0) acc[itemId] = nextQty;
+        return acc;
+      }, {});
+      return JSON.stringify(next) === JSON.stringify(current) ? current : next;
+    });
+  }, [bulkBaseQuantities, hasSellerBuildOptions, sellerBaseItems]);
+
+  useEffect(() => {
+    if (!hasSellerBuildOptions) return;
     if (sellerBaseGroups.length === 0) {
       setSelectedSellerBaseMain("");
       return;
@@ -546,6 +619,19 @@ export default function Customization() {
         item.id === selectedSellerBaseId && Number(item.stock || 0) > 0
     ) || null;
 
+  const selectedBulkBaseItems = useMemo(
+    () =>
+      sellerBaseItems
+        .filter((item) => Number(item.stock || 0) > 0)
+        .filter((item) => Number(bulkBaseQuantities[item.id] || 0) > 0)
+        .map((item) => ({
+          ...item,
+          type: "base",
+          quantity: Number(bulkBaseQuantities[item.id] || 0),
+        })),
+    [bulkBaseQuantities, sellerBaseItems]
+  );
+
   const selectedSellerAddonItems = useMemo(
     () =>
       sellerAddonItems
@@ -560,17 +646,47 @@ export default function Customization() {
   );
 
   const selectedItems = useMemo(() => {
-    const baseLine = selectedSellerBase
-      ? [
-          {
-            ...selectedSellerBase,
-            type: "base",
-            quantity: 1,
-          },
-        ]
-      : [];
+    const baseLine = enableBulkBases
+      ? selectedBulkBaseItems
+      : selectedSellerBase
+        ? [
+            {
+              ...selectedSellerBase,
+              type: "base",
+              quantity: 1,
+            },
+          ]
+        : [];
     return [...baseLine, ...selectedSellerAddonItems];
-  }, [selectedSellerBase, selectedSellerAddonItems]);
+  }, [enableBulkBases, selectedBulkBaseItems, selectedSellerBase, selectedSellerAddonItems]);
+
+  const selectedBaseSubtotal = useMemo(
+    () =>
+      selectedItems
+        .filter((item) => item.type === "base")
+        .reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0), 0),
+    [selectedItems]
+  );
+
+  const selectedAddonSubtotal = useMemo(
+    () =>
+      selectedSellerAddonItems.reduce(
+        (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0),
+        0
+      ),
+    [selectedSellerAddonItems]
+  );
+
+  const bulkHamperCount = useMemo(
+    () =>
+      enableBulkBases
+        ? selectedBulkBaseItems.reduce(
+            (sum, item) => sum + Math.max(0, Number(item.quantity || 0)),
+            0
+          )
+        : 0,
+    [enableBulkBases, selectedBulkBaseItems]
+  );
 
   const optionLabelLookup = useMemo(() => {
     const lookup = { ...OPTION_LABELS };
@@ -666,14 +782,8 @@ export default function Customization() {
     [buildReferenceImageNames]
   );
 
-  const selectedQuantity = selectedItems.reduce(
-    (sum, item) => sum + item.quantity,
-    0
-  );
-  const itemSubtotal = selectedItems.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0
-  );
+  const selectedQuantity = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
+  const itemSubtotal = selectedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const minimumHamperCharge = Number(sellerMinimumCharge || 0);
   const buildModeCharge = minimumHamperCharge + itemSubtotal;
   const existingModeCharge = Number(existingProduct?.makingCharge || 0);
@@ -701,11 +811,31 @@ export default function Customization() {
     existingProduct?._id || existingProduct?.id || ""
   ).trim();
   const showExistingProduct = customizationMode === "existing" && existingProduct;
-  const buildSummaryImage = selectedSellerBase?.image || "";
+  const buildSummaryImage = enableBulkBases
+    ? selectedBulkBaseItems[0]?.image || ""
+    : selectedSellerBase?.image || "";
   const summaryImage = showExistingProduct ? getProductImage(existingProduct) : buildSummaryImage;
   const summaryTitle = showExistingProduct
     ? String(existingProduct?.name || GENERIC_HAMPER_LABEL).trim()
     : GENERIC_HAMPER_LABEL;
+  const bulkBaseSummary = useMemo(
+    () =>
+      enableBulkBases
+        ? buildBaseSelectionSummary(
+            {
+              mode: "build_bulk",
+              selectedItems,
+              bulkPlan: { totalHampers: bulkHamperCount, baseSelections: selectedBulkBaseItems },
+            },
+            3
+          )
+        : "",
+    [bulkHamperCount, enableBulkBases, selectedBulkBaseItems, selectedItems]
+  );
+  const addonSummary = useMemo(
+    () => buildAddonItemSummary({ selectedItems }, 3),
+    [selectedItems]
+  );
 
   const updateQuantity = (itemId, change) => {
     setItemQuantities((current) => {
@@ -718,8 +848,32 @@ export default function Customization() {
     });
     setNotice("");
   };
+  const updateBulkBaseQuantity = (itemId, change, maxStock) => {
+    setBulkBaseQuantities((current) => {
+      const nextValue = Math.max(
+        0,
+        Math.min(Number(maxStock || 0), Number(current[itemId] || 0) + change)
+      );
+      if (nextValue === 0) {
+        const { [itemId]: _removed, ...rest } = current;
+        return rest;
+      }
+      return { ...current, [itemId]: nextValue };
+    });
+    setNotice("");
+  };
   const removeSelectedBuildItem = (item) => {
-    if (!item?.id || item.type === "base") return;
+    if (!item?.id) return;
+    if (item.type === "base") {
+      if (!enableBulkBases) return;
+      setBulkBaseQuantities((current) => {
+        if (!(item.id in current)) return current;
+        const { [item.id]: _removed, ...rest } = current;
+        return rest;
+      });
+      setNotice("");
+      return;
+    }
     setItemQuantities((current) => {
       if (!(item.id in current)) return current;
       const { [item.id]: _removed, ...rest } = current;
@@ -748,7 +902,12 @@ export default function Customization() {
         setNotice("Seller has not listed custom hamper items yet.");
         return false;
       }
-      if (sellerBaseItems.length > 0 && !selectedSellerBase) {
+      if (enableBulkBases) {
+        if (sellerBaseItems.length > 0 && selectedBulkBaseItems.length === 0) {
+          setNotice("Please choose at least one hamper base type and quantity.");
+          return false;
+        }
+      } else if (sellerBaseItems.length > 0 && !selectedSellerBase) {
         setNotice("Please select one hamper base to continue.");
         return false;
       }
@@ -849,9 +1008,29 @@ export default function Customization() {
     }
 
     const payload = {
-      mode: "build",
-      selectedOptions: selectedSellerBase ? { hamperBase: selectedSellerBase.id } : {},
+      mode: enableBulkBases ? "build_bulk" : "build",
+      selectedOptions:
+        !enableBulkBases && selectedSellerBase ? { hamperBase: selectedSellerBase.id } : {},
       selectedItems,
+      ...(enableBulkBases
+        ? {
+            bulkPlan: {
+              totalHampers: bulkHamperCount,
+              baseSelections: selectedBulkBaseItems.map((item) => ({
+                id: item.id,
+                name: item.name,
+                mainItem: item.mainItem,
+                subItem: item.subItem,
+                category: item.category || item.mainItem,
+                categoryId: item.categoryId,
+                size: item.size,
+                quantity: item.quantity,
+                price: item.price,
+                image: item.image,
+              })),
+            },
+          }
+        : {}),
       wishCardText: buildWishCardText.trim(),
       specialNote: buildSpecialNote.trim(),
       ideaDescription: buildIdeaDescription.trim(),
@@ -1027,93 +1206,248 @@ export default function Customization() {
                     )}
                     {sellerBaseGroups.length > 0 && (
                       <div className="hamper-base-picker-shell">
-                        {!showBaseVariants ? (
-                          <>
-                            <p className="field-hint">Choose hamper base</p>
-                            <div className="hamper-main-item-grid">
-                              {sellerBaseGroups.map((group) => (
+                        <div className="hamper-bulk-toggle">
+                          <div className="hamper-bulk-toggle-copy">
+                            <strong>Need multiple hampers?</strong>
+                            <p className="field-hint">
+                              Turn this on to choose several base types with quantities. Shared
+                              hamper items will apply to all selected bases.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className={`btn ${enableBulkBases ? "primary" : "ghost"}`}
+                            onClick={() => {
+                              setEnableBulkBases((current) => {
+                                const next = !current;
+                                if (next) {
+                                  setShowBaseVariants(false);
+                                }
+                                return next;
+                              });
+                              setNotice("");
+                            }}
+                            disabled={isDisabled}
+                          >
+                            {enableBulkBases ? "Use single base" : "Select multiple bases"}
+                          </button>
+                        </div>
+
+                        {!enableBulkBases ? (
+                          !showBaseVariants ? (
+                            <>
+                              <p className="field-hint">Choose hamper base</p>
+                              <div className="hamper-main-item-grid">
+                                {sellerBaseGroups.map((group) => (
+                                  <button
+                                    key={group.key}
+                                    type="button"
+                                    className={`hamper-main-item ${
+                                      selectedSellerBaseMain === group.mainItem ? "active" : ""
+                                    }`}
+                                    onClick={() => {
+                                      const preferredVariant = group.variants.find(
+                                        (item) => item.id === selectedSellerBaseId
+                                      );
+                                      setSelectedSellerBaseMain(group.mainItem);
+                                      setSelectedSellerBaseId(preferredVariant?.id || "");
+                                      setShowBaseVariants(true);
+                                      setNotice("");
+                                    }}
+                                    disabled={isDisabled}
+                                  >
+                                    <span className="hamper-main-item-media">
+                                      <img
+                                        src={group.thumbnail || getProductImage(product)}
+                                        alt={group.mainItem}
+                                        loading="lazy"
+                                      />
+                                    </span>
+                                    <span className="hamper-main-item-content">
+                                      <strong>{group.mainItem}</strong>
+                                      <small>{group.description}</small>
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="hamper-base-picker-head">
+                                <p className="field-hint">Choose hamper base type</p>
                                 <button
-                                  key={group.key}
                                   type="button"
-                                  className={`hamper-main-item ${
-                                    selectedSellerBaseMain === group.mainItem ? "active" : ""
-                                  }`}
-                                  onClick={() => {
-                                    const preferredVariant = group.variants.find(
-                                      (item) => item.id === selectedSellerBaseId
-                                    );
-                                    setSelectedSellerBaseMain(group.mainItem);
-                                    setSelectedSellerBaseId(preferredVariant?.id || "");
-                                    setShowBaseVariants(true);
-                                    setNotice("");
-                                  }}
+                                  className="btn ghost hamper-base-back"
+                                  onClick={() => setShowBaseVariants(false)}
                                   disabled={isDisabled}
                                 >
-                                  <span className="hamper-main-item-media">
-                                    <img
-                                      src={group.thumbnail || getProductImage(product)}
-                                      alt={group.mainItem}
-                                      loading="lazy"
-                                    />
-                                  </span>
-                                  <span className="hamper-main-item-content">
-                                    <strong>{group.mainItem}</strong>
-                                    <small>{group.description}</small>
-                                  </span>
+                                  Change base
                                 </button>
-                              ))}
-                            </div>
-                          </>
+                              </div>
+                              <p className="hamper-items-title">{selectedSellerBaseMain}</p>
+                              <div className="hamper-choice-grid">
+                                {sellerBaseVariants.map((option) => (
+                                  <button
+                                    key={option.id}
+                                    type="button"
+                                    className={`hamper-choice-card ${
+                                      selectedSellerBaseId === option.id ? "active" : ""
+                                    }`}
+                                    onClick={() => {
+                                      if (Number(option.stock || 0) <= 0) return;
+                                      setSelectedSellerBaseId(option.id);
+                                      setNotice("");
+                                    }}
+                                    disabled={isDisabled || Number(option.stock || 0) <= 0}
+                                  >
+                                    <span className="hamper-choice-media">
+                                      <img
+                                        src={option.image || getProductImage(product)}
+                                        alt={option.name}
+                                      />
+                                    </span>
+                                    <div className="hamper-choice-body">
+                                      <strong>{option.subItem || option.name}</strong>
+                                      <small>{option.mainItem}</small>
+                                      {option.size ? (
+                                        <small className="hamper-choice-size">{option.size}</small>
+                                      ) : null}
+                                      <div className="hamper-choice-pricing">
+                                        {Number(option.mrp || 0) > Number(option.price || 0) ? (
+                                          <span className="hamper-choice-mrp">
+                                            ₹{formatPrice(option.mrp)}
+                                          </span>
+                                        ) : null}
+                                        <span className="hamper-choice-price">
+                                          ₹{formatPrice(option.price)}
+                                        </span>
+                                        {calculateOfferPercent(option.mrp, option.price) > 0 ? (
+                                          <span className="hamper-choice-offer">
+                                            {calculateOfferPercent(option.mrp, option.price)}% off
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      {Number(option.stock || 0) <= 0 ? (
+                                        <small>Out of stock</small>
+                                      ) : null}
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )
                         ) : (
-                          <>
+                          <div className="hamper-bulk-builder">
                             <div className="hamper-base-picker-head">
-                              <p className="field-hint">Choose hamper base type</p>
-                              <button
-                                type="button"
-                                className="btn ghost hamper-base-back"
-                                onClick={() => setShowBaseVariants(false)}
-                                disabled={isDisabled}
-                              >
-                                Change base
-                              </button>
+                              <p className="field-hint">
+                                Choose as many base types as you need. Total hampers will be
+                                counted automatically.
+                              </p>
+                              <span className="hamper-bulk-total">
+                                {bulkHamperCount} hamper{bulkHamperCount === 1 ? "" : "s"}
+                              </span>
                             </div>
-                            <p className="hamper-items-title">{selectedSellerBaseMain}</p>
-                            <div className="hamper-choice-grid">
-                              {sellerBaseVariants.map((option) => (
-                                <button
-                                  key={option.id}
-                                  type="button"
-                                  className={`hamper-choice-card ${
-                                    selectedSellerBaseId === option.id ? "active" : ""
-                                  }`}
-                                  onClick={() => {
-                                    if (Number(option.stock || 0) <= 0) return;
-                                    setSelectedSellerBaseId(option.id);
-                                    setNotice("");
-                                  }}
-                                  disabled={isDisabled || Number(option.stock || 0) <= 0}
-                                >
-                                  <span className="hamper-choice-media">
-                                    <img
-                                      src={option.image || getProductImage(product)}
-                                      alt={option.name}
-                                    />
-                                  </span>
-                                  <span className="hamper-choice-body">
-                                    <strong>{option.subItem || option.name}</strong>
-                                    <small>{option.mainItem}</small>
-                                    <small>
-                                      {option.size ? `${option.size} | ` : ""}₹
-                                      {formatPrice(option.price)}
-                                    </small>
-                                    {Number(option.stock || 0) <= 0 ? (
-                                      <small>Out of stock</small>
-                                    ) : null}
-                                  </span>
-                                </button>
+                            <div className="hamper-bulk-group-stack">
+                              {sellerBaseGroups.map((group) => (
+                                <section key={group.key} className="hamper-bulk-group">
+                                  <div className="hamper-bulk-group-head">
+                                    <div>
+                                      <p>{group.mainItem}</p>
+                                      <small>{group.description}</small>
+                                    </div>
+                                    <span>{group.variants.length} types</span>
+                                  </div>
+                                  <div className="hamper-choice-grid hamper-choice-grid-bulk">
+                                    {group.variants.map((option) => {
+                                      const quantity = Number(bulkBaseQuantities[option.id] || 0);
+                                      const isOutOfStock = Number(option.stock || 0) <= 0;
+                                      return (
+                                        <article
+                                          key={option.id}
+                                          className={`hamper-choice-card hamper-choice-card-bulk ${
+                                            quantity > 0 ? "active" : ""
+                                          }`}
+                                        >
+                                          <span className="hamper-choice-media">
+                                            <img
+                                              src={option.image || getProductImage(product)}
+                                              alt={option.name}
+                                            />
+                                          </span>
+                                          <div className="hamper-choice-body">
+                                            <strong>{option.subItem || option.name}</strong>
+                                            <small>{option.mainItem}</small>
+                                            {option.size ? (
+                                              <small className="hamper-choice-size">{option.size}</small>
+                                            ) : null}
+                                            <div className="hamper-choice-pricing">
+                                              {Number(option.mrp || 0) > Number(option.price || 0) ? (
+                                                <span className="hamper-choice-mrp">
+                                                  ₹{formatPrice(option.mrp)}
+                                                </span>
+                                              ) : null}
+                                              <span className="hamper-choice-price">
+                                                ₹{formatPrice(option.price)}
+                                              </span>
+                                              {calculateOfferPercent(option.mrp, option.price) > 0 ? (
+                                                <span className="hamper-choice-offer">
+                                                  {calculateOfferPercent(option.mrp, option.price)}% off
+                                                </span>
+                                              ) : null}
+                                            </div>
+                                          </div>
+                                          <div className="hamper-choice-footer">
+                                            <small className="hamper-choice-stock">
+                                              {isOutOfStock
+                                                ? "Out of stock"
+                                                : `${Number(option.stock || 0)} available`}
+                                            </small>
+                                            <div className="hamper-stepper">
+                                              <button
+                                                type="button"
+                                                className="hamper-step-btn minus"
+                                                onClick={() =>
+                                                  updateBulkBaseQuantity(
+                                                    option.id,
+                                                    -1,
+                                                    Number(option.stock || 0)
+                                                  )
+                                                }
+                                                disabled={quantity === 0 || isDisabled}
+                                                aria-label={`Reduce ${option.name}`}
+                                              >
+                                                -
+                                              </button>
+                                              <span className="hamper-step-value">{quantity}</span>
+                                              <button
+                                                type="button"
+                                                className="hamper-step-btn plus"
+                                                onClick={() =>
+                                                  updateBulkBaseQuantity(
+                                                    option.id,
+                                                    1,
+                                                    Number(option.stock || 0)
+                                                  )
+                                                }
+                                                disabled={
+                                                  isDisabled ||
+                                                  isOutOfStock ||
+                                                  Number(option.stock || 0) <= quantity
+                                                }
+                                                aria-label={`Add ${option.name}`}
+                                              >
+                                                +
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </article>
+                                      );
+                                    })}
+                                  </div>
+                                </section>
                               ))}
                             </div>
-                          </>
+                          </div>
                         )}
                       </div>
                     )}
@@ -1127,83 +1461,100 @@ export default function Customization() {
                       </p>
                     ) : (
                       <>
-                        <p className="field-hint">Step 1: Choose main item</p>
-                        <div className="hamper-category-stack">
-                          {sellerAddonGroups.map((group) => (
-                            <button
-                              key={group.key}
-                              type="button"
-                              className={`hamper-category-row ${
-                                selectedSellerAddonMain === group.mainItem ? "active" : ""
-                              }`}
-                              onClick={() => {
-                                setSelectedSellerAddonMain(group.mainItem);
-                                setNotice("");
-                              }}
-                              disabled={isDisabled}
-                            >
-                              <span>{group.mainItem.toUpperCase()}</span>
-                              <strong>{group.variants.length}</strong>
-                            </button>
-                          ))}
-                        </div>
-
-                        <p className="field-hint">Step 2: Choose sub item and quantity</p>
-                        <div className="hamper-items-shell">
-                          <p className="hamper-items-title">
-                            {selectedSellerAddonMain || "Hamper contents"}
+                        {enableBulkBases && (
+                          <p className="field-hint">
+                            Shared hamper contents below will be added across all selected hampers.
                           </p>
-                          {sellerAddonVariants.length > 0 ? (
-                            <div className="hamper-items-grid">
-                              {sellerAddonVariants.map((item) => {
-                                const quantity = Number(itemQuantities[item.id] || 0);
-                                return (
-                                  <article key={item.id} className="hamper-item-card">
-                                    <img
-                                      className="hamper-item-image"
-                                      src={item.image || getProductImage(product)}
-                                      alt={item.name}
-                                      loading="lazy"
-                                    />
-                                    <h4>{item.subItem || item.name}</h4>
-                                    <p className="field-hint">{item.mainItem || item.name}</p>
-                                    <p className="hamper-item-price">
-                                      ₹{formatPrice(item.price)}
-                                      {item.size ? ` | ${item.size}` : ""}
-                                    </p>
-                                    {Number(item.stock || 0) <= 0 ? (
-                                      <p className="field-hint">Out of stock</p>
-                                    ) : null}
-                                    <div className="hamper-stepper">
-                                      <button
-                                        type="button"
-                                        className="hamper-step-btn minus"
-                                        onClick={() => updateQuantity(item.id, -1)}
-                                        disabled={quantity === 0 || isDisabled}
-                                        aria-label={`Reduce ${item.name}`}
-                                      >
-                                        -
-                                      </button>
-                                      <span className="hamper-step-value">{quantity}</span>
-                                      <button
-                                        type="button"
-                                        className="hamper-step-btn plus"
-                                        onClick={() => updateQuantity(item.id, 1)}
-                                        disabled={
-                                          isDisabled || Number(item.stock || 0) <= quantity
-                                        }
-                                        aria-label={`Add ${item.name}`}
-                                      >
-                                        +
-                                      </button>
-                                    </div>
-                                  </article>
-                                );
-                              })}
+                        )}
+                        <div className="hamper-content-layout">
+                          <section className="hamper-content-pane hamper-content-pane-nav">
+                            <div className="hamper-content-pane-head">
+                              <p className="field-hint">Step 1</p>
+                              <strong>Main items</strong>
                             </div>
-                          ) : (
-                            <p className="field-hint">No sub items found under this main item.</p>
-                          )}
+                            <div className="hamper-category-stack">
+                              {sellerAddonGroups.map((group) => (
+                                <button
+                                  key={group.key}
+                                  type="button"
+                                  className={`hamper-category-row ${
+                                    selectedSellerAddonMain === group.mainItem ? "active" : ""
+                                  }`}
+                                  onClick={() => {
+                                    setSelectedSellerAddonMain(group.mainItem);
+                                    setNotice("");
+                                  }}
+                                  disabled={isDisabled}
+                                >
+                                  <span>{group.mainItem}</span>
+                                  <strong>{group.variants.length}</strong>
+                                </button>
+                              ))}
+                            </div>
+                          </section>
+
+                          <section className="hamper-content-pane hamper-content-pane-items">
+                            <div className="hamper-content-pane-head">
+                              <p className="field-hint">Step 2</p>
+                              <strong>Sub items and quantity</strong>
+                            </div>
+                            <div className="hamper-items-shell">
+                              <p className="hamper-items-title">
+                                {selectedSellerAddonMain || "Hamper contents"}
+                              </p>
+                              {sellerAddonVariants.length > 0 ? (
+                                <div className="hamper-items-grid">
+                                  {sellerAddonVariants.map((item) => {
+                                    const quantity = Number(itemQuantities[item.id] || 0);
+                                    return (
+                                      <article key={item.id} className="hamper-item-card">
+                                        <img
+                                          className="hamper-item-image"
+                                          src={item.image || getProductImage(product)}
+                                          alt={item.name}
+                                          loading="lazy"
+                                        />
+                                        <h4>{item.subItem || item.name}</h4>
+                                        <p className="field-hint">{item.mainItem || item.name}</p>
+                                        <p className="hamper-item-price">
+                                          ₹{formatPrice(item.price)}
+                                          {item.size ? ` | ${item.size}` : ""}
+                                        </p>
+                                        {Number(item.stock || 0) <= 0 ? (
+                                          <p className="field-hint">Out of stock</p>
+                                        ) : null}
+                                        <div className="hamper-stepper">
+                                          <button
+                                            type="button"
+                                            className="hamper-step-btn minus"
+                                            onClick={() => updateQuantity(item.id, -1)}
+                                            disabled={quantity === 0 || isDisabled}
+                                            aria-label={`Reduce ${item.name}`}
+                                          >
+                                            -
+                                          </button>
+                                          <span className="hamper-step-value">{quantity}</span>
+                                          <button
+                                            type="button"
+                                            className="hamper-step-btn plus"
+                                            onClick={() => updateQuantity(item.id, 1)}
+                                            disabled={
+                                              isDisabled || Number(item.stock || 0) <= quantity
+                                            }
+                                            aria-label={`Add ${item.name}`}
+                                          >
+                                            +
+                                          </button>
+                                        </div>
+                                      </article>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <p className="field-hint">No sub items found under this main item.</p>
+                              )}
+                            </div>
+                          </section>
                         </div>
                       </>
                     )}
@@ -1233,7 +1584,9 @@ export default function Customization() {
             <h3>Your hamper</h3>
             <span>
               {customizationMode === "build"
-                ? `${selectedQuantity} items`
+                ? enableBulkBases
+                  ? `${bulkHamperCount} hamper${bulkHamperCount === 1 ? "" : "s"}`
+                  : `${selectedQuantity} items`
                 : `${existingSummaryItems.length} selected`}
             </span>
           </div>
@@ -1262,7 +1615,9 @@ export default function Customization() {
                 <strong>
                   {customizationMode === "existing"
                     ? "Modify existing hamper"
-                    : customizationMode === "build"
+                    : customizationMode === "build" && enableBulkBases
+                      ? "Build multiple hampers"
+                      : customizationMode === "build"
                       ? "Build your own hamper"
                       : "Not selected"}
                 </strong>
@@ -1272,19 +1627,26 @@ export default function Customization() {
                   Base:{" "}
                   <strong>
                     {hasSellerBuildOptions
-                      ? selectedSellerBase
-                        ? `${selectedSellerBase.mainItem || selectedSellerBase.name}${
-                            selectedSellerBase.subItem
-                              ? ` - ${selectedSellerBase.subItem}`
-                              : ""
-                          }${
-                            selectedSellerBase.size
-                              ? ` (${selectedSellerBase.size})`
-                              : ""
-                          }`
-                        : "Not selected"
+                      ? enableBulkBases
+                        ? bulkBaseSummary || "Not selected"
+                        : selectedSellerBase
+                          ? `${selectedSellerBase.mainItem || selectedSellerBase.name}${
+                              selectedSellerBase.subItem
+                                ? ` - ${selectedSellerBase.subItem}`
+                                : ""
+                            }${
+                              selectedSellerBase.size
+                                ? ` (${selectedSellerBase.size})`
+                                : ""
+                            }`
+                          : "Not selected"
                       : "Seller items not available"}
                   </strong>
+                </small>
+              )}
+              {customizationMode === "build" && enableBulkBases && addonSummary && (
+                <small>
+                  Shared items: <strong>{addonSummary}</strong>
                 </small>
               )}
             </div>
@@ -1327,13 +1689,15 @@ export default function Customization() {
                 selectedItems.map((item) => (
                   <li key={item.id}>
                     <span>
-                      {item.mainItem || item.name}
-                      {item.subItem ? ` - ${item.subItem}` : ""}
-                      {item.size ? ` (${item.size})` : ""}
+                      {item.type === "base"
+                        ? formatBaseSelectionLabel(item)
+                        : `${item.mainItem || item.name}${
+                            item.subItem ? ` - ${item.subItem}` : ""
+                          }${item.size ? ` (${item.size})` : ""}`}
                     </span>
                     <div className="hamper-summary-item-right">
                       <strong>x{item.quantity}</strong>
-                      {item.type !== "base" && (
+                      {(item.type !== "base" || enableBulkBases) && (
                         <button
                           type="button"
                           className="hamper-summary-remove"
@@ -1374,13 +1738,25 @@ export default function Customization() {
             {customizationMode === "build" && (
               <>
                 <div className="hamper-total-row">
-                  <span>Seller minimum charge</span>
+                  <span>Making charge</span>
                   <strong>₹{formatPrice(minimumHamperCharge)}</strong>
                 </div>
+                {enableBulkBases && (
+                  <div className="hamper-total-row">
+                    <span>Total hampers</span>
+                    <strong>{bulkHamperCount}</strong>
+                  </div>
+                )}
                 <div className="hamper-total-row">
-                  <span>Selected items total</span>
-                  <strong>₹{formatPrice(itemSubtotal)}</strong>
+                  <span>{enableBulkBases ? "Base total" : "Base + items total"}</span>
+                  <strong>₹{formatPrice(enableBulkBases ? selectedBaseSubtotal : itemSubtotal)}</strong>
                 </div>
+                {selectedAddonSubtotal > 0 && (
+                  <div className="hamper-total-row">
+                    <span>Shared hamper items</span>
+                    <strong>₹{formatPrice(selectedAddonSubtotal)}</strong>
+                  </div>
+                )}
               </>
             )}
 

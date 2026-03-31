@@ -9,7 +9,7 @@ const {
   normalizeNotification,
 } = require("../utils/sellerNotifications");
 const { publishNotificationUpdate, subscribeNotificationStream } = require("../utils/notificationStream");
-const { revokeAllRefreshTokens } = require("../utils/authSessions");
+const { hashRefreshToken, revokeAllRefreshTokens } = require("../utils/authSessions");
 const { MIN_PASSWORD_LENGTH } = require("../utils/authValidation");
 const { normalizeInstagramUrl } = require("../utils/socialLinks");
 
@@ -19,6 +19,9 @@ const CONTACT_MESSAGE_MAX = 1200;
 const CONTACT_FETCH_LIMIT = 6;
 const NOTIFICATION_FETCH_LIMIT = 10;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const GST_NUMBER_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+const PAN_NUMBER_PATTERN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+const IFSC_PATTERN = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const DEFAULT_RETURN_WINDOW_DAYS = 7;
 const MAX_RETURN_WINDOW_DAYS = 30;
 
@@ -59,16 +62,217 @@ const normalizeSavedAddresses = (items) => {
   return cleaned;
 };
 
+const normalizeTextList = (value, fallback = [], maxItems = 12) => {
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/\r?\n|,/)
+      : fallback;
+
+  return Array.from(
+    new Set(
+      (Array.isArray(source) ? source : [])
+        .map((entry) => String(entry || "").trim())
+        .filter(Boolean)
+    )
+  ).slice(0, maxItems);
+};
+
 const normalizeReturnWindowDays = (value, fallback = DEFAULT_RETURN_WINDOW_DAYS) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < 0) return fallback;
   return Math.min(parsed, MAX_RETURN_WINDOW_DAYS);
 };
 
+const parseNonNegativeNumber = (value, fallback = 0, max = Number.MAX_SAFE_INTEGER) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.min(Math.round(parsed * 100) / 100, max);
+};
+
+const parseWholeNumberInRange = (value, fallback = 0, max = 60) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 0) return fallback;
+  return Math.min(parsed, max);
+};
+
+const normalizeSellerBankDetails = (value, current = {}) => {
+  if (!value || typeof value !== "object") return current || {};
+  return {
+    ...(current || {}),
+    accountHolderName:
+      typeof value.accountHolderName === "string"
+        ? value.accountHolderName.trim()
+        : current?.accountHolderName || "",
+    bankName:
+      typeof value.bankName === "string" ? value.bankName.trim() : current?.bankName || "",
+    accountNumber:
+      typeof value.accountNumber === "string"
+        ? value.accountNumber.replace(/\s+/g, "").trim()
+        : current?.accountNumber || "",
+    ifscCode:
+      typeof value.ifscCode === "string"
+        ? value.ifscCode.trim().toUpperCase()
+        : current?.ifscCode || "",
+    upiId: typeof value.upiId === "string" ? value.upiId.trim() : current?.upiId || "",
+  };
+};
+
+const normalizeSellerNotificationSettings = (value, current = {}) => {
+  if (!value || typeof value !== "object") return current || {};
+  return {
+    orderUpdates: parseBoolean(value.orderUpdates, current?.orderUpdates ?? true),
+    customerMessages: parseBoolean(value.customerMessages, current?.customerMessages ?? true),
+    payoutUpdates: parseBoolean(value.payoutUpdates, current?.payoutUpdates ?? true),
+    lowStockAlerts: parseBoolean(value.lowStockAlerts, current?.lowStockAlerts ?? true),
+    marketingEmails: parseBoolean(value.marketingEmails, current?.marketingEmails ?? false),
+  };
+};
+
+const normalizeSellerSecuritySettings = (value, current = {}) => {
+  if (!value || typeof value !== "object") return current || {};
+  return {
+    loginOtpEnabled: parseBoolean(
+      value.loginOtpEnabled,
+      current?.loginOtpEnabled ?? false
+    ),
+  };
+};
+
+const normalizeSellerShippingSettings = (value, current = {}) => {
+  if (!value || typeof value !== "object") return current || {};
+  const nextMin = parseWholeNumberInRange(value.processingDaysMin, current?.processingDaysMin ?? 1, 30);
+  const nextMax = parseWholeNumberInRange(
+    value.processingDaysMax,
+    current?.processingDaysMax ?? Math.max(nextMin, 3),
+    60
+  );
+  return {
+    ...(current || {}),
+    defaultDeliveryCharge: parseNonNegativeNumber(
+      value.defaultDeliveryCharge,
+      current?.defaultDeliveryCharge ?? 0,
+      100000
+    ),
+    freeShippingThreshold: parseNonNegativeNumber(
+      value.freeShippingThreshold,
+      current?.freeShippingThreshold ?? 0,
+      1000000
+    ),
+    defaultShippingMethod:
+      typeof value.defaultShippingMethod === "string"
+        ? value.defaultShippingMethod.trim().slice(0, 80) || "standard"
+        : current?.defaultShippingMethod || "standard",
+    courierPreference:
+      typeof value.courierPreference === "string"
+        ? value.courierPreference.trim().slice(0, 80)
+        : current?.courierPreference || "self",
+    processingDaysMin: Math.min(nextMin, nextMax),
+    processingDaysMax: Math.max(nextMin, nextMax),
+    deliveryRegions: normalizeTextList(
+      value.deliveryRegions,
+      current?.deliveryRegions || [],
+      12
+    ),
+    weightChargeNotes:
+      typeof value.weightChargeNotes === "string"
+        ? value.weightChargeNotes.trim().slice(0, 400)
+        : current?.weightChargeNotes || "",
+    zoneChargeNotes:
+      typeof value.zoneChargeNotes === "string"
+        ? value.zoneChargeNotes.trim().slice(0, 400)
+        : current?.zoneChargeNotes || "",
+    handlingNotes:
+      typeof value.handlingNotes === "string"
+        ? value.handlingNotes.trim().slice(0, 500)
+        : current?.handlingNotes || "",
+  };
+};
+
+const normalizeSellerDocuments = (value, current = {}) => {
+  if (!value || typeof value !== "object") return current || {};
+  const nextInvoiceTemplate =
+    typeof value.invoiceTemplate === "string" ? value.invoiceTemplate.trim().toLowerCase() : "";
+  return {
+    ...(current || {}),
+    panNumber:
+      typeof value.panNumber === "string"
+        ? value.panNumber.trim().toUpperCase()
+        : current?.panNumber || "",
+    panDocumentUrl:
+      typeof value.panDocumentUrl === "string"
+        ? normalizeImageValue(value.panDocumentUrl, current?.panDocumentUrl || "")
+        : current?.panDocumentUrl || "",
+    gstCertificateUrl:
+      typeof value.gstCertificateUrl === "string"
+        ? normalizeImageValue(value.gstCertificateUrl, current?.gstCertificateUrl || "")
+        : current?.gstCertificateUrl || "",
+    kycDocumentUrl:
+      typeof value.kycDocumentUrl === "string"
+        ? normalizeImageValue(value.kycDocumentUrl, current?.kycDocumentUrl || "")
+        : current?.kycDocumentUrl || "",
+    agreementNotes:
+      typeof value.agreementNotes === "string"
+        ? value.agreementNotes.trim().slice(0, 1000)
+        : current?.agreementNotes || "",
+    invoiceTemplate: ["classic", "compact", "a5"].includes(nextInvoiceTemplate)
+      ? nextInvoiceTemplate
+      : current?.invoiceTemplate || "compact",
+  };
+};
+
+const normalizeFeaturedProductIds = (items = [], fallback = []) => {
+  if (!Array.isArray(items)) return Array.isArray(fallback) ? fallback : [];
+  return items
+    .map((entry) => String(entry || "").trim())
+    .filter((entry) => mongoose.Types.ObjectId.isValid(entry))
+    .slice(0, 12);
+};
+
+const normalizeSellerMarketing = (value, current = {}) => {
+  if (!value || typeof value !== "object") return current || {};
+  return {
+    ...(current || {}),
+    promoHeadline:
+      typeof value.promoHeadline === "string"
+        ? value.promoHeadline.trim().slice(0, 120)
+        : current?.promoHeadline || "",
+    promoSubheadline:
+      typeof value.promoSubheadline === "string"
+        ? value.promoSubheadline.trim().slice(0, 200)
+        : current?.promoSubheadline || "",
+    bannerImageUrl:
+      typeof value.bannerImageUrl === "string"
+        ? normalizeImageValue(value.bannerImageUrl, current?.bannerImageUrl || "")
+        : current?.bannerImageUrl || "",
+    featuredProductIds: normalizeFeaturedProductIds(
+      value.featuredProductIds,
+      current?.featuredProductIds
+    ),
+    couponCode:
+      typeof value.couponCode === "string"
+        ? value.couponCode.trim().toUpperCase().slice(0, 32)
+        : current?.couponCode || "",
+    couponDiscountPercent: parseNonNegativeNumber(
+      value.couponDiscountPercent,
+      current?.couponDiscountPercent ?? 0,
+      90
+    ),
+    couponActive: parseBoolean(value.couponActive, current?.couponActive ?? false),
+    campaignNotes:
+      typeof value.campaignNotes === "string"
+        ? value.campaignNotes.trim().slice(0, 600)
+        : current?.campaignNotes || "",
+  };
+};
+
 const toProfilePayload = (user) => ({
   id: String(user._id || ""),
   name: user.name,
   email: user.email,
+  emailVerified: Boolean(user?.emailVerification?.verifiedAt),
+  emailVerificationRequestedAt: user?.emailVerification?.requestedAt || null,
+  emailVerifiedAt: user?.emailVerification?.verifiedAt || null,
   role: user.role,
   createdAt: user.createdAt,
   phone: user.phone,
@@ -77,6 +281,8 @@ const toProfilePayload = (user) => ({
   storeName: user.storeName,
   sellerStatus: user.sellerStatus,
   supportEmail: user.supportEmail,
+  legalBusinessName: user.legalBusinessName || "",
+  gstNumber: user.gstNumber || "",
   country: user.country,
   timezone: user.timezone,
   language: user.language,
@@ -100,6 +306,31 @@ const toProfilePayload = (user) => ({
       }))
     : [],
   pickupAddress: user.pickupAddress || {},
+  sellerBankDetails: user.sellerBankDetails || {},
+  sellerNotificationSettings: user.sellerNotificationSettings || {},
+  sellerSecuritySettings: user.sellerSecuritySettings || {},
+  sellerShippingSettings: user.sellerShippingSettings || {},
+  sellerDocuments: user.sellerDocuments || {},
+  sellerMarketing: {
+    ...(user.sellerMarketing && typeof user.sellerMarketing.toObject === "function"
+      ? user.sellerMarketing.toObject()
+      : user.sellerMarketing || {}),
+    featuredProductIds: Array.isArray(user?.sellerMarketing?.featuredProductIds)
+      ? user.sellerMarketing.featuredProductIds.map((entry) => String(entry || "").trim())
+      : [],
+  },
+});
+
+const formatSessionPayload = (entry = {}, currentTokenHash = "") => ({
+  id: String(entry?.tokenHash || "").trim(),
+  createdAt: entry?.createdAt || null,
+  expiresAt: entry?.expiresAt || null,
+  lastUsedAt: entry?.lastUsedAt || null,
+  userAgent: String(entry?.userAgent || "").trim(),
+  ipAddress: String(entry?.ipAddress || "").trim(),
+  current:
+    Boolean(currentTokenHash) &&
+    String(entry?.tokenHash || "").trim() === String(currentTokenHash || "").trim(),
 });
 
 const parsePositiveInt = (value, fallback, max) => {
@@ -194,7 +425,7 @@ const ensureApprovedSeller = async (userId) => {
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "name email role createdAt phone gender dateOfBirth storeName sellerStatus supportEmail country timezone language about instagramUrl returnWindowDays profileImage storeCoverImage shippingAddress billingAddress billingSameAsShipping savedAddresses pickupAddress"
+      "name email emailVerification role createdAt phone gender dateOfBirth storeName sellerStatus supportEmail legalBusinessName gstNumber country timezone language about instagramUrl returnWindowDays profileImage storeCoverImage shippingAddress billingAddress billingSameAsShipping savedAddresses pickupAddress sellerBankDetails sellerNotificationSettings sellerSecuritySettings sellerShippingSettings sellerDocuments sellerMarketing"
     );
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(toProfilePayload(user));
@@ -213,6 +444,8 @@ exports.updateMe = async (req, res) => {
       dateOfBirth,
       storeName,
       supportEmail,
+      legalBusinessName,
+      gstNumber,
       country,
       timezone,
       language,
@@ -226,6 +459,12 @@ exports.updateMe = async (req, res) => {
       billingSameAsShipping,
       savedAddresses,
       pickupAddress,
+      sellerBankDetails,
+      sellerNotificationSettings,
+      sellerSecuritySettings,
+      sellerShippingSettings,
+      sellerDocuments,
+      sellerMarketing,
     } = req.body;
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
@@ -233,13 +472,15 @@ exports.updateMe = async (req, res) => {
     if (typeof name === "string" && name.trim()) user.name = name.trim();
     if (typeof email === "string") {
       const normalizedEmail = email.trim().toLowerCase();
+      const emailChanged =
+        normalizedEmail !== String(user.email || "").trim().toLowerCase();
       if (!normalizedEmail) {
         return res.status(400).json({ message: "Email is required" });
       }
       if (!EMAIL_PATTERN.test(normalizedEmail)) {
         return res.status(400).json({ message: "Please enter a valid email address." });
       }
-      if (normalizedEmail !== String(user.email || "").trim().toLowerCase()) {
+      if (emailChanged) {
         const existingUser = await User.findOne({
           email: normalizedEmail,
           _id: { $ne: user._id },
@@ -249,6 +490,9 @@ exports.updateMe = async (req, res) => {
         }
       }
       user.email = normalizedEmail;
+      if (emailChanged) {
+        user.emailVerification = undefined;
+      }
     }
     if (typeof phone === "string") user.phone = phone.trim();
     if (typeof gender === "string") {
@@ -259,7 +503,37 @@ exports.updateMe = async (req, res) => {
     }
     if (typeof dateOfBirth === "string") user.dateOfBirth = dateOfBirth.trim();
     if (typeof storeName === "string") user.storeName = storeName.trim();
-    if (typeof supportEmail === "string") user.supportEmail = supportEmail.trim();
+    if (typeof supportEmail === "string") {
+      const normalizedSupportEmail = supportEmail.trim().toLowerCase();
+      if (normalizedSupportEmail && !EMAIL_PATTERN.test(normalizedSupportEmail)) {
+        return res.status(400).json({
+          message: "Please enter a valid support email address.",
+        });
+      }
+      user.supportEmail = normalizedSupportEmail;
+    }
+    if (typeof legalBusinessName === "string") {
+      if (user.role !== "seller") {
+        return res.status(400).json({
+          message: "Business invoice details are only available for sellers.",
+        });
+      }
+      user.legalBusinessName = legalBusinessName.trim();
+    }
+    if (typeof gstNumber === "string") {
+      if (user.role !== "seller") {
+        return res.status(400).json({
+          message: "GST details are only available for sellers.",
+        });
+      }
+      const normalizedGst = gstNumber.trim().toUpperCase();
+      if (normalizedGst && !GST_NUMBER_PATTERN.test(normalizedGst)) {
+        return res.status(400).json({
+          message: "Please enter a valid 15-character GST number.",
+        });
+      }
+      user.gstNumber = normalizedGst;
+    }
     if (typeof country === "string") user.country = country.trim();
     if (typeof timezone === "string") user.timezone = timezone.trim();
     if (typeof language === "string") user.language = language.trim();
@@ -337,10 +611,76 @@ exports.updateMe = async (req, res) => {
       if (typeof pickupAddress.pincode === "string") {
         nextPickup.pincode = pickupAddress.pincode.trim();
       }
+      if (typeof pickupAddress.contactNumber === "string") {
+        nextPickup.contactNumber = pickupAddress.contactNumber.trim();
+      }
       if (typeof pickupAddress.pickupWindow === "string") {
         nextPickup.pickupWindow = pickupAddress.pickupWindow.trim();
       }
       user.pickupAddress = nextPickup;
+    }
+
+    const hasSellerSettingsPayload =
+      typeof sellerBankDetails !== "undefined" ||
+      typeof sellerNotificationSettings !== "undefined" ||
+      typeof sellerSecuritySettings !== "undefined" ||
+      typeof sellerShippingSettings !== "undefined" ||
+      typeof sellerDocuments !== "undefined" ||
+      typeof sellerMarketing !== "undefined";
+    if (hasSellerSettingsPayload && user.role !== "seller") {
+      return res.status(400).json({
+        message: "These settings are only available for seller accounts.",
+      });
+    }
+
+    if (typeof sellerBankDetails !== "undefined") {
+      const nextBankDetails = normalizeSellerBankDetails(
+        sellerBankDetails,
+        user.sellerBankDetails || {}
+      );
+      if (nextBankDetails.ifscCode && !IFSC_PATTERN.test(nextBankDetails.ifscCode)) {
+        return res.status(400).json({ message: "Please enter a valid IFSC code." });
+      }
+      user.sellerBankDetails = nextBankDetails;
+    }
+
+    if (typeof sellerNotificationSettings !== "undefined") {
+      user.sellerNotificationSettings = normalizeSellerNotificationSettings(
+        sellerNotificationSettings,
+        user.sellerNotificationSettings || {}
+      );
+    }
+
+    if (typeof sellerSecuritySettings !== "undefined") {
+      user.sellerSecuritySettings = normalizeSellerSecuritySettings(
+        sellerSecuritySettings,
+        user.sellerSecuritySettings || {}
+      );
+    }
+
+    if (typeof sellerShippingSettings !== "undefined") {
+      user.sellerShippingSettings = normalizeSellerShippingSettings(
+        sellerShippingSettings,
+        user.sellerShippingSettings || {}
+      );
+    }
+
+    if (typeof sellerDocuments !== "undefined") {
+      const nextDocuments = normalizeSellerDocuments(
+        sellerDocuments,
+        user.sellerDocuments || {}
+      );
+      if (nextDocuments.panNumber && !PAN_NUMBER_PATTERN.test(nextDocuments.panNumber)) {
+        return res.status(400).json({ message: "Please enter a valid PAN number." });
+      }
+      user.sellerDocuments = nextDocuments;
+    }
+
+    if (typeof sellerMarketing !== "undefined") {
+      user.sellerMarketing = normalizeSellerMarketing(
+        sellerMarketing,
+        user.sellerMarketing || {}
+      );
     }
 
     await user.save();
@@ -529,6 +869,67 @@ exports.changeMyPassword = async (req, res) => {
   }
 };
 
+exports.listMySessions = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("refreshTokens");
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const currentRefreshToken = String(req.headers["x-refresh-token"] || "").trim();
+    const currentTokenHash = currentRefreshToken ? hashRefreshToken(currentRefreshToken) : "";
+    const now = Date.now();
+    const items = (Array.isArray(user.refreshTokens) ? user.refreshTokens : [])
+      .filter((entry) => {
+        const tokenHash = String(entry?.tokenHash || "").trim();
+        const expiresAt = new Date(entry?.expiresAt || 0).getTime();
+        return Boolean(tokenHash) && expiresAt > now;
+      })
+      .sort(
+        (a, b) =>
+          new Date(b?.lastUsedAt || b?.createdAt || 0).getTime() -
+          new Date(a?.lastUsedAt || a?.createdAt || 0).getTime()
+      )
+      .map((entry) => formatSessionPayload(entry, currentTokenHash));
+
+    return res.json({ items });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.revokeMySession = async (req, res) => {
+  try {
+    const sessionId = String(req.params?.sessionId || "").trim();
+    if (!sessionId) {
+      return res.status(400).json({ message: "Session id is required." });
+    }
+
+    const user = await User.findById(req.user.id).select("refreshTokens");
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const currentRefreshToken = String(req.headers["x-refresh-token"] || "").trim();
+    const currentTokenHash = currentRefreshToken ? hashRefreshToken(currentRefreshToken) : "";
+    const sessions = Array.isArray(user.refreshTokens) ? user.refreshTokens : [];
+    const nextSessions = sessions.filter(
+      (entry) => String(entry?.tokenHash || "").trim() !== sessionId
+    );
+
+    if (nextSessions.length === sessions.length) {
+      return res.status(404).json({ message: "Session not found." });
+    }
+
+    user.refreshTokens = nextSessions;
+    await user.save();
+
+    return res.json({
+      message: "Session revoked successfully.",
+      revokedCurrent: Boolean(currentTokenHash) && currentTokenHash === sessionId,
+      items: nextSessions.map((entry) => formatSessionPayload(entry, currentTokenHash)),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
 exports.deleteMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -604,7 +1005,7 @@ exports.submitSellerContactRequest = async (req, res) => {
       type: "customer_message",
       title: "New customer message",
       message: `${senderName} sent a new store message.`,
-      link: "/seller/dashboard",
+      link: `/seller/dashboard?contactRequest=${String(contactRequest?._id || "").trim()}#customer-messages`,
       entityType: "contact_request",
       entityId: String(contactRequest?._id || "").trim(),
     });
@@ -628,17 +1029,39 @@ exports.listMyContactRequests = async (req, res) => {
     }
 
     const limit = parsePositiveInt(req.query?.limit, CONTACT_FETCH_LIMIT, 20);
-    const [items, total] = await Promise.all([
+    const focusedContactRequestId = String(
+      req.query?.contactRequest || req.query?.focus || ""
+    ).trim();
+    const [items, total, focusedItem] = await Promise.all([
       ContactRequest.find({ seller: userId })
         .sort({ createdAt: -1 })
         .limit(limit)
         .lean(),
       ContactRequest.countDocuments({ seller: userId }),
+      mongoose.Types.ObjectId.isValid(focusedContactRequestId)
+        ? ContactRequest.findOne({
+            _id: focusedContactRequestId,
+            seller: userId,
+          }).lean()
+        : null,
     ]);
+    const nextItems = Array.isArray(items) ? [...items] : [];
+    if (focusedItem) {
+      const focusedId = String(focusedItem?._id || "").trim();
+      const existingIndex = nextItems.findIndex(
+        (entry) => String(entry?._id || "").trim() === focusedId
+      );
+      if (existingIndex >= 0) {
+        const [entry] = nextItems.splice(existingIndex, 1);
+        nextItems.unshift(entry);
+      } else {
+        nextItems.unshift(focusedItem);
+      }
+    }
 
     return res.json({
       total,
-      items: (Array.isArray(items) ? items : []).map((entry) => ({
+      items: nextItems.slice(0, limit).map((entry) => ({
         id: String(entry?._id || "").trim(),
         senderName: String(entry?.senderName || "").trim() || "Customer",
         senderEmail: String(entry?.senderEmail || "").trim(),

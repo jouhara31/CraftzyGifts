@@ -1165,7 +1165,7 @@ export default function AdminAccount() {
   useEffect(() => {
     if (isEditing) return;
     setAddressDraft(addressDraftValue);
-  }, [profile, isEditing]);
+  }, [addressDraftValue, isEditing]);
 
   useEffect(() => {
     if (!profileImageModalOpen) return undefined;

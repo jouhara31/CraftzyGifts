@@ -17,6 +17,22 @@ const notify = () => {
   }
 };
 
+const buildCustomizationSignature = (customization = {}) => {
+  if (!customization || typeof customization !== "object") return "";
+  try {
+    return JSON.stringify(customization);
+  } catch {
+    return "";
+  }
+};
+
+const buildCartItemKey = (item = {}) => {
+  const id = String(item?.id || item?._id || "").trim();
+  const variantId = String(item?.selectedVariant?.id || item?.variantId || "").trim();
+  const customizationSignature = buildCustomizationSignature(item?.customization);
+  return [id, variantId, customizationSignature].join("::");
+};
+
 const normalizeCartItem = (item = {}) => {
   const resolvedId = String(item?.id || item?._id || "").trim();
   if (!resolvedId) return null;
@@ -28,6 +44,7 @@ const normalizeCartItem = (item = {}) => {
     ...item,
     id: resolvedId,
     quantity,
+    cartItemKey: String(item?.cartItemKey || "").trim() || buildCartItemKey(item),
   };
 };
 
@@ -56,7 +73,9 @@ export const addToCart = (item) => {
   const incoming = normalizeCartItem(item);
   if (!incoming) return cart;
 
-  const existing = cart.find((entry) => String(entry.id) === String(incoming.id));
+  const existing = cart.find(
+    (entry) => String(entry.cartItemKey || "") === String(incoming.cartItemKey || "")
+  );
   if (existing) {
     existing.quantity += incoming.quantity || 1;
   } else {
@@ -66,20 +85,25 @@ export const addToCart = (item) => {
   return cart;
 };
 
-export const updateQuantity = (id, quantity) => {
-  const targetId = String(id || "").trim();
+export const updateQuantity = (idOrKey, quantity) => {
+  const targetId = String(idOrKey || "").trim();
   const cart = getCart()
     .map((item) =>
-      String(item.id) === targetId ? { ...item, quantity: Math.max(1, quantity) } : item
+      String(item.cartItemKey || item.id) === targetId || String(item.id) === targetId
+        ? { ...item, quantity: Math.max(1, quantity) }
+        : item
     )
     .filter((item) => item.quantity > 0);
   saveCart(cart);
   return cart;
 };
 
-export const removeFromCart = (id) => {
-  const targetId = String(id || "").trim();
-  const cart = getCart().filter((item) => String(item.id) !== targetId);
+export const removeFromCart = (idOrKey) => {
+  const targetId = String(idOrKey || "").trim();
+  const cart = getCart().filter(
+    (item) =>
+      String(item.cartItemKey || item.id) !== targetId && String(item.id) !== targetId
+  );
   saveCart(cart);
   return cart;
 };
@@ -88,11 +112,21 @@ export const clearCart = () => {
   saveCart([]);
 };
 
-export const setCustomization = (id, customization) => {
-  const targetId = String(id || "").trim();
-  const cart = getCart().map((item) =>
-    String(item.id) === targetId ? { ...item, customization } : item
-  );
+export const setCustomization = (idOrKey, customization) => {
+  const targetId = String(idOrKey || "").trim();
+  const cart = getCart().map((item) => {
+    if (
+      String(item.cartItemKey || item.id) !== targetId &&
+      String(item.id) !== targetId
+    ) {
+      return item;
+    }
+    const nextItem = { ...item, customization };
+    return {
+      ...nextItem,
+      cartItemKey: buildCartItemKey(nextItem),
+    };
+  });
   saveCart(cart);
   return cart;
 };

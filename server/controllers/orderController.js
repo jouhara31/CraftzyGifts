@@ -6,6 +6,15 @@ const {
   createCustomerNotification,
   maybeCreateInventoryNotifications,
 } = require("../utils/sellerNotifications");
+const { generateInvoicePdfBuffer } = require("../utils/invoiceDocument");
+const { issueNextInvoiceNumber } = require("../utils/invoiceNumbers");
+const { generateShippingLabelPdfBuffer } = require("../utils/shippingLabelDocument");
+const {
+  buildSellerFinancePayload,
+  requestSellerPayout,
+  updatePayoutBatchStatus,
+  listAdminPayoutBatches,
+} = require("../utils/sellerFinance");
 const {
   PAYMENT_CURRENCY,
   buildPaymentConfigError,
@@ -22,7 +31,12 @@ const ONLINE_PAYMENT_GATEWAY = "razorpay";
 const DEFAULT_RETURN_WINDOW_DAYS = 7;
 const MAX_RETURN_REASON_LENGTH = 500;
 const MIN_RETURN_REASON_LENGTH = 10;
+const MAX_CANCELLATION_REASON_LENGTH = 280;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const CUSTOMER_CANCELABLE_STATUSES = new Set(["pending_payment", "placed", "processing"]);
+const GENERIC_HAMPER_PRODUCT_NAME = "Build Your Own Hamper";
+const GENERIC_HAMPER_PRODUCT_CATEGORY = "Custom hamper";
+const GENERIC_HAMPER_PRODUCT_DESCRIPTION = "Custom hamper order created from seller hamper builder.";
 const LEGACY_CUSTOMIZATION_OPTION_KEYS = new Set([
   "giftBoxes",
   "chocolates",
@@ -41,6 +55,55 @@ const SELLER_TRANSITIONS = {
   shipped: ["delivered"],
   return_requested: ["return_rejected", "refunded"],
   refund_initiated: ["refunded"],
+};
+const SHIPMENT_STATUSES = new Set([
+  "pending",
+  "packed",
+  "shipped",
+  "out_for_delivery",
+  "delivered",
+]);
+
+const parseShipmentStatus = (value, fallback = "pending") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return SHIPMENT_STATUSES.has(normalized) ? normalized : fallback;
+};
+
+const parseShipmentDate = (value, fallback = null) => {
+  if (value === undefined || value === null || value === "") return fallback;
+  const candidate = new Date(value);
+  if (Number.isNaN(candidate.getTime())) return null;
+  return candidate;
+};
+
+const ensureShipmentDetails = (value = {}) => ({
+  ...(value && typeof value === "object" ? value : {}),
+});
+
+const syncShipmentDetailsForOrderStatus = (order, nextOrderStatus) => {
+  const nextShipment = ensureShipmentDetails(
+    order?.shipment && typeof order.shipment.toObject === "function"
+      ? order.shipment.toObject()
+      : order?.shipment || {}
+  );
+  const now = new Date();
+  if (nextOrderStatus === "processing") {
+    nextShipment.status = parseShipmentStatus(nextShipment.status, "packed");
+    if (!nextShipment.packedAt) nextShipment.packedAt = now;
+  }
+  if (nextOrderStatus === "shipped") {
+    nextShipment.status = "shipped";
+    nextShipment.dispatchDate = nextShipment.dispatchDate || now;
+  }
+  if (nextOrderStatus === "delivered") {
+    nextShipment.status = "delivered";
+    nextShipment.dispatchDate = nextShipment.dispatchDate || now;
+    nextShipment.outForDeliveryAt = nextShipment.outForDeliveryAt || now;
+  }
+  if (["processing", "shipped", "delivered"].includes(nextOrderStatus)) {
+    nextShipment.statusUpdatedAt = now;
+  }
+  return nextShipment;
 };
 
 const isAcceptedImageSource = (value) => {
@@ -64,6 +127,7 @@ const parseReviewImageUrls = (value, fallback = []) => {
 const hasCustomization = (customization) => {
   if (!customization) return false;
   const {
+    mode,
     wishCardText,
     referenceImageUrl,
     referenceImageUrls,
@@ -74,8 +138,10 @@ const hasCustomization = (customization) => {
     ideaDescription,
     selectedItems,
     selectedOptions,
+    bulkPlan,
   } = customization;
   if (
+    mode ||
     wishCardText ||
     referenceImageUrl ||
     specialNote ||
@@ -88,6 +154,18 @@ const hasCustomization = (customization) => {
   }
   if (Array.isArray(referenceImageUrls) && referenceImageUrls.some(Boolean)) {
     return true;
+  }
+  if (bulkPlan && typeof bulkPlan === "object") {
+    const totalHampers = Number.parseInt(bulkPlan.totalHampers, 10);
+    if (Number.isInteger(totalHampers) && totalHampers > 0) {
+      return true;
+    }
+    if (
+      Array.isArray(bulkPlan.baseSelections) &&
+      bulkPlan.baseSelections.some((item) => Number(item?.quantity || 0) > 0)
+    ) {
+      return true;
+    }
   }
   if (selectedOptions && typeof selectedOptions === "object") {
     if (Object.values(selectedOptions).some((value) => Boolean(value))) {
@@ -136,6 +214,9 @@ const buildOrderProductSnapshot = (product = {}) => ({
   description: String(product?.description || "").trim(),
   category: String(product?.category || "").trim(),
   subcategory: String(product?.subcategory || "").trim(),
+  sku: String(product?.sku || "").trim(),
+  hsnCode: String(product?.hsnCode || "").trim(),
+  taxRate: Math.max(0, Number(product?.taxRate || 0)),
   image: String(product?.image || "").trim(),
   images: Array.isArray(product?.images)
     ? product.images
@@ -149,6 +230,40 @@ const buildOrderProductSnapshot = (product = {}) => ({
   packagingStyles: normalizeProductPackagingStyles(product),
 });
 
+const buildOrderSellerSnapshot = (seller = {}) => ({
+  _id: seller?._id,
+  name: String(seller?.name || "").trim(),
+  storeName: String(seller?.storeName || "").trim(),
+  email: String(seller?.email || "").trim(),
+  supportEmail: String(seller?.supportEmail || "").trim(),
+  phone: String(seller?.phone || "").trim(),
+  legalBusinessName: String(seller?.legalBusinessName || "").trim(),
+  gstNumber: String(seller?.gstNumber || "").trim(),
+  returnWindowDays: normalizeReturnWindowDays(seller?.returnWindowDays),
+  billingAddress:
+    seller?.billingAddress && typeof seller.billingAddress === "object"
+      ? {
+          line1: String(seller.billingAddress.line1 || "").trim(),
+          city: String(seller.billingAddress.city || "").trim(),
+          state: String(seller.billingAddress.state || "").trim(),
+          pincode: String(seller.billingAddress.pincode || "").trim(),
+        }
+      : {},
+});
+
+const buildGenericHamperProduct = (product = {}) => ({
+  ...product,
+  name: GENERIC_HAMPER_PRODUCT_NAME,
+  category: GENERIC_HAMPER_PRODUCT_CATEGORY,
+  subcategory: GENERIC_HAMPER_PRODUCT_CATEGORY,
+  description: GENERIC_HAMPER_PRODUCT_DESCRIPTION,
+});
+
+const getOrderDisplayProductName = (order = {}) => {
+  const resolvedProduct = resolveOrderProductForResponse(order);
+  return String(resolvedProduct?.name || "an order").trim() || "an order";
+};
+
 const resolveOrderProductForResponse = (order = {}) => {
   const populatedProduct =
     order?.product && typeof order.product === "object"
@@ -161,12 +276,20 @@ const resolveOrderProductForResponse = (order = {}) => {
       ? order.productSnapshot
       : null;
 
-  if (!snapshot) return populatedProduct;
-  return {
+  if (!snapshot) {
+    return isGenericHamperCustomization(order?.customization)
+      ? buildGenericHamperProduct(populatedProduct || {})
+      : populatedProduct;
+  }
+
+  const resolvedProduct = {
     ...snapshot,
     ...(populatedProduct || {}),
     _id: populatedProduct?._id || snapshot?._id || order?.product || undefined,
   };
+  return isGenericHamperCustomization(order?.customization)
+    ? buildGenericHamperProduct(resolvedProduct)
+    : resolvedProduct;
 };
 
 const serializeOrderForResponse = (order) => {
@@ -174,6 +297,7 @@ const serializeOrderForResponse = (order) => {
     order && typeof order.toObject === "function" ? order.toObject() : { ...(order || {}) };
   const resolvedProduct = resolveOrderProductForResponse(order);
   delete plainOrder.productSnapshot;
+  delete plainOrder.sellerSnapshot;
   if (resolvedProduct) {
     plainOrder.product = resolvedProduct;
   }
@@ -226,6 +350,78 @@ const resolveRequestedOccasion = (product, customization = {}) => {
   }
 
   return match;
+};
+
+const normalizeProductVariants = (product = {}) =>
+  (Array.isArray(product?.variants) ? product.variants : [])
+    .map((variant, index) => {
+      const id = String(variant?.id || `variant_${index + 1}`).trim();
+      if (!id || variant?.active === false) return null;
+      return {
+        id,
+        size: String(variant?.size || "").trim(),
+        color: String(variant?.color || "").trim(),
+        material: String(variant?.material || "").trim(),
+        sku: String(variant?.sku || "").trim(),
+        price: Math.max(0, Number(variant?.price || 0)),
+        stock: Math.max(0, Number(variant?.stock || 0)),
+        active: variant?.active !== false,
+      };
+    })
+    .filter(Boolean);
+
+const buildVariantLabel = (variant = {}) =>
+  [variant?.size, variant?.color, variant?.material]
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean)
+    .join(" / ");
+
+const getResolvedVariantUnitPrice = (product = {}, variant = null) => {
+  if (variant && Number.isFinite(Number(variant?.price)) && Number(variant.price) > 0) {
+    return Math.max(0, Number(variant.price));
+  }
+  return Math.max(0, Number(product?.price || 0));
+};
+
+const resolveRequestedVariant = (product, item = {}, orderQuantity = 1) => {
+  const variants = normalizeProductVariants(product);
+  if (variants.length === 0) return null;
+
+  const requestedId = String(item?.variantId || item?.selectedVariant?.id || "").trim();
+  const requestedSku = String(item?.selectedVariant?.sku || "").trim().toLowerCase();
+  if (!requestedId && !requestedSku) return null;
+
+  const match =
+    variants.find((variant) => variant.id === requestedId) ||
+    variants.find((variant) => requestedSku && variant.sku.toLowerCase() === requestedSku);
+
+  if (!match) {
+    const error = new Error("Selected variant is not available for this product.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (match.stock < orderQuantity) {
+    const label = buildVariantLabel(match) || match.sku || "Selected variant";
+    throw buildStockError(
+      `Insufficient stock for ${product?.name || "this product"} - ${label} (requested ${orderQuantity}, available ${match.stock})`,
+      {
+        type: "product_stock",
+        productId: String(product?._id || ""),
+        productName: product?.name,
+        requestedQty: orderQuantity,
+        availableQty: match.stock,
+        variantId: match.id,
+        variantLabel: label,
+      }
+    );
+  }
+
+  return {
+    ...match,
+    label: buildVariantLabel(match),
+    price: getResolvedVariantUnitPrice(product, match),
+  };
 };
 
 const parseQuantity = (value) => {
@@ -361,6 +557,12 @@ const sanitizeReturnReason = (value = "") =>
     .replace(/\s+/g, " ")
     .slice(0, MAX_RETURN_REASON_LENGTH);
 
+const sanitizeCancellationReason = (value = "") =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, MAX_CANCELLATION_REASON_LENGTH);
+
 const normalizeReturnWindowDays = (value, fallback = DEFAULT_RETURN_WINDOW_DAYS) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < 0) return fallback;
@@ -378,6 +580,452 @@ const getReturnWindowExpiry = (deliveredAt, returnWindowDays) => {
   if (!(deliveredAt instanceof Date) || Number.isNaN(deliveredAt.getTime())) return null;
   if (returnWindowDays < 0) return null;
   return new Date(deliveredAt.getTime() + returnWindowDays * DAY_IN_MS);
+};
+
+const buildInvoiceNumber = async () => issueNextInvoiceNumber();
+
+const cloneInvoiceSnapshot = (invoice = {}) => ({
+  number: String(invoice?.number || "").trim(),
+  issuedAt: invoice?.issuedAt || null,
+  version: Math.max(1, Number(invoice?.version || 1)),
+});
+
+const shouldIssueInvoice = (order = {}) => {
+  const status = String(order?.status || "").trim().toLowerCase();
+  const paymentStatus = String(order?.paymentStatus || "").trim().toLowerCase();
+  if (status === "pending_payment") return false;
+  if (status === "cancelled" && !String(order?.invoice?.number || "").trim()) {
+    return false;
+  }
+  return true;
+};
+
+const ensureOrderInvoiceRecord = async (order, { save = false } = {}) => {
+  if (!order || typeof order !== "object") return false;
+  if (!shouldIssueInvoice(order)) return false;
+
+  const currentNumber = String(order?.invoice?.number || "").trim();
+  const currentIssuedAt = order?.invoice?.issuedAt || null;
+  const currentVersion = Math.max(1, Number(order?.invoice?.version || 1));
+  const nextNumber = currentNumber || (await buildInvoiceNumber(order));
+  const nextIssuedAt = currentIssuedAt || order?.paidAt || order?.createdAt || new Date();
+
+  const needsUpdate =
+    nextNumber !== currentNumber ||
+    String(currentIssuedAt || "") !== String(nextIssuedAt || "") ||
+    currentVersion !== Number(order?.invoice?.version || 1);
+
+  if (!needsUpdate) return false;
+
+  order.invoice = {
+    number: nextNumber,
+    issuedAt: nextIssuedAt,
+    version: currentVersion,
+  };
+
+  if (save) {
+    await order.save();
+  }
+  return true;
+};
+
+const calculateInclusiveTaxBreakdown = (amount = 0, taxRate = 0) => {
+  const safeAmount = Math.max(0, Number(amount || 0));
+  const safeTaxRate = Math.max(0, Number(taxRate || 0));
+  if (!safeTaxRate) {
+    return {
+      taxRate: 0,
+      taxableValue: safeAmount,
+      taxAmount: 0,
+    };
+  }
+
+  const taxableValue = Math.round((safeAmount / (1 + safeTaxRate / 100)) * 100) / 100;
+  const taxAmount = Math.round((safeAmount - taxableValue) * 100) / 100;
+  return {
+    taxRate: safeTaxRate,
+    taxableValue,
+    taxAmount,
+  };
+};
+
+const roundCurrency = (value = 0) => Math.round(Number(value || 0) * 100) / 100;
+
+const buildHamperInvoiceItemTitle = (item = {}) => {
+  const type = String(item?.type || "").trim().toLowerCase();
+  const subItem = String(item?.subItem || "").trim();
+  const name = String(item?.name || "").trim();
+  const mainItem = String(item?.mainItem || "").trim();
+  if (type === "base") {
+    return subItem || name || mainItem || "Hamper base";
+  }
+  return subItem || name || mainItem || "Hamper item";
+};
+
+const buildHamperInvoiceItemMeta = (item = {}) => {
+  const type = String(item?.type || "").trim().toLowerCase();
+  const title = buildHamperInvoiceItemTitle(item).toLowerCase();
+  return [
+    type === "base" ? "Hamper base" : "",
+    String(item?.mainItem || "").trim(),
+    String(item?.category || "").trim(),
+    String(item?.size || "").trim() ? `Size: ${String(item.size).trim()}` : "",
+  ].filter((value, index, values) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized || normalized === title) return false;
+    return values.findIndex((entry) => String(entry || "").trim().toLowerCase() === normalized) === index;
+  });
+};
+
+const applyInvoiceTaxToLineItems = (lineItems = [], taxRate = 0, total = 0) => {
+  const safeLineItems = Array.isArray(lineItems) ? lineItems.filter(Boolean) : [];
+  if (safeLineItems.length === 0) return [];
+
+  const overallBreakdown = calculateInclusiveTaxBreakdown(total, taxRate);
+  const rows = safeLineItems.map((lineItem) => {
+    const lineTotal = roundCurrency(lineItem?.total || 0);
+    const lineBreakdown = calculateInclusiveTaxBreakdown(lineTotal, taxRate);
+    return {
+      ...lineItem,
+      quantity: Math.max(1, Number.parseInt(lineItem?.quantity, 10) || 1),
+      unitPrice: roundCurrency(lineItem?.unitPrice || 0),
+      taxableValue: roundCurrency(lineBreakdown.taxableValue),
+      taxAmount: roundCurrency(lineBreakdown.taxAmount),
+      total: lineTotal,
+    };
+  });
+
+  const taxableDiff = roundCurrency(
+    overallBreakdown.taxableValue -
+      rows.reduce((sum, lineItem) => sum + roundCurrency(lineItem?.taxableValue || 0), 0)
+  );
+  const taxDiff = roundCurrency(
+    overallBreakdown.taxAmount -
+      rows.reduce((sum, lineItem) => sum + roundCurrency(lineItem?.taxAmount || 0), 0)
+  );
+
+  const lastRow = rows[rows.length - 1];
+  if (lastRow) {
+    lastRow.taxableValue = roundCurrency(lastRow.taxableValue + taxableDiff);
+    lastRow.taxAmount = roundCurrency(lastRow.taxAmount + taxDiff);
+  }
+
+  return rows;
+};
+
+const buildInvoiceLineItems = ({
+  order = {},
+  product = {},
+  quantity = 1,
+  subtotal = 0,
+  grandTotal = 0,
+  productTaxRate = 0,
+}) => {
+  const isGenericHamper = isGenericHamperCustomization(order?.customization);
+  if (!isGenericHamper) {
+    return applyInvoiceTaxToLineItems(
+      [
+        {
+          id: normalizeEntityId(order?._id) || "order-item",
+          name: String(product?.name || "Curated gift").trim(),
+          meta: [
+            String(product?.category || "").trim(),
+            product?.sku ? `SKU: ${String(product.sku).trim()}` : "",
+            product?.hsnCode ? `HSN: ${String(product.hsnCode).trim()}` : "",
+            Number(productTaxRate || 0) > 0 ? `Tax rate: ${productTaxRate}%` : "",
+          ].filter(Boolean),
+          quantity,
+          unitPrice: quantity > 0 ? roundCurrency(subtotal / quantity) : roundCurrency(subtotal),
+          total: roundCurrency(grandTotal),
+        },
+      ],
+      productTaxRate,
+      grandTotal
+    );
+  }
+
+  const selectedItems = Array.isArray(order?.customization?.selectedItems)
+    ? order.customization.selectedItems
+    : [];
+  const itemRows = selectedItems
+    .map((item, index) => {
+      const itemQuantity = Math.max(1, Number.parseInt(item?.quantity, 10) || 1);
+      const unitPrice = roundCurrency(item?.price || 0);
+      return {
+        id: String(item?.id || `hamper-item-${index + 1}`).trim(),
+        name: buildHamperInvoiceItemTitle(item),
+        meta: buildHamperInvoiceItemMeta(item),
+        quantity: itemQuantity,
+        unitPrice,
+        total: roundCurrency(unitPrice * itemQuantity),
+      };
+    })
+    .filter((item) => item.total > 0 || item.name);
+
+  const selectedItemsTotal = roundCurrency(
+    itemRows.reduce((sum, item) => sum + roundCurrency(item?.total || 0), 0)
+  );
+  const assemblyCharge = roundCurrency(Math.max(0, grandTotal - selectedItemsTotal));
+
+  if (assemblyCharge > 0 || itemRows.length === 0) {
+    itemRows.push({
+      id: "hamper-assembly-charge",
+      name: "Making charge",
+      meta: ["Seller-set making charge and service"],
+      quantity: 1,
+      unitPrice: assemblyCharge,
+      total: assemblyCharge,
+    });
+  }
+
+  return applyInvoiceTaxToLineItems(itemRows, productTaxRate, grandTotal);
+};
+
+const normalizeEntityId = (value) => String(value?._id || value || "").trim();
+
+const canAccessInvoice = (order, user = {}) => {
+  const role = String(user?.role || "").trim().toLowerCase();
+  const userId = normalizeEntityId(user?.id);
+  if (!order || !role || !userId) return false;
+  if (role === "admin") return true;
+  if (role === "customer") return false;
+  if (role === "seller") {
+    if (normalizeEntityId(order?.seller) === userId) {
+      return true;
+    }
+    if (normalizeEntityId(order?.sellerSnapshot?._id) === userId) {
+      return true;
+    }
+    return normalizeEntityId(order?.product?.seller) === userId;
+  }
+  return false;
+};
+
+const buildInvoicePayload = (order = {}) => {
+  const product = resolveOrderProductForResponse(order) || {};
+  const sellerSnapshot =
+    order?.sellerSnapshot && typeof order.sellerSnapshot === "object"
+      ? order.sellerSnapshot
+      : {};
+  const persistedInvoiceNumber = String(order?.invoice?.number || "").trim();
+  const persistedIssuedAt = order?.invoice?.issuedAt || order?.paidAt || order?.createdAt || new Date();
+  const quantity = parseQuantity(order?.quantity);
+  const subtotal = Math.max(0, Number(order?.price || 0));
+  const makingCharge = Math.max(
+    0,
+    Number(order?.makingCharge || order?.customization?.makingCharge || 0)
+  );
+  const grandTotal = Math.max(0, Number(order?.total || subtotal + makingCharge));
+  const packagingStyleTitle = String(order?.customization?.packagingStyleTitle || "").trim();
+  const giftMessage = String(order?.customization?.wishCardText || "").trim();
+  const orderNote = String(order?.customization?.specialNote || "").trim();
+  const sellerName = String(
+    sellerSnapshot?.storeName ||
+      sellerSnapshot?.name ||
+      order?.seller?.storeName ||
+      order?.seller?.name ||
+      ""
+  ).trim();
+  const sellerPhone = String(sellerSnapshot?.phone || order?.seller?.phone || "").trim();
+  const sellerLegalName = String(
+    sellerSnapshot?.legalBusinessName ||
+      order?.seller?.legalBusinessName ||
+      sellerName ||
+      sellerSnapshot?.name ||
+      order?.seller?.name ||
+      ""
+  ).trim();
+  const sellerReturnWindowDays = normalizeReturnWindowDays(
+    sellerSnapshot?.returnWindowDays ?? order?.seller?.returnWindowDays
+  );
+  const productTaxRate = Math.max(0, Number(product?.taxRate || 0));
+  const taxBreakdown = calculateInclusiveTaxBreakdown(grandTotal, productTaxRate);
+  const invoiceNumber = persistedInvoiceNumber || "";
+  const fileName = `${invoiceNumber || "invoice"}.pdf`;
+  const isGenericHamper = isGenericHamperCustomization(order?.customization);
+  const billingAddressSource =
+    order?.customer?.billingAddress && typeof order.customer.billingAddress === "object"
+      ? order.customer.billingAddress
+      : order?.shippingAddress || {};
+  const items = buildInvoiceLineItems({
+    order,
+    product,
+    quantity,
+    subtotal,
+    grandTotal,
+    productTaxRate,
+  });
+  const itemizedSubtotal = roundCurrency(
+    items
+      .filter((entry) => String(entry?.id || "").trim() !== "hamper-assembly-charge")
+      .reduce((sum, entry) => sum + roundCurrency(entry?.total || 0), 0)
+  );
+  const assemblyCharge = roundCurrency(Math.max(0, grandTotal - itemizedSubtotal));
+  const summary = {
+    subtotalLabel: isGenericHamper ? "Selected hamper items" : "Item subtotal",
+    subtotal: isGenericHamper ? itemizedSubtotal : subtotal,
+    makingChargeLabel: isGenericHamper ? "Making charge" : "Customization / packaging",
+    makingCharge: isGenericHamper ? assemblyCharge : makingCharge,
+    taxLabel: "Tax included",
+    taxAmount: taxBreakdown.taxAmount,
+    totalLabel: "Grand total",
+    total: grandTotal,
+  };
+
+  return {
+    invoiceNumber,
+    fileName,
+    issuedAt: persistedIssuedAt,
+    order: {
+      id: String(order?._id || "").trim(),
+      shortCode: getOrderShortCode(order?._id),
+      createdAt: order?.createdAt || null,
+      status: String(order?.status || "").trim(),
+      paymentStatus: String(order?.paymentStatus || "").trim(),
+      paymentMode: String(order?.paymentMode || "").trim(),
+      paymentReference: String(order?.paymentReference || "").trim(),
+      paidAt: order?.paidAt || null,
+      cancelledAt: order?.cancelledAt || null,
+      refundedAt: order?.refundedAt || null,
+    },
+    seller: {
+      name: sellerName || "CraftzyGifts Store",
+      legalBusinessName: sellerLegalName || sellerName || "CraftzyGifts Store",
+      email: String(
+        sellerSnapshot?.supportEmail ||
+          sellerSnapshot?.email ||
+          order?.seller?.supportEmail ||
+          order?.seller?.email ||
+          ""
+      ).trim(),
+      phone: sellerPhone,
+      gstNumber: String(sellerSnapshot?.gstNumber || order?.seller?.gstNumber || "").trim(),
+      returnWindowDays: sellerReturnWindowDays,
+      billingAddress:
+        sellerSnapshot?.billingAddress && typeof sellerSnapshot.billingAddress === "object"
+          ? sellerSnapshot.billingAddress
+          : order?.seller?.billingAddress || {},
+    },
+    customer: {
+      name: String(order?.shippingAddress?.name || order?.customer?.name || "").trim(),
+      email: String(order?.customer?.email || "").trim(),
+      phone: String(order?.shippingAddress?.phone || "").trim(),
+    },
+    shippingAddress: {
+      name: String(order?.shippingAddress?.name || "").trim(),
+      line1: String(order?.shippingAddress?.line1 || "").trim(),
+      line2: String(order?.shippingAddress?.line2 || "").trim(),
+      city: String(order?.shippingAddress?.city || "").trim(),
+      state: String(order?.shippingAddress?.state || "").trim(),
+      pincode: String(order?.shippingAddress?.pincode || "").trim(),
+      phone: String(order?.shippingAddress?.phone || "").trim(),
+    },
+    billingAddress: {
+      name: String(
+        billingAddressSource?.name || order?.shippingAddress?.name || order?.customer?.name || ""
+      ).trim(),
+      line1: String(billingAddressSource?.line1 || order?.shippingAddress?.line1 || "").trim(),
+      line2: String(billingAddressSource?.line2 || order?.shippingAddress?.line2 || "").trim(),
+      city: String(billingAddressSource?.city || order?.shippingAddress?.city || "").trim(),
+      state: String(billingAddressSource?.state || order?.shippingAddress?.state || "").trim(),
+      pincode: String(
+        billingAddressSource?.pincode || order?.shippingAddress?.pincode || ""
+      ).trim(),
+      phone: String(
+        billingAddressSource?.phone || order?.shippingAddress?.phone || order?.customer?.phone || ""
+      ).trim(),
+    },
+    item: {
+      name: String(product?.name || "Curated gift").trim(),
+      category: String(product?.category || "").trim(),
+      sku: String(product?.sku || "").trim(),
+      hsnCode: String(product?.hsnCode || "").trim(),
+      quantity,
+      unitPrice:
+        quantity > 0 ? Math.round((subtotal / quantity) * 100) / 100 : subtotal,
+      subtotal,
+      makingCharge,
+      taxRate: taxBreakdown.taxRate,
+      taxableValue: taxBreakdown.taxableValue,
+      taxAmount: taxBreakdown.taxAmount,
+      total: grandTotal,
+    },
+    items,
+    summary,
+    notes: [giftMessage ? `Gift message: ${giftMessage}` : "", packagingStyleTitle
+      ? `Packaging style: ${packagingStyleTitle}`
+      : "", orderNote ? `Order note: ${orderNote}` : ""].filter(Boolean),
+  };
+};
+
+const buildShippingLabelPayload = (order = {}) => {
+  const invoiceView = buildInvoicePayload(order);
+  const paymentMode = String(order?.paymentMode || "").trim().toLowerCase();
+  const paymentStatus = String(order?.paymentStatus || "").trim().toLowerCase();
+  const collectAmount =
+    paymentMode === "cod" && paymentStatus !== "paid"
+      ? Math.max(0, Number(invoiceView?.summary?.total ?? order?.total ?? 0))
+      : 0;
+
+  return {
+    fileName: `shipping-label-${String(invoiceView?.order?.shortCode || "order")
+      .trim()
+      .toLowerCase()}.pdf`,
+    invoiceNumber: String(invoiceView?.invoiceNumber || "").trim(),
+    order: {
+      id: String(invoiceView?.order?.id || "").trim(),
+      shortCode: String(invoiceView?.order?.shortCode || "").trim(),
+      status: String(invoiceView?.order?.status || "").trim(),
+      paymentMode: String(invoiceView?.order?.paymentMode || "").trim(),
+      paymentStatus: String(invoiceView?.order?.paymentStatus || "").trim(),
+    },
+    shipment: {
+      courierName: String(order?.shipment?.courierName || "").trim(),
+      trackingId: String(order?.shipment?.trackingId || "").trim(),
+      awbNumber: String(order?.shipment?.awbNumber || "").trim(),
+    },
+    seller: {
+      name: String(invoiceView?.seller?.name || "").trim(),
+      legalBusinessName: String(invoiceView?.seller?.legalBusinessName || "").trim(),
+      phone: String(invoiceView?.seller?.phone || "").trim(),
+      billingAddress:
+        invoiceView?.seller?.billingAddress && typeof invoiceView.seller.billingAddress === "object"
+          ? invoiceView.seller.billingAddress
+          : {},
+    },
+    shippingAddress:
+      invoiceView?.shippingAddress && typeof invoiceView.shippingAddress === "object"
+        ? invoiceView.shippingAddress
+        : {},
+    items: Array.isArray(invoiceView?.items) ? invoiceView.items : [],
+    collectAmount,
+  };
+};
+
+const cancelOrderRecord = async (
+  order,
+  { initiator = "customer", reason = "", paymentFailureReason = "" } = {}
+) => {
+  order.status = "cancelled";
+  order.cancelledAt = order.cancelledAt || new Date();
+  order.cancelledBy = initiator;
+  order.cancellationReason = reason || order.cancellationReason || "";
+
+  if (order.inventoryAdjusted) {
+    await restockInventory(order);
+  }
+
+  if (order.paymentStatus === "paid") {
+    order.paymentStatus = "refunded";
+    order.refundedAt = order.refundedAt || new Date();
+  } else if (ONLINE_PAYMENT_MODES.has(order.paymentMode)) {
+    order.paymentStatus = "failed";
+    order.paymentFailureReason =
+      paymentFailureReason || order.paymentFailureReason || "Order cancelled before payment confirmation.";
+  }
+
+  await order.save();
+  return order;
 };
 
 const populateOrdersForCustomer = async (orders = []) =>
@@ -420,6 +1068,20 @@ const createPlacedOrderNotification = async (order) => {
     message: `Order #${orderCode} has been placed successfully.`,
     key: `${String(order?._id || "").trim()}_placed`,
   });
+};
+
+const buildSellerPlacedOrderNotification = (order = {}) => {
+  const orderCode = getOrderShortCode(order?._id);
+  if (isGenericHamperCustomization(order?.customization)) {
+    return {
+      title: "New custom hamper order",
+      message: `Custom hamper order #${orderCode} was placed for this store.`,
+    };
+  }
+  return {
+    title: "New order placed",
+    message: `Order #${orderCode} was placed for this store.`,
+  };
 };
 
 const populateOrderForCustomer = async (order) => {
@@ -695,10 +1357,63 @@ const normalizeCatalogSelections = (product, customization = {}, orderQuantity =
         : 0;
   });
 
+  const customizationMode = String(customization?.mode || "").trim().toLowerCase();
+  let bulkPlan;
+  if (customizationMode === "build_bulk") {
+    const rawBulkSelectionLookup = new Map(
+      (Array.isArray(customization?.bulkPlan?.baseSelections)
+        ? customization.bulkPlan.baseSelections
+        : []
+      ).map((item) => [String(item?.id || "").trim(), item])
+    );
+    const baseSelections = selectedItems
+      .filter((item) => String(item?.type || "").trim().toLowerCase() === "base")
+      .map((item) => {
+        const rawMatch = rawBulkSelectionLookup.get(String(item.id || "").trim()) || {};
+        return {
+          id: item.id,
+          name: item.name,
+          mainItem: item.mainItem || "",
+          subItem: item.subItem || "",
+          category:
+            String(rawMatch?.category || "").trim() || item.category || item.mainItem || "",
+          categoryId: String(rawMatch?.categoryId || "").trim(),
+          size: item.size || "",
+          quantity: item.quantity,
+          price: Number.isFinite(item.price) && item.price > 0 ? item.price : 0,
+          image: item.image || "",
+        };
+      });
+
+    const totalHampers = baseSelections.reduce(
+      (sum, item) => sum + Math.max(0, Number(item.quantity || 0)),
+      0
+    );
+
+    if (baseSelections.length === 0 || totalHampers < 1) {
+      const error = new Error("Please select at least one hamper base type.");
+      error.status = 400;
+      throw error;
+    }
+
+    const requestedTotal = Number.parseInt(customization?.bulkPlan?.totalHampers, 10);
+    if (Number.isInteger(requestedTotal) && requestedTotal > 0 && requestedTotal !== totalHampers) {
+      const error = new Error("Selected hamper base quantities do not match the total hamper count.");
+      error.status = 400;
+      throw error;
+    }
+
+    bulkPlan = {
+      totalHampers,
+      baseSelections,
+    };
+  }
+
   return {
     selectedItems,
     selectedOptions,
     minimumChargeFromCatalog,
+    bulkPlan,
   };
 };
 
@@ -738,6 +1453,8 @@ const buildOrderDraft = async ({
     throw error;
   }
 
+  const selectedVariant = resolveRequestedVariant(product, item, parsedQuantity);
+
   if (isGenericHamper) {
     const catalogSellerId = String(customization?.catalogSellerId || "").trim();
     if (!catalogSellerId || String(product.seller) !== catalogSellerId) {
@@ -750,6 +1467,8 @@ const buildOrderDraft = async ({
       error.status = 400;
       throw error;
     }
+  } else if (selectedVariant) {
+    // Variant stock is validated inside resolveRequestedVariant().
   } else if ((product.stock || 0) < parsedQuantity) {
     const availableQty = Math.max(0, Number(product.stock || 0));
     throw buildStockError(
@@ -762,6 +1481,15 @@ const buildOrderDraft = async ({
         availableQty,
       }
     );
+  }
+
+  const sellerProfile = await User.findById(product.seller).select(
+    "name storeName email supportEmail phone legalBusinessName gstNumber returnWindowDays billingAddress"
+  );
+  if (!sellerProfile) {
+    const error = new Error("Seller profile is unavailable for this product.");
+    error.status = 409;
+    throw error;
   }
 
   const requestedWishCardText = String(customization?.wishCardText || "").trim();
@@ -802,11 +1530,13 @@ const buildOrderDraft = async ({
     ? { ...(customization || {}) }
     : undefined;
   let minimumCatalogCharge = 0;
+  let normalizedBulkPlan;
 
   if (product.isCustomizable) {
     const normalizedCatalog = normalizeCatalogSelections(product, customization, parsedQuantity);
     normalizedCustomization = {
       ...(customization || {}),
+      mode: customizationMode || undefined,
       catalogSellerId: isGenericHamper
         ? String(customization?.catalogSellerId || "").trim()
         : undefined,
@@ -815,6 +1545,12 @@ const buildOrderDraft = async ({
     };
     minimumCatalogCharge =
       customizationMode === "existing" ? 0 : normalizedCatalog.minimumChargeFromCatalog;
+    normalizedBulkPlan = normalizedCatalog.bulkPlan;
+    if (customizationMode === "build_bulk") {
+      normalizedCustomization.bulkPlan = normalizedBulkPlan;
+    } else {
+      normalizedCustomization.bulkPlan = undefined;
+    }
   }
 
   const sellerCharge = Number(product.makingCharge || 0);
@@ -826,7 +1562,10 @@ const buildOrderDraft = async ({
   const requestedCustomizationCharge = requestedPackagingStyle
     ? packagingStyleCharge
     : resolvedCharge;
-  const standardPrice = product.price * parsedQuantity;
+  const resolvedUnitPrice = selectedVariant
+    ? getResolvedVariantUnitPrice(product, selectedVariant)
+    : Math.max(0, Number(product.price || 0));
+  const standardPrice = resolvedUnitPrice * parsedQuantity;
   const standardMakingCharge = product.isCustomizable
     ? Math.max(sellerCharge, requestedCustomizationCharge, minimumCatalogCharge)
     : packagingStyleCharge;
@@ -866,6 +1605,18 @@ const buildOrderDraft = async ({
     seller: product.seller,
     product: product._id,
     productSnapshot: buildOrderProductSnapshot(product),
+    sellerSnapshot: buildOrderSellerSnapshot(sellerProfile),
+    selectedVariant: selectedVariant
+      ? {
+          id: selectedVariant.id,
+          size: selectedVariant.size,
+          color: selectedVariant.color,
+          material: selectedVariant.material,
+          sku: selectedVariant.sku,
+          price: selectedVariant.price,
+          label: selectedVariant.label,
+        }
+      : undefined,
     quantity: parsedQuantity,
     price,
     makingCharge,
@@ -928,6 +1679,7 @@ const captureOrderSnapshot = (order) => ({
   paymentFailureReason: order.paymentFailureReason,
   paidAt: order.paidAt,
   refundedAt: order.refundedAt,
+  invoice: cloneInvoiceSnapshot(order.invoice),
   inventoryAdjusted: order.inventoryAdjusted,
   inventoryRestocked: order.inventoryRestocked,
 });
@@ -943,6 +1695,7 @@ const restoreOrderSnapshot = async (order, snapshot) => {
   order.paymentFailureReason = snapshot.paymentFailureReason;
   order.paidAt = snapshot.paidAt;
   order.refundedAt = snapshot.refundedAt;
+  order.invoice = cloneInvoiceSnapshot(snapshot.invoice);
   order.inventoryAdjusted = snapshot.inventoryAdjusted;
   order.inventoryRestocked = snapshot.inventoryRestocked;
   await order.save();
@@ -982,6 +1735,20 @@ const markOrdersPaid = async ({
 
       const snapshot = captureOrderSnapshot(order);
       appendWebhookEvent(order, eventName, paymentId);
+
+      if (order.status === "cancelled") {
+        order.paymentReference = paymentId;
+        order.paymentGatewaySignature = razorpaySignature || order.paymentGatewaySignature;
+        if (ONLINE_PAYMENT_MODES.has(order.paymentMode)) {
+          order.paymentStatus = "refunded";
+          order.refundedAt = order.refundedAt || new Date();
+          order.paymentFailureReason = "Payment arrived after the order was cancelled.";
+        }
+        await order.save();
+        processed.push({ order, snapshot });
+        continue;
+      }
+
       order.paymentStatus = "paid";
       order.paymentReference = paymentId;
       order.paymentGatewaySignature = razorpaySignature || order.paymentGatewaySignature;
@@ -995,6 +1762,7 @@ const markOrdersPaid = async ({
       }
 
       const stockChange = await deductInventory(order);
+      await ensureOrderInvoiceRecord(order);
       await order.save();
 
       processed.push({ order, snapshot });
@@ -1023,11 +1791,12 @@ const markOrdersPaid = async ({
   }
 
   for (const order of placedOrders) {
+    const sellerNotification = buildSellerPlacedOrderNotification(order);
     await createSellerNotification({
       sellerId: order.seller,
       type: "new_order",
-      title: "New order placed",
-      message: `Order #${getOrderShortCode(order._id)} was placed for this store.`,
+      title: sellerNotification.title,
+      message: sellerNotification.message,
       link: "/seller/orders?status=placed",
       entityType: "order",
       entityId: String(order._id || "").trim(),
@@ -1236,6 +2005,7 @@ const applyCustomizationStockAdjustments = async (order, direction) => {
 const deductInventory = async (order) => {
   if (order.inventoryAdjusted) return null;
   const orderQuantity = parseQuantity(order.quantity);
+  const selectedVariantId = String(order?.selectedVariant?.id || "").trim();
 
   if (isGenericHamperOrder(order)) {
     await applyCustomizationStockAdjustments(order, -1);
@@ -1244,24 +2014,65 @@ const deductInventory = async (order) => {
     return null;
   }
 
-  const updated = await Product.findOneAndUpdate(
-    { _id: order.product, stock: { $gte: orderQuantity } },
-    { $inc: { stock: -orderQuantity } },
-    { returnDocument: "after" }
-  );
+  const updated = selectedVariantId
+    ? await Product.findOneAndUpdate(
+        {
+          _id: order.product,
+          stock: { $gte: orderQuantity },
+          variants: {
+            $elemMatch: {
+              id: selectedVariantId,
+              stock: { $gte: orderQuantity },
+              active: { $ne: false },
+            },
+          },
+        },
+        {
+          $inc: {
+            stock: -orderQuantity,
+            "variants.$[variant].stock": -orderQuantity,
+          },
+        },
+        {
+          returnDocument: "after",
+          arrayFilters: [
+            {
+              "variant.id": selectedVariantId,
+              "variant.stock": { $gte: orderQuantity },
+              "variant.active": { $ne: false },
+            },
+          ],
+        }
+      )
+    : await Product.findOneAndUpdate(
+        { _id: order.product, stock: { $gte: orderQuantity } },
+        { $inc: { stock: -orderQuantity } },
+        { returnDocument: "after" }
+      );
 
   if (!updated) {
-    const current = await Product.findById(order.product).select("name stock").lean();
-    const availableQty = Math.max(0, Number(current?.stock || 0));
+    const current = await Product.findById(order.product).select("name stock variants").lean();
     const productName = String(current?.name || "this item").trim();
+    const variantMatch = (Array.isArray(current?.variants) ? current.variants : []).find(
+      (variant) => String(variant?.id || "").trim() === selectedVariantId
+    );
+    const variantLabel = buildVariantLabel(variantMatch);
+    const availableQty = selectedVariantId
+      ? Math.max(0, Number(variantMatch?.stock || 0))
+      : Math.max(0, Number(current?.stock || 0));
     throw buildStockError(
-      `Insufficient stock for ${productName} (requested ${orderQuantity}, available ${availableQty})`,
+      selectedVariantId
+        ? `Insufficient stock for ${productName} - ${
+            variantLabel || "selected variant"
+          } (requested ${orderQuantity}, available ${availableQty})`
+        : `Insufficient stock for ${productName} (requested ${orderQuantity}, available ${availableQty})`,
       {
         type: "product_stock",
         productId: String(order.product || ""),
         productName,
         requestedQty: orderQuantity,
         availableQty,
+        ...(selectedVariantId ? { variantId: selectedVariantId, variantLabel } : {}),
       }
     );
   }
@@ -1269,7 +2080,22 @@ const deductInventory = async (order) => {
   try {
     await applyCustomizationStockAdjustments(order, -1);
   } catch (error) {
-    await Product.findByIdAndUpdate(order.product, { $inc: { stock: orderQuantity } });
+    if (selectedVariantId) {
+      await Product.findByIdAndUpdate(
+        order.product,
+        {
+          $inc: {
+            stock: orderQuantity,
+            "variants.$[variant].stock": orderQuantity,
+          },
+        },
+        {
+          arrayFilters: [{ "variant.id": selectedVariantId }],
+        }
+      );
+    } else {
+      await Product.findByIdAndUpdate(order.product, { $inc: { stock: orderQuantity } });
+    }
     throw error;
   }
 
@@ -1285,6 +2111,7 @@ const deductInventory = async (order) => {
 const restockInventory = async (order) => {
   if (!order.inventoryAdjusted || order.inventoryRestocked) return;
   const orderQuantity = parseQuantity(order.quantity);
+  const selectedVariantId = String(order?.selectedVariant?.id || "").trim();
 
   if (isGenericHamperOrder(order)) {
     await applyCustomizationStockAdjustments(order, 1);
@@ -1293,7 +2120,22 @@ const restockInventory = async (order) => {
     return;
   }
 
-  await Product.findByIdAndUpdate(order.product, { $inc: { stock: orderQuantity } });
+  if (selectedVariantId) {
+    await Product.findByIdAndUpdate(
+      order.product,
+      {
+        $inc: {
+          stock: orderQuantity,
+          "variants.$[variant].stock": orderQuantity,
+        },
+      },
+      {
+        arrayFilters: [{ "variant.id": selectedVariantId }],
+      }
+    );
+  } else {
+    await Product.findByIdAndUpdate(order.product, { $inc: { stock: orderQuantity } });
+  }
   await applyCustomizationStockAdjustments(order, 1);
   order.inventoryAdjusted = false;
   order.inventoryRestocked = true;
@@ -1385,11 +2227,13 @@ exports.createOrder = async (req, res) => {
     let stockChange = null;
     if (!onlineMode) {
       stockChange = await deductInventory(order);
+      await ensureOrderInvoiceRecord(order);
     }
 
     await order.save();
 
     if (stockChange) {
+      const sellerNotification = buildSellerPlacedOrderNotification(order);
       await maybeCreateInventoryNotifications({
         sellerId: order.seller,
         product: stockChange.product,
@@ -1399,8 +2243,8 @@ exports.createOrder = async (req, res) => {
       await createSellerNotification({
         sellerId: order.seller,
         type: "new_order",
-        title: "New order placed",
-        message: `Order #${getOrderShortCode(order._id)} was placed for this store.`,
+        title: sellerNotification.title,
+        message: sellerNotification.message,
         link: "/seller/orders?status=placed",
         entityType: "order",
         entityId: String(order._id || "").trim(),
@@ -1460,6 +2304,7 @@ exports.createCheckoutSession = async (req, res) => {
       try {
         for (const order of drafts) {
           const stockChange = await deductInventory(order);
+          await ensureOrderInvoiceRecord(order);
           await order.save();
           processed.push({ order, stockChange });
         }
@@ -1483,11 +2328,12 @@ exports.createCheckoutSession = async (req, res) => {
             currentStock: row.stockChange.currentStock,
           });
         }
+        const sellerNotification = buildSellerPlacedOrderNotification(row.order);
         await createSellerNotification({
           sellerId: row.order.seller,
           type: "new_order",
-          title: "New order placed",
-          message: `Order #${getOrderShortCode(row.order._id)} was placed for this store.`,
+          title: sellerNotification.title,
+          message: sellerNotification.message,
           link: "/seller/orders?status=placed",
           entityType: "order",
           entityId: String(row.order._id || "").trim(),
@@ -1563,6 +2409,103 @@ exports.getMyOrders = async (req, res) => {
   }
 };
 
+exports.getMyOrderInvoice = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+      .populate("product")
+      .populate("customer", "name email phone billingAddress")
+      .populate(
+        "seller",
+        "name storeName email supportEmail phone legalBusinessName gstNumber returnWindowDays billingAddress"
+      );
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+    if (!canAccessInvoice(order, req.user)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    if (
+      order.status === "pending_payment" ||
+      (order.status === "cancelled" && ["pending", "failed"].includes(order.paymentStatus))
+    ) {
+      return res.status(400).json({
+        message: "Invoice becomes available after the order is confirmed.",
+      });
+    }
+
+    if (!String(order?.invoice?.number || "").trim()) {
+      await ensureOrderInvoiceRecord(order, { save: true });
+    }
+
+    if (!String(order?.invoice?.number || "").trim()) {
+      return res.status(400).json({
+        message: "Invoice becomes available after the order is confirmed.",
+      });
+    }
+
+    const invoicePayload = buildInvoicePayload(order);
+    const pdfBuffer = await generateInvoicePdfBuffer(invoicePayload);
+    const safeFileName =
+      String(invoicePayload?.fileName || "invoice.pdf")
+        .trim()
+        .replace(/[^A-Za-z0-9._-]/g, "-") || "invoice.pdf";
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(safeFileName)}`
+    );
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Length", String(pdfBuffer.length));
+
+    return res.status(200).send(pdfBuffer);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getMyOrderShippingLabel = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+      .populate("product")
+      .populate("customer", "name email phone billingAddress")
+      .populate(
+        "seller",
+        "name storeName email supportEmail phone legalBusinessName gstNumber returnWindowDays billingAddress"
+      );
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+    if (!canAccessInvoice(order, req.user)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    if (order.status === "pending_payment" || order.status === "cancelled") {
+      return res.status(400).json({
+        message: "Shipping label becomes available after the order is confirmed.",
+      });
+    }
+
+    const labelPayload = buildShippingLabelPayload(order);
+    const pdfBuffer = await generateShippingLabelPdfBuffer(labelPayload);
+    const safeFileName =
+      String(labelPayload?.fileName || "shipping-label.pdf")
+        .trim()
+        .replace(/[^A-Za-z0-9._-]/g, "-") || "shipping-label.pdf";
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(safeFileName)}`
+    );
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Length", String(pdfBuffer.length));
+
+    return res.status(200).send(pdfBuffer);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
 exports.getSellerOrders = async (req, res) => {
   try {
     let orders = await Order.find({ seller: req.user.id })
@@ -1585,6 +2528,204 @@ exports.getSellerOrders = async (req, res) => {
     res.json(orders.map((order) => serializeOrderForResponse(order)));
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getSellerFinanceSummary = async (req, res) => {
+  try {
+    const payload = await buildSellerFinancePayload(req.user.id);
+    return res.json(payload);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.createSellerPayoutRequest = async (req, res) => {
+  try {
+    const outcome = await requestSellerPayout(req.user.id, {
+      note: String(req.body?.note || "").trim(),
+    });
+    if (outcome?.error) {
+      return res.status(outcome.status || 400).json({ message: outcome.error });
+    }
+
+    return res.status(201).json({
+      message: "Payout request created successfully.",
+      batch: outcome.batch,
+      settings: outcome.settings,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getAdminPayoutBatches = async (req, res) => {
+  try {
+    const payload = await listAdminPayoutBatches({
+      status: req.query?.status,
+      limit: req.query?.limit,
+    });
+    return res.json(payload);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateAdminPayoutStatus = async (req, res) => {
+  try {
+    const outcome = await updatePayoutBatchStatus(req.params?.batchId, req.body?.status);
+    if (outcome?.error) {
+      return res.status(outcome.status || 400).json({ message: outcome.error });
+    }
+
+    return res.json({
+      message: "Payout batch updated successfully.",
+      batch: outcome.batch,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateOrderShipment = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id).populate("product").populate("customer", "name email phone");
+    if (!order) return res.status(404).json({ message: "Order not found" });
+    if (order.seller.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    if (["pending_payment", "cancelled", "refunded"].includes(order.status)) {
+      return res.status(400).json({
+        message: "Shipment details can only be updated after the order is confirmed.",
+      });
+    }
+
+    const nextShipment = ensureShipmentDetails(
+      order.shipment && typeof order.shipment.toObject === "function"
+        ? order.shipment.toObject()
+        : order.shipment || {}
+    );
+    const payload = req.body || {};
+    const now = new Date();
+
+    if (typeof payload.courierName === "string") {
+      nextShipment.courierName = payload.courierName.trim().slice(0, 80);
+    }
+    if (typeof payload.trackingId === "string") {
+      nextShipment.trackingId = payload.trackingId.trim().slice(0, 120);
+    }
+    if (typeof payload.awbNumber === "string") {
+      nextShipment.awbNumber = payload.awbNumber.trim().slice(0, 120);
+    }
+    if (typeof payload.packagingNotes === "string") {
+      nextShipment.packagingNotes = payload.packagingNotes.trim().slice(0, 600);
+    }
+    if (typeof payload.dispatchDate !== "undefined") {
+      const nextDispatchDate = parseShipmentDate(payload.dispatchDate, nextShipment.dispatchDate || null);
+      if (payload.dispatchDate && !nextDispatchDate) {
+        return res.status(400).json({ message: "Dispatch date must be a valid date." });
+      }
+      nextShipment.dispatchDate = nextDispatchDate || undefined;
+    }
+    if (typeof payload.status !== "undefined") {
+      const nextStatus = parseShipmentStatus(payload.status, "");
+      if (!nextStatus) {
+        return res.status(400).json({ message: "Shipment status is invalid." });
+      }
+      nextShipment.status = nextStatus;
+      nextShipment.statusUpdatedAt = now;
+      if (nextStatus === "packed" && !nextShipment.packedAt) {
+        nextShipment.packedAt = now;
+      }
+      if (nextStatus === "shipped") {
+        nextShipment.dispatchDate = nextShipment.dispatchDate || now;
+      }
+      if (nextStatus === "out_for_delivery") {
+        nextShipment.dispatchDate = nextShipment.dispatchDate || now;
+        nextShipment.outForDeliveryAt = nextShipment.outForDeliveryAt || now;
+      }
+      if (nextStatus === "delivered") {
+        nextShipment.dispatchDate = nextShipment.dispatchDate || now;
+        nextShipment.outForDeliveryAt = nextShipment.outForDeliveryAt || now;
+      }
+
+      if (nextStatus === "packed" && order.status === "placed") {
+        order.status = "processing";
+      }
+      if (["shipped", "out_for_delivery"].includes(nextStatus) && order.status !== "delivered") {
+        order.status = "shipped";
+      }
+      if (nextStatus === "delivered") {
+        order.status = "delivered";
+        order.deliveredAt = order.deliveredAt || now;
+        if (order.paymentMode === "cod" && order.paymentStatus === "pending") {
+          order.paymentStatus = "paid";
+          order.paidAt = order.paidAt || now;
+          order.paymentReference = order.paymentReference || `cod_${Date.now()}`;
+        }
+      }
+    }
+
+    order.shipment = nextShipment;
+    await order.save();
+
+    return res.json({
+      message: "Shipment details updated.",
+      order: serializeOrderForResponse(order),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateSellerReviewModeration = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id).populate("product").populate("customer", "name email phone");
+    if (!order) return res.status(404).json({ message: "Order not found" });
+    if (order.seller.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    if (!order.review || !Number.isFinite(Number(order.review.rating || 0))) {
+      return res.status(400).json({ message: "No customer review found for this order." });
+    }
+
+    const payload = req.body || {};
+    const review = {
+      ...(order.review && typeof order.review.toObject === "function"
+        ? order.review.toObject()
+        : order.review || {}),
+    };
+
+    if (typeof payload.sellerReply === "string") {
+      review.sellerReply = payload.sellerReply.trim().slice(0, 600);
+      review.sellerReplyUpdatedAt = new Date();
+    }
+    if (typeof payload.visibleToStorefront !== "undefined") {
+      review.visibleToStorefront =
+        payload.visibleToStorefront === false ||
+        String(payload.visibleToStorefront || "")
+          .trim()
+          .toLowerCase() === "false"
+          ? false
+          : true;
+    }
+    if (typeof payload.flaggedForAdmin !== "undefined") {
+      review.flaggedForAdmin =
+        payload.flaggedForAdmin === true ||
+        String(payload.flaggedForAdmin || "")
+          .trim()
+          .toLowerCase() === "true";
+    }
+
+    order.review = review;
+    await order.save();
+
+    return res.json({
+      message: "Review preferences updated.",
+      order: serializeOrderForResponse(order),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 };
 
@@ -1803,7 +2944,7 @@ exports.requestReturn = async (req, res) => {
       sellerId: order.seller,
       type: "return_request",
       title: "Return or refund request",
-      message: `A return request was raised for ${order.product?.name || "an order"}.`,
+      message: `A return request was raised for ${getOrderDisplayProductName(order)}.`,
       link: "/seller/orders?status=return_requested",
       entityType: "order",
       entityId: String(order._id || "").trim(),
@@ -1818,6 +2959,58 @@ exports.requestReturn = async (req, res) => {
     res.json(order);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.cancelMyOrder = async (req, res) => {
+  try {
+    if (req.user?.role !== "customer") {
+      return res.status(403).json({ message: "Only customer accounts can cancel orders." });
+    }
+
+    const order = await Order.findById(req.params.id).populate("product");
+    if (!order) return res.status(404).json({ message: "Order not found" });
+    if (order.customer.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    if (!CUSTOMER_CANCELABLE_STATUSES.has(order.status)) {
+      return res.status(400).json({
+        message: "This order can no longer be cancelled from your account.",
+      });
+    }
+
+    const reason = sanitizeCancellationReason(req.body?.reason);
+    await cancelOrderRecord(order, {
+      initiator: "customer",
+      reason,
+      paymentFailureReason: "Order cancelled by the customer before payment confirmation.",
+    });
+
+    await createSellerNotification({
+      sellerId: order.seller,
+      type: "order_cancelled",
+      title: "Order cancelled by customer",
+      message: `Order #${getOrderShortCode(order._id)} was cancelled by the customer.`,
+      link: "/seller/orders?status=cancelled",
+      entityType: "order",
+      entityId: String(order._id || "").trim(),
+    });
+
+    const customerNotification = buildCustomerStatusNotification(order, "cancelled");
+    if (customerNotification) {
+      await notifyCustomerForOrder(order, customerNotification);
+    }
+
+    await populateOrderForCustomer(order);
+    return res.json({
+      message:
+        order.paymentStatus === "refunded"
+          ? "Order cancelled and refund marked successfully."
+          : "Order cancelled successfully.",
+      order: serializeOrderForResponse(order),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 };
 
@@ -1867,7 +3060,7 @@ exports.submitOrderReview = async (req, res) => {
       sellerId: order.seller?._id || order.seller,
       type: "review_received",
       title: "New review received",
-      message: `A ${rating}-star review was added for ${order.product?.name || "your listing"}.`,
+      message: `A ${rating}-star review was added for ${getOrderDisplayProductName(order)}.`,
       link: `/store/${String(order.seller?._id || order.seller || "").trim()}?tab=feedbacks`,
       entityType: "order",
       entityId: String(order._id || "").trim(),
@@ -1943,38 +3136,38 @@ exports.updateOrderStatus = async (req, res) => {
     }
 
     order.status = status;
+    order.shipment = syncShipmentDetailsForOrderStatus(order, status);
 
     if (status === "cancelled") {
-      await restockInventory(order);
-      if (order.paymentStatus === "paid") {
-        order.paymentStatus = "refunded";
-        order.refundedAt = new Date();
-      } else if (ONLINE_PAYMENT_MODES.has(order.paymentMode)) {
-        order.paymentStatus = "failed";
+      await cancelOrderRecord(order, {
+        initiator: isAdmin ? "admin" : "seller",
+        reason: sanitizeCancellationReason(req.body?.reason),
+        paymentFailureReason: "Order cancelled before payment confirmation.",
+      });
+    } else {
+      if (
+        status === "delivered" &&
+        order.paymentMode === "cod" &&
+        order.paymentStatus === "pending"
+      ) {
+        order.paymentStatus = "paid";
+        order.paidAt = new Date();
+        order.paymentReference = order.paymentReference || `cod_${Date.now()}`;
       }
+
+      if (status === "delivered") {
+        order.deliveredAt = new Date();
+      }
+
+      if (status === "refunded") {
+        order.paymentStatus = "refunded";
+        order.refundedAt = order.refundedAt || new Date();
+        await restockInventory(order);
+      }
+
+      await order.save();
     }
 
-    if (
-      status === "delivered" &&
-      order.paymentMode === "cod" &&
-      order.paymentStatus === "pending"
-    ) {
-      order.paymentStatus = "paid";
-      order.paidAt = new Date();
-      order.paymentReference = order.paymentReference || `cod_${Date.now()}`;
-    }
-
-    if (status === "delivered") {
-      order.deliveredAt = new Date();
-    }
-
-    if (status === "refunded") {
-      order.paymentStatus = "refunded";
-      order.refundedAt = order.refundedAt || new Date();
-      await restockInventory(order);
-    }
-
-    await order.save();
     const customerNotification = buildCustomerStatusNotification(order, status);
     if (customerNotification) {
       await notifyCustomerForOrder(order, customerNotification);

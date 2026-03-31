@@ -5,12 +5,14 @@ const {
   getCategoryMaster,
   getProductById,
   getSellerProducts,
+  saveSellerCustomizationCatalog,
   getSellerCustomizationCatalog,
   getPublicSellerStore,
   getCustomizationMasterOptions,
   createProduct,
   updateProduct,
   deleteProduct,
+  bulkImportProducts,
 } = require("../controllers/productController");
 const { auth, optionalAuth, requireRole, requireApprovedSeller } = require("../middleware/auth");
 const { createRateLimiter } = require("../middleware/rateLimit");
@@ -25,6 +27,14 @@ const sellerWriteRateLimit = createRateLimiter({
 router.get("/", getProducts);
 router.get("/categories", getCategoryMaster);
 router.get("/seller/me", auth, requireRole("seller"), requireApprovedSeller, getSellerProducts);
+router.put(
+  "/seller/me/customization-catalog",
+  auth,
+  requireRole("seller"),
+  requireApprovedSeller,
+  sellerWriteRateLimit,
+  saveSellerCustomizationCatalog
+);
 router.get(
   "/seller/:sellerId/customization",
   optionalAuth,
@@ -39,6 +49,14 @@ router.get(
   getCustomizationMasterOptions
 );
 router.get("/:id", getProductById);
+router.post(
+  "/bulk-import",
+  auth,
+  requireRole("seller"),
+  requireApprovedSeller,
+  sellerWriteRateLimit,
+  bulkImportProducts
+);
 router.post(
   "/",
   auth,

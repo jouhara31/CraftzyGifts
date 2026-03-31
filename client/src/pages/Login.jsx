@@ -7,6 +7,8 @@ import { persistAuthSession } from "../utils/authSession";
 
 export default function Login() {
   const [form, setForm] = useState({ email: "", password: "" });
+  const [otpCode, setOtpCode] = useState("");
+  const [otpStep, setOtpStep] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -23,37 +25,83 @@ export default function Login() {
     if (status) setStatus(null);
   };
 
+  const finishLogin = (data) => {
+    persistAuthSession({
+      token: data.token,
+      refreshToken: data.refreshToken,
+      user: data.user,
+    });
+    let nextPath = "/";
+    if (data?.user?.role === "seller") {
+      nextPath =
+        String(data?.user?.sellerStatus || "").trim().toLowerCase() === "approved"
+          ? "/seller/dashboard"
+          : "/seller/pending";
+    } else if (data?.user?.role === "admin") {
+      nextPath = "/admin/dashboard";
+    }
+    navigate(nextPath);
+  };
+
+  const requestOtp = async () => {
+    const res = await fetch(`${API_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 202 && data?.requiresOtp) {
+      setOtpStep({
+        email: data.email || form.email,
+        challengeToken: data.challengeToken,
+        otpPreviewCode: data.otpPreviewCode || "",
+        otpExpiresInMinutes: data.otpExpiresInMinutes,
+      });
+      setOtpCode("");
+      setStatus({
+        type: "info",
+        message:
+          data?.message ||
+          "A verification code is required to finish signing in.",
+      });
+      return { handled: true };
+    }
+    if (!res.ok) {
+      setStatus({
+        type: "error",
+        message: data?.message || "Login failed. Please try again.",
+      });
+      return { handled: true };
+    }
+    finishLogin(data);
+    return { handled: true };
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (status) setStatus(null);
     try {
-      const res = await fetch(`${API_URL}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        persistAuthSession({
-          token: data.token,
-          refreshToken: data.refreshToken,
-          user: data.user,
+      if (otpStep?.challengeToken) {
+        const res = await fetch(`${API_URL}/api/auth/login/verify-otp`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: otpStep.email || form.email,
+            challengeToken: otpStep.challengeToken,
+            otp: otpCode,
+          }),
         });
-        let nextPath = "/";
-        if (data?.user?.role === "seller") {
-          nextPath =
-            String(data?.user?.sellerStatus || "").trim().toLowerCase() === "approved"
-              ? "/seller/dashboard"
-              : "/seller/pending";
-        } else if (data?.user?.role === "admin") {
-          nextPath = "/admin/dashboard";
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          finishLogin(data);
+          return;
         }
-        navigate(nextPath);
-      } else {
         setStatus({
           type: "error",
-          message: data?.message || "Login failed. Please try again.",
+          message: data?.message || "OTP verification failed. Please try again.",
         });
+      } else {
+        await requestOtp();
       }
     } catch (err) {
       setStatus({ type: "error", message: `Error: ${err.message}` });
@@ -68,7 +116,9 @@ export default function Login() {
           <p className="auth-kicker">Welcome back</p>
           <h2 className="auth-title">Login to CraftzyGifts</h2>
           <p className="auth-sub">
-            Access your cart, wishlist, and personalized hampers.
+            {otpStep?.challengeToken
+              ? "Enter the verification code to finish signing in."
+              : "Access your cart, wishlist, and personalized hampers."}
           </p>
           {status?.message ? (
             <div
@@ -79,101 +129,174 @@ export default function Login() {
               {status.message}
             </div>
           ) : null}
-          <div className="auth-form">
-            <label className="auth-label" htmlFor="email">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              name="email"
-              placeholder="you@example.com"
-              value={form.email}
-              onChange={handleChange}
-              className="auth-input"
-              required
-            />
-          </div>
-          <div className="auth-form">
-            <label className="auth-label" htmlFor="password">
-              Password
-            </label>
-            <div className="auth-input-wrap">
-              <input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                name="password"
-                placeholder="Enter your password"
-                value={form.password}
-                onChange={handleChange}
-                className="auth-input"
-                required
-              />
-              <button
-                type="button"
-                className="auth-input-toggle"
-                onClick={() => setShowPassword((prev) => !prev)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-                aria-pressed={showPassword}
-                title={showPassword ? "Hide password" : "Show password"}
-              >
-                {showPassword ? (
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M4 4l16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <circle
-                      cx="12"
-                      cy="12"
-                      r="3"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                    />
-                  </svg>
-                )}
-              </button>
-            </div>
-          </div>
+          {!otpStep?.challengeToken ? (
+            <>
+              <div className="auth-form">
+                <label className="auth-label" htmlFor="email">
+                  Email
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  name="email"
+                  placeholder="you@example.com"
+                  value={form.email}
+                  onChange={handleChange}
+                  className="auth-input"
+                  required
+                />
+              </div>
+              <div className="auth-form">
+                <label className="auth-label" htmlFor="password">
+                  Password
+                </label>
+                <div className="auth-input-wrap">
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    name="password"
+                    placeholder="Enter your password"
+                    value={form.password}
+                    onChange={handleChange}
+                    className="auth-input"
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="auth-input-toggle"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-pressed={showPassword}
+                    title={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? (
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M4 4l16 16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <circle
+                          cx="12"
+                          cy="12"
+                          r="3"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+              <div className="auth-inline-actions">
+                <span className="auth-note">Use your customer, seller, or admin account.</span>
+                <Link to="/forgot-password" className="auth-link">
+                  Forgot password?
+                </Link>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="auth-form">
+                <label className="auth-label" htmlFor="otpEmail">
+                  Email
+                </label>
+                <input
+                  id="otpEmail"
+                  type="email"
+                  value={otpStep.email || form.email}
+                  className="auth-input"
+                  disabled
+                />
+              </div>
+              <div className="auth-form">
+                <label className="auth-label" htmlFor="otpCode">
+                  Verification code
+                </label>
+                <input
+                  id="otpCode"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  placeholder="Enter 6-digit code"
+                  value={otpCode}
+                  onChange={(event) =>
+                    setOtpCode(event.target.value.replace(/\D+/g, "").slice(0, 6))
+                  }
+                  className="auth-input"
+                  required
+                />
+              </div>
+              {otpStep.otpPreviewCode ? (
+                <div className="auth-alert is-info" role="status">
+                  Test OTP: <strong>{otpStep.otpPreviewCode}</strong>
+                </div>
+              ) : null}
+              <div className="auth-inline-actions">
+                <button
+                  type="button"
+                  className="auth-link-button"
+                  onClick={() => {
+                    setOtpStep(null);
+                    setOtpCode("");
+                    setStatus(null);
+                  }}
+                >
+                  Use another account
+                </button>
+                <button
+                  type="button"
+                  className="auth-link-button"
+                  onClick={() => requestOtp()}
+                >
+                  Resend code
+                </button>
+              </div>
+            </>
+          )}
           <button type="submit" className="btn primary auth-button">
-            Login
+            {otpStep?.challengeToken ? "Verify code" : "Login"}
           </button>
-          <p className="auth-foot">
-            Don&apos;t have an account?{" "}
-            <Link to="/register" className="auth-link">
-              Create account
-            </Link>
-          </p>
-          <p className="auth-foot">
-            Want to sell on CraftzyGifts?{" "}
-            <Link to="/register?seller=1" className="auth-link">
-              Become a seller
-            </Link>
-          </p>
+          {!otpStep?.challengeToken ? (
+            <>
+              <p className="auth-foot">
+                Don&apos;t have an account?{" "}
+                <Link to="/register" className="auth-link">
+                  Create account
+                </Link>
+              </p>
+              <p className="auth-foot">
+                Want to sell on CraftzyGifts?{" "}
+                <Link to="/register?seller=1" className="auth-link">
+                  Become a seller
+                </Link>
+              </p>
+            </>
+          ) : null}
         </form>
       </div>
     </div>

@@ -23,6 +23,8 @@ const buildPublicUserPayload = (user) => ({
   id: String(user?._id || ""),
   name: user?.name,
   email: user?.email,
+  emailVerified: Boolean(user?.emailVerification?.verifiedAt),
+  twoFactorEnabled: Boolean(user?.sellerSecuritySettings?.loginOtpEnabled),
   role: user?.role,
   sellerStatus: user?.sellerStatus,
   storeName: user?.storeName,

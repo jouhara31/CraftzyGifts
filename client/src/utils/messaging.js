@@ -65,6 +65,59 @@ export const sendConversationMessage = async ({ conversationId = "", sellerId = 
     },
   });
 
+export const fetchSupportTickets = async ({ sellerId = "" } = {}) =>
+  request(
+    `/api/messages/support-tickets${
+      sellerId ? `?sellerId=${encodeURIComponent(String(sellerId).trim())}` : ""
+    }`
+  );
+
+export const createSupportTicket = async ({
+  title,
+  category,
+  priority,
+  text,
+  attachmentUrl = "",
+}) =>
+  request("/api/messages/support-tickets", {
+    method: "POST",
+    body: {
+      title,
+      category,
+      priority,
+      text,
+      attachmentUrl,
+    },
+  });
+
+export const fetchSupportTicketMessages = async (ticketId) =>
+  request(`/api/messages/support-tickets/${encodeURIComponent(String(ticketId || "").trim())}`);
+
+export const replyToSupportTicket = async ({ ticketId, text, attachmentUrl = "" }) =>
+  request(
+    `/api/messages/support-tickets/${encodeURIComponent(
+      String(ticketId || "").trim()
+    )}/messages`,
+    {
+      method: "POST",
+      body: {
+        text,
+        attachmentUrl,
+      },
+    }
+  );
+
+export const updateSupportTicketStatus = async ({ ticketId, status }) =>
+  request(
+    `/api/messages/support-tickets/${encodeURIComponent(String(ticketId || "").trim())}`,
+    {
+      method: "PATCH",
+      body: {
+        status,
+      },
+    }
+  );
+
 const timeFormatter = new Intl.DateTimeFormat("en-IN", {
   hour: "numeric",
   minute: "2-digit",

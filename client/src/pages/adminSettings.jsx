@@ -7,6 +7,9 @@ const DEFAULT_SETTINGS = {
   platformName: "CraftzyGifts",
   currencyCode: "INR",
   lowStockThreshold: 5,
+  sellerCommissionPercent: 8,
+  settlementDelayDays: 3,
+  payoutSchedule: "weekly",
   autoApproveSellers: false,
   enableOrderEmailAlerts: true,
   maintenanceMode: false,
@@ -27,6 +30,11 @@ const normalizeSettings = (value = {}) => ({
   platformName: String(value?.platformName || DEFAULT_SETTINGS.platformName),
   currencyCode: String(value?.currencyCode || DEFAULT_SETTINGS.currencyCode),
   lowStockThreshold: Number(value?.lowStockThreshold ?? DEFAULT_SETTINGS.lowStockThreshold),
+  sellerCommissionPercent: Number(
+    value?.sellerCommissionPercent ?? DEFAULT_SETTINGS.sellerCommissionPercent
+  ),
+  settlementDelayDays: Number(value?.settlementDelayDays ?? DEFAULT_SETTINGS.settlementDelayDays),
+  payoutSchedule: String(value?.payoutSchedule || DEFAULT_SETTINGS.payoutSchedule),
   autoApproveSellers: Boolean(value?.autoApproveSellers),
   enableOrderEmailAlerts:
     value?.enableOrderEmailAlerts === undefined
@@ -101,6 +109,8 @@ export default function AdminSettings() {
         body: JSON.stringify({
           ...settings,
           lowStockThreshold: Number(settings.lowStockThreshold || 0),
+          sellerCommissionPercent: Number(settings.sellerCommissionPercent || 0),
+          settlementDelayDays: Number(settings.settlementDelayDays || 0),
         }),
       });
       const data = await readApiPayload(response);
@@ -168,6 +178,44 @@ export default function AdminSettings() {
               value={settings.lowStockThreshold}
               onChange={updateField("lowStockThreshold")}
             />
+          </div>
+          <div className="field">
+            <label htmlFor="sellerCommissionPercent">Seller commission %</label>
+            <input
+              id="sellerCommissionPercent"
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              value={settings.sellerCommissionPercent}
+              onChange={updateField("sellerCommissionPercent")}
+            />
+          </div>
+        </div>
+
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="settlementDelayDays">Settlement delay (days)</label>
+            <input
+              id="settlementDelayDays"
+              type="number"
+              min="0"
+              max="30"
+              value={settings.settlementDelayDays}
+              onChange={updateField("settlementDelayDays")}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="payoutSchedule">Payout schedule</label>
+            <select
+              id="payoutSchedule"
+              value={settings.payoutSchedule}
+              onChange={updateField("payoutSchedule")}
+            >
+              <option value="manual">Manual</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
           </div>
         </div>
 

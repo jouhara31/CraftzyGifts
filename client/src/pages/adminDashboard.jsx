@@ -8,6 +8,38 @@ const toNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
+const readApiPayload = async (response) => {
+  const text = await response.text();
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
+};
+const formatStatus = (value = "") =>
+  String(value || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+const formatDateTime = (value) => {
+  const candidate = value ? new Date(value) : null;
+  if (!candidate || Number.isNaN(candidate.getTime())) return "Pending";
+  return candidate.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+const payoutStatusClass = (status = "") => {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (["paid", "ready"].includes(normalized)) return "success";
+  if (["requested", "processing", "holding"].includes(normalized)) return "warning";
+  if (["rejected", "reversed"].includes(normalized)) return "locked";
+  return "info";
+};
 
 const STATUS_ICONS = {
   pending_payment: (
@@ -83,9 +115,13 @@ const getStatusIcon = (statusKey) => STATUS_ICONS[statusKey] || STATUS_ICONS.unk
 export default function AdminDashboard() {
   const [overview, setOverview] = useState(null);
   const [error, setError] = useState("");
+  const [financeError, setFinanceError] = useState("");
   const [notice, setNotice] = useState("");
   const [actingSellerId, setActingSellerId] = useState("");
+  const [actingBatchId, setActingBatchId] = useState("");
   const [loading, setLoading] = useState(false);
+  const [financeLoading, setFinanceLoading] = useState(false);
+  const [finance, setFinance] = useState({ summary: {}, batches: [] });
   const navigate = useNavigate();
 
   const loadOverview = useCallback(async () => {
@@ -101,7 +137,7 @@ export default function AdminDashboard() {
       const res = await fetch(`${API_URL}/api/admin/overview`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
+      const data = await readApiPayload(res);
       if (!res.ok) {
         setError(data.message || "Unable to load admin overview.");
         return;
@@ -114,9 +150,40 @@ export default function AdminDashboard() {
     }
   }, [navigate]);
 
+  const loadPayouts = useCallback(async () => {
+    setFinanceError("");
+    setFinanceLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        navigate("/login");
+        return;
+      }
+
+      const res = await fetch(`${API_URL}/api/admin/finance/payouts`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await readApiPayload(res);
+      if (!res.ok) {
+        setFinanceError(data.message || "Unable to load payout queue.");
+        return;
+      }
+
+      setFinance({
+        summary: data?.summary || {},
+        batches: Array.isArray(data?.batches) ? data.batches : [],
+      });
+    } catch {
+      setFinanceError("Unable to load payout queue.");
+    } finally {
+      setFinanceLoading(false);
+    }
+  }, [navigate]);
+
   useEffect(() => {
     loadOverview();
-  }, [loadOverview]);
+    loadPayouts();
+  }, [loadOverview, loadPayouts]);
 
   const updateSellerStatus = async (sellerId, status) => {
     const token = localStorage.getItem("token");
@@ -151,12 +218,52 @@ export default function AdminDashboard() {
     }
   };
 
+  const updatePayoutStatus = async (batchId, status) => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    setActingBatchId(batchId);
+    setNotice("");
+    setFinanceError("");
+    try {
+      const res = await fetch(`${API_URL}/api/admin/finance/payouts/${batchId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status }),
+      });
+      const data = await readApiPayload(res);
+      if (!res.ok) {
+        setFinanceError(data.message || "Unable to update payout batch.");
+        return;
+      }
+
+      setNotice(`Payout batch marked as ${formatStatus(status)}.`);
+      await loadPayouts();
+    } catch {
+      setFinanceError("Unable to update payout batch.");
+    } finally {
+      setActingBatchId("");
+    }
+  };
+
   const cards = overview?.cards || {};
   const totalCustomers = toNumber(overview?.totalCustomers, 0);
   const topCategories = Array.isArray(overview?.topCategories) ? overview.topCategories : [];
   const lowStock = overview?.lowStock || {};
   const lowStockItems = Array.isArray(lowStock.items) ? lowStock.items : [];
   const lowStockThreshold = toNumber(lowStock.threshold, 0);
+  const payoutSummary = finance?.summary || {};
+  const payoutBatches = Array.isArray(finance?.batches) ? finance.batches : [];
+  const refreshDashboard = () => {
+    loadOverview();
+    loadPayouts();
+  };
   const categoriesPanel = (
     <div className="seller-panel admin-categories-panel">
       <div className="card-head">
@@ -188,7 +295,7 @@ export default function AdminDashboard() {
       description="Overview with stats, recent orders, and activity."
       pageClassName="admin-dashboard-page"
       actions={
-        <button className="admin-text-action" type="button" onClick={loadOverview}>
+        <button className="admin-text-action" type="button" onClick={refreshDashboard}>
           Refresh
         </button>
       }
@@ -238,6 +345,113 @@ export default function AdminDashboard() {
               Manage Categories
             </button>
           </div>
+        </div>
+
+        <div className="seller-panel">
+          <div className="card-head">
+            <h3 className="card-title">Payout queue</h3>
+            <button className="btn ghost" type="button" onClick={() => navigate("/admin/settings")}>
+              Finance rules
+            </button>
+          </div>
+          {financeError && <p className="field-hint">{financeError}</p>}
+          <div className="stat-grid">
+            <div className="stat-card">
+              <p className="stat-label">Outstanding</p>
+              <p className="stat-value">{money(payoutSummary.outstandingAmount)}</p>
+              <p className="stat-delta">
+                {(payoutSummary.requestedCount || 0) + (payoutSummary.processingCount || 0)} batches in queue
+              </p>
+            </div>
+            <div className="stat-card">
+              <p className="stat-label">Requested</p>
+              <p className="stat-value">{payoutSummary.requestedCount || 0}</p>
+              <p className="stat-delta">{money(payoutSummary.requestedAmount)}</p>
+            </div>
+            <div className="stat-card">
+              <p className="stat-label">Processing</p>
+              <p className="stat-value">{payoutSummary.processingCount || 0}</p>
+              <p className="stat-delta">{money(payoutSummary.processingAmount)}</p>
+            </div>
+            <div className="stat-card">
+              <p className="stat-label">Paid out</p>
+              <p className="stat-value">{payoutSummary.paidCount || 0}</p>
+              <p className="stat-delta">{money(payoutSummary.paidAmount)}</p>
+            </div>
+          </div>
+          <div className="payout-grid" style={{ marginTop: "1rem" }}>
+            {payoutBatches.map((batch) => {
+              const sellerLabel =
+                batch?.seller?.storeName || batch?.seller?.name || batch?.seller?.email || "Seller";
+              const bankSummary = [
+                batch?.bank?.bankName || batch?.bank?.upiId || "",
+                batch?.bank?.accountMasked || "",
+              ]
+                .filter(Boolean)
+                .join(" • ");
+              const canProcess = batch.status === "requested";
+              const canPay = ["requested", "processing"].includes(batch.status);
+              const canReject = ["requested", "processing"].includes(batch.status);
+
+              return (
+                <article key={batch.id} className="payout-card">
+                  <div className="payout-head">
+                    <strong>{batch.reference || "Payout batch"}</strong>
+                    <span className={`status-pill ${payoutStatusClass(batch.status)}`}>
+                      {formatStatus(batch.status)}
+                    </span>
+                  </div>
+                  <p className="payout-amount">{money(batch.totalAmount)}</p>
+                  <p className="payout-sub">{sellerLabel}</p>
+                  <p className="payout-sub">
+                    {batch.settlementCount} settlements • Requested {formatDateTime(batch.requestedAt)}
+                  </p>
+                  <p className="payout-sub">
+                    Bank: {bankSummary || "Seller bank details pending"}{" "}
+                    {batch?.bank?.ifscCode ? `• ${batch.bank.ifscCode}` : ""}
+                  </p>
+                  <p className="payout-sub">{batch.note || "No payout note added."}</p>
+                  {(canProcess || canPay || canReject) && (
+                    <div className="seller-toolbar">
+                      {canProcess ? (
+                        <button
+                          className="btn ghost"
+                          type="button"
+                          disabled={actingBatchId === batch.id}
+                          onClick={() => updatePayoutStatus(batch.id, "processing")}
+                        >
+                          Mark processing
+                        </button>
+                      ) : null}
+                      {canPay ? (
+                        <button
+                          className="btn primary"
+                          type="button"
+                          disabled={actingBatchId === batch.id}
+                          onClick={() => updatePayoutStatus(batch.id, "paid")}
+                        >
+                          Mark paid
+                        </button>
+                      ) : null}
+                      {canReject ? (
+                        <button
+                          className="btn ghost"
+                          type="button"
+                          disabled={actingBatchId === batch.id}
+                          onClick={() => updatePayoutStatus(batch.id, "rejected")}
+                        >
+                          Reject
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+          {!financeError && !financeLoading && payoutBatches.length === 0 && (
+            <p className="field-hint">No seller payout requests yet.</p>
+          )}
         </div>
 
         <div className="seller-panel">

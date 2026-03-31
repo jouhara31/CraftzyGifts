@@ -283,7 +283,7 @@ const StoreActionIcon = ({ name }) => {
   return null;
 };
 
-export default function SellerStore() {
+export default function SellerStore({ sellerWorkspaceMode = false }) {
   const { sellerId } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -454,6 +454,7 @@ export default function SellerStore() {
     String(viewer?.role || "").toLowerCase() === "seller" &&
     viewerId &&
     String(sellerId || "").trim() === viewerId;
+  const showWorkspaceShell = sellerWorkspaceMode;
 
   useEffect(() => {
     if (!isOwnerSeller) {
@@ -756,7 +757,10 @@ export default function SellerStore() {
       setEditMode(false);
       setEditNotice("Store profile updated successfully.");
       if (editRequested) {
-        navigate(`/store/${sellerId}`, { replace: true });
+        navigate(
+          showWorkspaceShell ? `/seller/store/${sellerId}` : `/store/${sellerId}`,
+          { replace: true }
+        );
       }
     } catch {
       setEditError("Unable to save store changes.");
@@ -969,8 +973,14 @@ export default function SellerStore() {
   };
 
   return (
-    <div className="page seller-store-page">
-      <Header variant={isOwnerSeller ? "seller" : undefined} />
+    <div
+      className={
+        showWorkspaceShell
+          ? "seller-shell-view seller-store-page seller-store-embedded"
+          : "page seller-store-page"
+      }
+    >
+      {!showWorkspaceShell ? <Header variant={isOwnerSeller ? "seller" : undefined} /> : null}
       <div className="seller-store-shell">
         <div className="seller-store-headline">
           <div>

@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Conversation = require("../models/Conversation");
 const Message = require("../models/Message");
+const SupportTicket = require("../models/SupportTicket");
 const User = require("../models/User");
 const {
   buildMessagePreview,
@@ -11,10 +12,15 @@ const {
   createNotificationsForAdmins,
   createSellerNotification,
 } = require("../utils/sellerNotifications");
+const { persistInlineAsset } = require("../utils/assetStore");
 
 const SELLER_SELECT =
   "name storeName profileImage sellerStatus instagramUrl supportEmail createdAt";
 const MAX_CONVERSATION_FETCH = 150;
+const MAX_SUPPORT_TICKETS_FETCH = 60;
+const MAX_SUPPORT_TICKET_TITLE_LENGTH = 120;
+const MAX_SUPPORT_TICKET_CATEGORY_LENGTH = 48;
+const MAX_SUPPORT_TICKET_MESSAGE_LENGTH = 1500;
 
 const normalizeId = (value) => String(value || "").trim();
 
@@ -59,6 +65,69 @@ const formatConversation = (conversation, role) => ({
   createdAt: conversation?.createdAt || null,
   updatedAt: conversation?.updatedAt || null,
 });
+
+const formatSupportTicketMessage = (message) => ({
+  id: normalizeId(message?._id),
+  senderId: normalizeId(message?.senderId),
+  senderRole: String(message?.senderRole || "").trim(),
+  text: String(message?.text || "").trim(),
+  attachmentUrl: String(message?.attachmentUrl || "").trim(),
+  createdAt: message?.createdAt || null,
+});
+
+const formatSupportTicket = (ticket) => ({
+  id: normalizeId(ticket?._id),
+  seller: ticket?.seller ? formatSeller(ticket.seller) : null,
+  createdBy: normalizeId(ticket?.createdBy),
+  title: String(ticket?.title || "").trim(),
+  category: String(ticket?.category || "").trim(),
+  priority: String(ticket?.priority || "").trim() || "normal",
+  status: String(ticket?.status || "").trim() || "open",
+  adminReplyStatus:
+    String(ticket?.adminReplyStatus || "").trim() || "waiting_for_admin",
+  attachmentUrl: String(ticket?.attachmentUrl || "").trim(),
+  messageCount: Array.isArray(ticket?.messages) ? ticket.messages.length : 0,
+  lastMessagePreview: String(ticket?.lastMessagePreview || "").trim(),
+  lastMessageAt: ticket?.lastMessageAt || null,
+  createdAt: ticket?.createdAt || null,
+  updatedAt: ticket?.updatedAt || null,
+});
+
+const normalizeSupportText = (value = "", maxLength = MAX_SUPPORT_TICKET_MESSAGE_LENGTH) =>
+  String(value || "").trim().replace(/\s+/g, " ").slice(0, maxLength);
+
+const normalizeSupportAttachment = async (value = "") => {
+  const text = String(value || "").trim().slice(0, 900000);
+  if (!text) return "";
+  return persistInlineAsset({
+    value: text,
+    folder: "support",
+    prefix: "ticket",
+  });
+};
+
+const loadSupportTicketWithAccessCheck = async (ticketId, req) => {
+  const normalizedTicketId = normalizeId(ticketId);
+  if (!isValidObjectId(normalizedTicketId)) {
+    return { error: "Support ticket id is invalid.", status: 400 };
+  }
+
+  const ticket = await SupportTicket.findById(normalizedTicketId)
+    .populate("seller", SELLER_SELECT)
+    .exec();
+  if (!ticket) {
+    return { error: "Support ticket not found.", status: 404 };
+  }
+
+  if (
+    req.user?.role === "seller" &&
+    normalizeId(ticket?.seller?._id || ticket?.seller) !== normalizeId(req.user?.id)
+  ) {
+    return { error: "Forbidden", status: 403 };
+  }
+
+  return { ticket };
+};
 
 const ensureSeller = async (sellerId) => {
   const normalizedSellerId = normalizeId(sellerId);
@@ -395,6 +464,227 @@ exports.sendMessage = async (req, res) => {
     return res.status(201).json({
       conversation: formatConversation(refreshedConversation, req.user?.role),
       message: formatMessage(message),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.listSupportTickets = async (req, res) => {
+  try {
+    const filter =
+      req.user?.role === "seller"
+        ? { seller: req.user.id }
+        : req.query?.sellerId && isValidObjectId(req.query.sellerId)
+          ? { seller: req.query.sellerId }
+          : {};
+
+    const tickets = await SupportTicket.find(filter)
+      .populate("seller", SELLER_SELECT)
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .limit(MAX_SUPPORT_TICKETS_FETCH)
+      .lean();
+
+    return res.json({
+      items: (Array.isArray(tickets) ? tickets : []).map((ticket) =>
+        formatSupportTicket(ticket)
+      ),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.createSupportTicket = async (req, res) => {
+  try {
+    if (req.user?.role !== "seller") {
+      return res.status(403).json({ message: "Only sellers can create support tickets." });
+    }
+
+    const title = normalizeSupportText(req.body?.title, MAX_SUPPORT_TICKET_TITLE_LENGTH);
+    const category = normalizeSupportText(
+      req.body?.category || "general",
+      MAX_SUPPORT_TICKET_CATEGORY_LENGTH
+    ).toLowerCase();
+    const priority = ["normal", "high", "urgent"].includes(
+      String(req.body?.priority || "").trim().toLowerCase()
+    )
+      ? String(req.body?.priority || "").trim().toLowerCase()
+      : "normal";
+    const text = normalizeSupportText(req.body?.text, MAX_SUPPORT_TICKET_MESSAGE_LENGTH);
+    const attachmentUrl = await normalizeSupportAttachment(req.body?.attachmentUrl);
+
+    if (title.length < 4) {
+      return res.status(400).json({ message: "Ticket title should be at least 4 characters." });
+    }
+    if (text.length < 10) {
+      return res.status(400).json({ message: "Please describe the issue in at least 10 characters." });
+    }
+
+    const ticket = await SupportTicket.create({
+      seller: req.user.id,
+      createdBy: req.user.id,
+      title,
+      category,
+      priority,
+      status: "open",
+      adminReplyStatus: "waiting_for_admin",
+      attachmentUrl,
+      lastMessagePreview: buildMessagePreview(text),
+      lastMessageAt: new Date(),
+      messages: [
+        {
+          senderId: req.user.id,
+          senderRole: "seller",
+          text,
+          attachmentUrl,
+          createdAt: new Date(),
+        },
+      ],
+    });
+
+    await createNotificationsForAdmins({
+      type: "seller_support_ticket",
+      title: `Support ticket: ${title}`,
+      message: buildMessagePreview(text),
+      link: `/admin/messages?supportTicket=${String(ticket?._id || "").trim()}`,
+      entityType: "support_ticket",
+      entityId: String(ticket?._id || "").trim(),
+      key: `support_ticket_${String(ticket?._id || "").trim()}_created`,
+    });
+
+    const hydrated = await SupportTicket.findById(ticket._id).populate("seller", SELLER_SELECT).lean();
+
+    return res.status(201).json({
+      ticket: formatSupportTicket(hydrated),
+      messages: (Array.isArray(hydrated?.messages) ? hydrated.messages : []).map((message) =>
+        formatSupportTicketMessage(message)
+      ),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getSupportTicketMessages = async (req, res) => {
+  try {
+    const resolved = await loadSupportTicketWithAccessCheck(req.params?.ticketId, req);
+    if (resolved?.error) {
+      return res.status(resolved.status || 400).json({ message: resolved.error });
+    }
+
+    const ticket =
+      resolved.ticket && typeof resolved.ticket.toObject === "function"
+        ? resolved.ticket.toObject()
+        : resolved.ticket;
+
+    return res.json({
+      ticket: formatSupportTicket(ticket),
+      messages: (Array.isArray(ticket?.messages) ? ticket.messages : []).map((message) =>
+        formatSupportTicketMessage(message)
+      ),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.replyToSupportTicket = async (req, res) => {
+  try {
+    const resolved = await loadSupportTicketWithAccessCheck(req.params?.ticketId, req);
+    if (resolved?.error) {
+      return res.status(resolved.status || 400).json({ message: resolved.error });
+    }
+
+    const text = normalizeSupportText(req.body?.text, MAX_SUPPORT_TICKET_MESSAGE_LENGTH);
+    const attachmentUrl = await normalizeSupportAttachment(req.body?.attachmentUrl);
+    if (text.length < 2) {
+      return res.status(400).json({ message: "Please enter a message before sending." });
+    }
+
+    const ticket = resolved.ticket;
+    const senderRole = req.user?.role === "admin" ? "admin" : "seller";
+    ticket.messages = Array.isArray(ticket.messages) ? ticket.messages : [];
+    ticket.messages.push({
+      senderId: req.user.id,
+      senderRole,
+      text,
+      attachmentUrl,
+      createdAt: new Date(),
+    });
+    ticket.lastMessagePreview = buildMessagePreview(text);
+    ticket.lastMessageAt = new Date();
+    if (senderRole === "admin") {
+      ticket.adminReplyStatus = "replied";
+      if (ticket.status === "open") {
+        ticket.status = "in_progress";
+      }
+      await createSellerNotification({
+        sellerId: normalizeId(ticket?.seller?._id || ticket?.seller),
+        type: "support_ticket_reply",
+        title: `Admin replied: ${String(ticket?.title || "").trim() || "Support ticket"}`,
+        message: buildMessagePreview(text),
+        link: `/seller/messages?supportTicket=${String(ticket?._id || "").trim()}`,
+        entityType: "support_ticket",
+        entityId: String(ticket?._id || "").trim(),
+        key: `support_ticket_${String(ticket?._id || "").trim()}_reply_${ticket.messages.length}`,
+      });
+    } else {
+      ticket.adminReplyStatus =
+        ticket.messages.length > 1 ? "updated_by_seller" : "waiting_for_admin";
+      if (["resolved", "closed"].includes(String(ticket.status || "").trim())) {
+        ticket.status = "open";
+      }
+      await createNotificationsForAdmins({
+        type: "seller_support_ticket_update",
+        title: `Support update: ${String(ticket?.title || "").trim() || "Support ticket"}`,
+        message: buildMessagePreview(text),
+        link: `/admin/messages?supportTicket=${String(ticket?._id || "").trim()}`,
+        entityType: "support_ticket",
+        entityId: String(ticket?._id || "").trim(),
+        key: `support_ticket_${String(ticket?._id || "").trim()}_seller_update_${ticket.messages.length}`,
+      });
+    }
+    await ticket.save();
+
+    const refreshed = await SupportTicket.findById(ticket._id).populate("seller", SELLER_SELECT).lean();
+    return res.json({
+      ticket: formatSupportTicket(refreshed),
+      messages: (Array.isArray(refreshed?.messages) ? refreshed.messages : []).map((message) =>
+        formatSupportTicketMessage(message)
+      ),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateSupportTicketStatus = async (req, res) => {
+  try {
+    if (req.user?.role !== "admin") {
+      return res.status(403).json({ message: "Only admins can update ticket status." });
+    }
+
+    const resolved = await loadSupportTicketWithAccessCheck(req.params?.ticketId, req);
+    if (resolved?.error) {
+      return res.status(resolved.status || 400).json({ message: resolved.error });
+    }
+
+    const nextStatus = String(req.body?.status || "").trim().toLowerCase();
+    if (!["open", "in_progress", "resolved", "closed"].includes(nextStatus)) {
+      return res.status(400).json({ message: "Ticket status is invalid." });
+    }
+
+    const ticket = resolved.ticket;
+    ticket.status = nextStatus;
+    if (["resolved", "closed"].includes(nextStatus)) {
+      ticket.adminReplyStatus = "replied";
+    }
+    await ticket.save();
+
+    const refreshed = await SupportTicket.findById(ticket._id).populate("seller", SELLER_SELECT).lean();
+    return res.json({
+      ticket: formatSupportTicket(refreshed),
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });

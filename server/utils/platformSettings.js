@@ -5,6 +5,9 @@ const DEFAULT_PLATFORM_SETTINGS = {
   platformName: "CraftyGifts",
   currencyCode: "INR",
   lowStockThreshold: 5,
+  sellerCommissionPercent: 8,
+  settlementDelayDays: 3,
+  payoutSchedule: "weekly",
   autoApproveSellers: false,
   enableOrderEmailAlerts: true,
   maintenanceMode: false,
@@ -27,6 +30,18 @@ const normalizeThreshold = (value, fallback = 5) => {
   return Math.round(normalized);
 };
 
+const normalizePercent = (value, fallback = 0) => {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized) || normalized < 0) return fallback;
+  return Math.min(Math.round(normalized * 100) / 100, 100);
+};
+
+const normalizeSchedule = (value, fallback = "weekly") => {
+  const normalized = normalizeText(value, fallback).toLowerCase();
+  if (["manual", "daily", "weekly"].includes(normalized)) return normalized;
+  return fallback;
+};
+
 const normalizeBoolean = (value, fallback = false) => {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
@@ -41,6 +56,15 @@ const normalizePlatformSettings = (input = {}, fallback = DEFAULT_PLATFORM_SETTI
   platformName: normalizeText(input?.platformName, fallback.platformName),
   currencyCode: normalizeCurrencyCode(input?.currencyCode, fallback.currencyCode),
   lowStockThreshold: normalizeThreshold(input?.lowStockThreshold, fallback.lowStockThreshold),
+  sellerCommissionPercent: normalizePercent(
+    input?.sellerCommissionPercent,
+    fallback.sellerCommissionPercent
+  ),
+  settlementDelayDays: normalizeThreshold(
+    input?.settlementDelayDays,
+    fallback.settlementDelayDays
+  ),
+  payoutSchedule: normalizeSchedule(input?.payoutSchedule, fallback.payoutSchedule),
   autoApproveSellers: normalizeBoolean(input?.autoApproveSellers, fallback.autoApproveSellers),
   enableOrderEmailAlerts: normalizeBoolean(
     input?.enableOrderEmailAlerts,
@@ -55,6 +79,18 @@ const toPlatformSettingsPayload = (settings) => ({
   lowStockThreshold: normalizeThreshold(
     settings?.lowStockThreshold,
     DEFAULT_PLATFORM_SETTINGS.lowStockThreshold
+  ),
+  sellerCommissionPercent: normalizePercent(
+    settings?.sellerCommissionPercent,
+    DEFAULT_PLATFORM_SETTINGS.sellerCommissionPercent
+  ),
+  settlementDelayDays: normalizeThreshold(
+    settings?.settlementDelayDays,
+    DEFAULT_PLATFORM_SETTINGS.settlementDelayDays
+  ),
+  payoutSchedule: normalizeSchedule(
+    settings?.payoutSchedule,
+    DEFAULT_PLATFORM_SETTINGS.payoutSchedule
   ),
   autoApproveSellers: Boolean(settings?.autoApproveSellers),
   enableOrderEmailAlerts:
@@ -81,6 +117,9 @@ const ensurePlatformSettings = async () => {
     platformName: settings.platformName,
     currencyCode: settings.currencyCode,
     lowStockThreshold: settings.lowStockThreshold,
+    sellerCommissionPercent: settings.sellerCommissionPercent,
+    settlementDelayDays: settings.settlementDelayDays,
+    payoutSchedule: settings.payoutSchedule,
     autoApproveSellers: settings.autoApproveSellers,
     enableOrderEmailAlerts: settings.enableOrderEmailAlerts,
     maintenanceMode: settings.maintenanceMode,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
 import logoPng from "../assets/logo.png";
 import { addToCart } from "../utils/cart";
@@ -8,6 +8,10 @@ import { getWishlist, toggleWishlist } from "../utils/wishlist";
 
 import { API_URL } from "../apiBase";
 import { clearAuthSession, logoutSession } from "../utils/authSession";
+import {
+  buildSellerSidebarSections,
+  isWorkspacePathActive,
+} from "../utils/sellerWorkspace";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
 
 const ROLE_LABEL = {
@@ -235,25 +239,9 @@ const persistUserToStorage = (user) => {
   window.dispatchEvent(new Event("user:updated"));
 };
 
-const buildSidebarSections = (role) => {
+const buildSidebarSections = (role, { sellerStorePath = "/seller/dashboard" } = {}) => {
   if (role === "seller") {
-    return [
-      {
-        title: "Seller Hub",
-        items: [
-          { label: "Dashboard", path: "/seller/dashboard" },
-          { label: "Products", path: "/seller/products" },
-          { label: "Custom Hamper Items", path: "/seller/listed-items" },
-          { label: "Orders", path: "/seller/orders" },
-          { label: "Payments", path: "/seller/payments" },
-          { label: "Edit Store", path: "/seller/settings" },
-        ],
-      },
-      {
-        title: "Account",
-        items: [{ label: "Profile Information", active: true }],
-      },
-    ];
+    return buildSellerSidebarSections({ sellerStorePath });
   }
 
   if (role === "admin") {
@@ -320,6 +308,17 @@ const ProfileMenuIcon = ({ name }) => {
     );
   }
 
+  if (key.includes("product") || key.includes("inventory") || key.includes("hamper")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="4.5" y="4.5" width="6.5" height="6.5" rx="1.2" />
+        <rect x="13" y="4.5" width="6.5" height="6.5" rx="1.2" />
+        <rect x="4.5" y="13" width="6.5" height="6.5" rx="1.2" />
+        <rect x="13" y="13" width="6.5" height="6.5" rx="1.2" />
+      </svg>
+    );
+  }
+
   if (key.includes("cart")) {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -366,6 +365,67 @@ const ProfileMenuIcon = ({ name }) => {
         <rect x="3.5" y="6" width="17" height="12" rx="2.4" />
         <path d="M3.5 10h17" />
         <path d="M7.5 15h4" />
+      </svg>
+    );
+  }
+
+  if (key.includes("shipping") || key.includes("delivery")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3.5 7.5h10v8h-10z" />
+        <path d="M13.5 10h3.2l2.3 2.4v3.1h-5.5z" />
+        <circle cx="8" cy="17" r="1.6" />
+        <circle cx="17" cy="17" r="1.6" />
+      </svg>
+    );
+  }
+
+  if (key.includes("report") || key.includes("analytics") || key.includes("dashboard")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 18.5h14" />
+        <path d="M7 15V10" />
+        <path d="M12 15V6" />
+        <path d="M17 15v-3.5" />
+      </svg>
+    );
+  }
+
+  if (key.includes("review") || key.includes("rating")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m12 4 2.3 4.7 5.2.7-3.8 3.7.9 5.2L12 15.7 7.4 18.3l.9-5.2-3.8-3.7 5.2-.7Z" />
+      </svg>
+    );
+  }
+
+  if (key.includes("message") || key.includes("support") || key.includes("customer")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4.5 6.5h15a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-8l-4.5 3v-3h-2a1.5 1.5 0 0 1-1.5-1.5V8a1.5 1.5 0 0 1 1.5-1.5Z" />
+        <path d="M7.5 10.5h9" />
+        <path d="M7.5 13.5h6" />
+      </svg>
+    );
+  }
+
+  if (key.includes("document") || key.includes("compliance") || key.includes("gst")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 4.5h7l3 3v12H7z" />
+        <path d="M14 4.5v3h3" />
+        <path d="M9 12h6" />
+        <path d="M9 15h4" />
+      </svg>
+    );
+  }
+
+  if (key.includes("marketing") || key.includes("offer")) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 8.5h14v9H5z" />
+        <path d="m9 8.5 2.5-3h1L15 8.5" />
+        <path d="M12 8.5v9" />
       </svg>
     );
   }
@@ -487,6 +547,7 @@ const fetchRoleOverview = async (role, token) => {
 };
 
 export default function Profile() {
+  const location = useLocation();
   const [profile, setProfile] = useState(null);
   const [overview, setOverview] = useState({ cards: [], rowsTitle: "", rows: [] });
   const [customerOrders, setCustomerOrders] = useState([]);
@@ -506,7 +567,14 @@ export default function Profile() {
   const headerVariant =
     role === "seller" ? "seller" : role === "admin" ? "admin" : undefined;
   const roleLabel = ROLE_LABEL[role] || "Customer";
-  const sidebarSections = useMemo(() => buildSidebarSections(role), [role]);
+  const sellerStorePath =
+    role === "seller" && String(profile?.id || profile?._id || "").trim()
+      ? `/seller/store/${String(profile?.id || profile?._id || "").trim()}`
+      : "/seller/dashboard";
+  const sidebarSections = useMemo(
+    () => buildSidebarSections(role, { sellerStorePath }),
+    [role, sellerStorePath]
+  );
   const isSellerProfileViewOnly = role === "seller";
   const isCustomerProfile = role === "customer";
   const ordersPath = role === "seller" ? "/seller/orders" : "/orders";
@@ -579,7 +647,7 @@ export default function Profile() {
           persistUserToStorage(nextUserSnapshot);
           const sellerProfileId = String(data.id || data._id || "").trim();
           if (sellerProfileId) {
-            navigate(`/store/${sellerProfileId}`, { replace: true });
+            navigate(`/seller/store/${sellerProfileId}`, { replace: true });
             return;
           }
         }
@@ -1289,12 +1357,16 @@ export default function Profile() {
                         : "";
                     const isActiveCustomerItem = isCustomerProfile && item.tab === selectedCustomerTab;
                     const targetPath = item.tab ? buildCustomerTabPath(item.tab) : item.path;
+                    const isActivePathItem =
+                      !item.tab && targetPath
+                        ? isWorkspacePathActive(location, { ...item, path: targetPath })
+                        : false;
                     if (targetPath) {
                       return (
                         <Link
                           key={item.key || item.label}
                           className={`profile-link ${visibilityClass} ${
-                            isActiveCustomerItem ? "active" : ""
+                            isActiveCustomerItem || isActivePathItem ? "active" : ""
                           }`.trim()}
                           to={targetPath}
                         >

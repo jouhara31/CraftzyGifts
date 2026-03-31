@@ -88,7 +88,9 @@ const HIDDEN_ORDER_OPTION_KEYS = new Set(["hamperBase", "hamperPackage"]);
 const DEFAULT_RETURN_WINDOW_DAYS = 7;
 const MIN_RETURN_REASON_LENGTH = 10;
 const RETURN_REASON_MAX_LENGTH = 500;
+const CANCELLATION_REASON_MAX_LENGTH = 280;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const CUSTOMER_CANCELABLE_STATUSES = new Set(["pending_payment", "placed", "processing"]);
 
 const asText = (value) => String(value ?? "").trim();
 const asNumber = (value, fallback = 0) => {
@@ -172,6 +174,9 @@ const isOnlinePendingPaymentOrder = (order = {}) =>
   asText(order?.status) === "pending_payment" &&
   asText(order?.paymentStatus) === "pending" &&
   ONLINE_PAYMENT_MODES.has(asText(order?.paymentMode));
+
+const canCancelOrder = (order = {}) =>
+  CUSTOMER_CANCELABLE_STATUSES.has(asText(order?.status));
 
 const formatShortOrderCode = (value) => {
   const text = asText(value);
@@ -324,8 +329,10 @@ export default function Orders() {
   const [reviewingOrderId, setReviewingOrderId] = useState("");
   const [openReviewOrderId, setOpenReviewOrderId] = useState("");
   const [openReturnOrderId, setOpenReturnOrderId] = useState("");
+  const [openCancelOrderId, setOpenCancelOrderId] = useState("");
   const [reviewDrafts, setReviewDrafts] = useState({});
   const [returnReasonDrafts, setReturnReasonDrafts] = useState({});
+  const [cancelReasonDrafts, setCancelReasonDrafts] = useState({});
   const [trackedPaymentGroups, setTrackedPaymentGroups] = useState(() =>
     readPendingPaymentGroups()
   );
@@ -585,6 +592,51 @@ export default function Orders() {
     }
   };
 
+  const handleCancelOrder = async (orderId) => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    setActingOrderId(orderId);
+    setError("");
+    setNotice("");
+    try {
+      const res = await fetch(`${API_URL}/api/orders/${orderId}/cancel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          reason: String(cancelReasonDrafts[orderId] || "").trim(),
+        }),
+      });
+      const data = await res.json();
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      if (!res.ok) {
+        setError(data.message || "Unable to cancel order.");
+        return;
+      }
+      setNotice(data.message || "Order cancelled successfully.");
+      setOpenCancelOrderId("");
+      setCancelReasonDrafts((prev) => {
+        const next = { ...prev };
+        delete next[orderId];
+        return next;
+      });
+      await loadOrders();
+    } catch {
+      setError("Unable to cancel order.");
+    } finally {
+      setActingOrderId("");
+    }
+  };
+
   const handleReturnRequest = async (orderId) => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -653,6 +705,7 @@ export default function Orders() {
     }
 
     setOpenReviewOrderId("");
+    setOpenCancelOrderId("");
     setOpenReturnOrderId((prev) => (prev === orderId ? "" : orderId));
     setReturnReasonDrafts((prev) => ({
       ...prev,
@@ -664,6 +717,28 @@ export default function Orders() {
     setReturnReasonDrafts((prev) => ({
       ...prev,
       [orderId]: String(value || "").slice(0, RETURN_REASON_MAX_LENGTH),
+    }));
+  };
+
+  const handleCancelOrderStart = (order) => {
+    const orderId = String(order?._id || "").trim();
+    if (!orderId) return;
+
+    setError("");
+    setNotice("");
+    setOpenReviewOrderId("");
+    setOpenReturnOrderId("");
+    setOpenCancelOrderId((prev) => (prev === orderId ? "" : orderId));
+    setCancelReasonDrafts((prev) => ({
+      ...prev,
+      [orderId]: typeof prev[orderId] === "string" ? prev[orderId] : "",
+    }));
+  };
+
+  const updateCancelReasonDraft = (orderId, value) => {
+    setCancelReasonDrafts((prev) => ({
+      ...prev,
+      [orderId]: String(value || "").slice(0, CANCELLATION_REASON_MAX_LENGTH),
     }));
   };
 
@@ -887,13 +962,18 @@ export default function Orders() {
           const draftComment = String(draft.comment || "");
           const draftImages = normalizeReviewImages(draft.images);
           const savedReviewImages = normalizeReviewImages(order?.review?.images);
-          const isBusy = actingOrderId === orderId || reviewingOrderId === orderId;
+          const isBusy =
+            actingOrderId === orderId ||
+            reviewingOrderId === orderId;
           const isTrackingPayment =
             isOnlinePendingPaymentOrder(order) &&
             trackedPaymentGroups.includes(asText(order?.paymentGroupId));
           const isReturnOpen = openReturnOrderId === orderId;
+          const isCancelOpen = openCancelOrderId === orderId;
           const returnReason = String(returnReasonDrafts[orderId] || "");
+          const cancelReason = String(cancelReasonDrafts[orderId] || "");
           const returnWindowNote = buildReturnWindowNote(order);
+          const showCancelAction = canCancelOrder(order);
           const selectedOptionEntries = Object.entries(
             toPlainObject(order.customization?.selectedOptions)
           )
@@ -1146,6 +1226,17 @@ export default function Orders() {
                   </>
                 ) : null}
 
+                {showCancelAction ? (
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => handleCancelOrderStart(order)}
+                  >
+                    {isCancelOpen ? "Close cancellation" : "Cancel order"}
+                  </button>
+                ) : null}
+
                 {order.status === "delivered" ? (
                   <button
                     className="btn ghost"
@@ -1163,6 +1254,7 @@ export default function Orders() {
                     type="button"
                     disabled={isBusy}
                     onClick={() => {
+                      setOpenCancelOrderId("");
                       setOpenReturnOrderId("");
                       setOpenReviewOrderId((prev) => (prev === orderId ? "" : orderId));
                     }}
@@ -1181,6 +1273,52 @@ export default function Orders() {
                   Payment was submitted from checkout. We are waiting for the Razorpay webhook to
                   confirm it.
                 </p>
+              ) : null}
+
+              {showCancelAction && isCancelOpen ? (
+                <div className="customer-order-review-block">
+                  <p className="customer-order-section-title">Cancel this order</p>
+                  <div className="order-feedback-card">
+                    <p className="order-feedback-heading">
+                      Share a short note if you want to tell the store team why this order is being cancelled
+                    </p>
+                    <textarea
+                      className="order-feedback-textarea"
+                      value={cancelReason}
+                      maxLength={CANCELLATION_REASON_MAX_LENGTH}
+                      placeholder="Add an optional cancellation note"
+                      onChange={(event) =>
+                        updateCancelReasonDraft(orderId, event.target.value)
+                      }
+                    />
+                    <p className="field-hint">
+                      {cancelReason.length}/{CANCELLATION_REASON_MAX_LENGTH}
+                    </p>
+                    {order.paymentStatus === "paid" ? (
+                      <p className="field-hint">
+                        This order is already marked as paid, so the cancellation will also mark it as refunded.
+                      </p>
+                    ) : null}
+                    <div className="order-feedback-actions">
+                      <button
+                        className="btn ghost"
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => setOpenCancelOrderId("")}
+                      >
+                        Keep order
+                      </button>
+                      <button
+                        className="btn primary"
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => handleCancelOrder(orderId)}
+                      >
+                        {actingOrderId === orderId ? "Cancelling..." : "Confirm cancellation"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               ) : null}
 
               {order.status === "delivered" && isReturnOpen ? (

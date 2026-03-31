@@ -1,51 +1,68 @@
 import { Suspense, lazy, useEffect } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Footer from "./components/footer";
 import SellerRoute from "./components/SellerRoute";
 import AdminRoute from "./components/AdminRoute";
 import SellerAccountRoute from "./components/SellerAccountRoute";
+import SellerSidebarLayout from "./components/SellerSidebarLayout";
+import { readStoredSessionClaims } from "./utils/authRoute";
 
-const Home = lazy(() => import("./pages/Home"));
-const Register = lazy(() => import("./pages/Register"));
-const Login = lazy(() => import("./pages/Login"));
-const Products = lazy(() => import("./pages/products"));
-const ProductDetail = lazy(() => import("./pages/productDetail"));
-const SellerStore = lazy(() => import("./pages/sellerStore"));
-const Customization = lazy(() => import("./pages/customization"));
-const Checkout = lazy(() => import("./pages/Checkout"));
-const PaymentStatus = lazy(() => import("./pages/PaymentStatus"));
-const Cart = lazy(() => import("./pages/cart"));
-const Orders = lazy(() => import("./pages/orders"));
-const Profile = lazy(() => import("./pages/profile"));
-const Wishlist = lazy(() => import("./pages/wishlist"));
-const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
-const TermsOfService = lazy(() => import("./pages/TermsOfService"));
-const ReturnPolicy = lazy(() => import("./pages/ReturnPolicy"));
-const ShippingPolicy = lazy(() => import("./pages/ShippingPolicy"));
-const Settings = lazy(() => import("./pages/settings"));
-const EditProfile = lazy(() => import("./pages/editProfile"));
-const ProfileInfo = lazy(() => import("./pages/profileInfo"));
-const ManageAddresses = lazy(() => import("./pages/manageAddresses"));
-const SellerDashboard = lazy(() => import("./pages/sellerDashboard"));
-const SellerPending = lazy(() => import("./pages/SellerPending"));
-const SellerProducts = lazy(() => import("./pages/sellerProducts"));
-const SellerListedItems = lazy(() => import("./pages/sellerListedItems"));
-const SellerOrders = lazy(() => import("./pages/sellerOrders"));
-const SellerPayments = lazy(() => import("./pages/sellerPayments"));
-const SellerSettings = lazy(() => import("./pages/sellerSettings"));
-const SellerMessages = lazy(() => import("./pages/sellerMessages"));
-const AdminDashboard = lazy(() => import("./pages/adminDashboard"));
-const AdminSellers = lazy(() => import("./pages/adminSellers"));
-const AdminProducts = lazy(() => import("./pages/adminProducts"));
-const AdminCategories = lazy(() => import("./pages/adminCategories"));
-const AdminOrders = lazy(() => import("./pages/adminOrders"));
-const AdminReports = lazy(() => import("./pages/adminReports"));
-const AdminCustomers = lazy(() => import("./pages/adminCustomers"));
-const AdminInventory = lazy(() => import("./pages/adminInventory"));
-const AdminAnalytics = lazy(() => import("./pages/adminAnalytics"));
-const AdminSettings = lazy(() => import("./pages/adminSettings"));
-const AdminAccount = lazy(() => import("./pages/adminAccount"));
-const AdminMessages = lazy(() => import("./pages/adminMessages"));
+const lazyPage = (loader) => {
+  const Component = lazy(loader);
+  Component.preload = loader;
+  return Component;
+};
+
+const Home = lazyPage(() => import("./pages/Home"));
+const Register = lazyPage(() => import("./pages/Register"));
+const Login = lazyPage(() => import("./pages/Login"));
+const ForgotPassword = lazyPage(() => import("./pages/ForgotPassword"));
+const ResetPassword = lazyPage(() => import("./pages/ResetPassword"));
+const VerifyEmail = lazyPage(() => import("./pages/VerifyEmail"));
+const Products = lazyPage(() => import("./pages/products"));
+const ProductDetail = lazyPage(() => import("./pages/productDetail"));
+const SellerStore = lazyPage(() => import("./pages/sellerStore"));
+const Customization = lazyPage(() => import("./pages/customization"));
+const Checkout = lazyPage(() => import("./pages/Checkout"));
+const PaymentStatus = lazyPage(() => import("./pages/PaymentStatus"));
+const Cart = lazyPage(() => import("./pages/cart"));
+const Orders = lazyPage(() => import("./pages/orders"));
+const Profile = lazyPage(() => import("./pages/profile"));
+const Wishlist = lazyPage(() => import("./pages/wishlist"));
+const PrivacyPolicy = lazyPage(() => import("./pages/PrivacyPolicy"));
+const TermsOfService = lazyPage(() => import("./pages/TermsOfService"));
+const ReturnPolicy = lazyPage(() => import("./pages/ReturnPolicy"));
+const ShippingPolicy = lazyPage(() => import("./pages/ShippingPolicy"));
+const Settings = lazyPage(() => import("./pages/settings"));
+const EditProfile = lazyPage(() => import("./pages/editProfile"));
+const ProfileInfo = lazyPage(() => import("./pages/profileInfo"));
+const ManageAddresses = lazyPage(() => import("./pages/manageAddresses"));
+const SellerDashboard = lazyPage(() => import("./pages/sellerDashboard"));
+const SellerPending = lazyPage(() => import("./pages/SellerPending"));
+const SellerProducts = lazyPage(() => import("./pages/sellerProducts"));
+const SellerListedItems = lazyPage(() => import("./pages/sellerListedItems"));
+const SellerOrders = lazyPage(() => import("./pages/sellerOrders"));
+const SellerShipping = lazyPage(() => import("./pages/sellerShipping"));
+const SellerPayments = lazyPage(() => import("./pages/sellerPayments"));
+const SellerCustomers = lazyPage(() => import("./pages/sellerCustomers"));
+const SellerReports = lazyPage(() => import("./pages/sellerReports"));
+const SellerReviews = lazyPage(() => import("./pages/sellerReviews"));
+const SellerMarketing = lazyPage(() => import("./pages/sellerMarketing"));
+const SellerSettings = lazyPage(() => import("./pages/sellerSettings"));
+const SellerMessages = lazyPage(() => import("./pages/sellerMessages"));
+const AdminDashboard = lazyPage(() => import("./pages/adminDashboard"));
+const AdminSellers = lazyPage(() => import("./pages/adminSellers"));
+const AdminProducts = lazyPage(() => import("./pages/adminProducts"));
+const AdminCategories = lazyPage(() => import("./pages/adminCategories"));
+const AdminOrders = lazyPage(() => import("./pages/adminOrders"));
+const AdminReports = lazyPage(() => import("./pages/adminReports"));
+const AdminCustomers = lazyPage(() => import("./pages/adminCustomers"));
+const AdminInventory = lazyPage(() => import("./pages/adminInventory"));
+const AdminAnalytics = lazyPage(() => import("./pages/adminAnalytics"));
+const AdminSettings = lazyPage(() => import("./pages/adminSettings"));
+const AdminAccount = lazyPage(() => import("./pages/adminAccount"));
+const AdminMessages = lazyPage(() => import("./pages/adminMessages"));
+const NotFound = lazyPage(() => import("./pages/NotFound"));
 
 function App() {
   const { pathname } = useLocation();
@@ -54,9 +71,83 @@ function App() {
     window.scrollTo(0, 0);
   }, [pathname]);
 
+  useEffect(() => {
+    const sessionClaims = readStoredSessionClaims();
+    const publicPages = [
+      Home,
+      Products,
+      ProductDetail,
+      SellerStore,
+      Customization,
+      ForgotPassword,
+      ResetPassword,
+      VerifyEmail,
+      Cart,
+      Checkout,
+      Orders,
+      Wishlist,
+      Profile,
+      EditProfile,
+      ManageAddresses,
+    ];
+    const sellerPages = [
+      SellerDashboard,
+      SellerProducts,
+      SellerListedItems,
+      SellerOrders,
+      SellerShipping,
+      SellerPayments,
+      SellerCustomers,
+      SellerReports,
+      SellerReviews,
+      SellerMarketing,
+      SellerSettings,
+      SellerMessages,
+    ];
+    const adminPages = [
+      AdminDashboard,
+      AdminSellers,
+      AdminProducts,
+      AdminCategories,
+      AdminOrders,
+      AdminReports,
+      AdminCustomers,
+      AdminInventory,
+      AdminAnalytics,
+      AdminSettings,
+      AdminAccount,
+      AdminMessages,
+    ];
+
+    const pagesToPreload = [...publicPages];
+    if (sessionClaims.role === "seller") pagesToPreload.push(...sellerPages);
+    if (sessionClaims.role === "admin") pagesToPreload.push(...adminPages);
+
+    const schedule =
+      typeof window !== "undefined" && "requestIdleCallback" in window
+        ? window.requestIdleCallback.bind(window)
+        : (callback) => window.setTimeout(callback, 300);
+
+    const cancel =
+      typeof window !== "undefined" && "cancelIdleCallback" in window
+        ? window.cancelIdleCallback.bind(window)
+        : window.clearTimeout.bind(window);
+
+    const handle = schedule(() => {
+      pagesToPreload.forEach((PageComponent) => {
+        PageComponent.preload?.().catch(() => null);
+      });
+    });
+
+    return () => cancel(handle);
+  }, []);
+
   const hideFooter =
     pathname === "/login" ||
     pathname === "/register" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
+    pathname === "/verify-email" ||
     pathname === "/checkout" ||
     pathname === "/payment-status" ||
     pathname === "/profile" ||
@@ -93,63 +184,42 @@ function App() {
           <Route path="/shipping-policy" element={<ShippingPolicy />} />
           <Route path="/register" element={<Register />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/seller/pending" element={<SellerPending />} />
           <Route
-            path="/seller/messages"
+            path="/seller"
             element={
               <SellerAccountRoute>
-                <SellerMessages />
+                <SellerSidebarLayout />
               </SellerAccountRoute>
             }
-          />
+          >
+            <Route path="messages" element={<SellerMessages />} />
+          </Route>
           <Route
-            path="/seller/dashboard"
+            path="/seller"
             element={
               <SellerRoute>
-                <SellerDashboard />
+                <SellerSidebarLayout />
               </SellerRoute>
             }
-          />
-          <Route
-            path="/seller/products"
-            element={
-              <SellerRoute>
-                <SellerProducts />
-              </SellerRoute>
-            }
-          />
-          <Route
-            path="/seller/listed-items"
-            element={
-              <SellerRoute>
-                <SellerListedItems />
-              </SellerRoute>
-            }
-          />
-          <Route
-            path="/seller/orders"
-            element={
-              <SellerRoute>
-                <SellerOrders />
-              </SellerRoute>
-            }
-          />
-          <Route
-            path="/seller/payments"
-            element={
-              <SellerRoute>
-                <SellerPayments />
-              </SellerRoute>
-            }
-          />
-          <Route
-            path="/seller/settings"
-            element={
-              <SellerRoute>
-                <SellerSettings />
-              </SellerRoute>
-            }
-          />
+          >
+            <Route index element={<Navigate to="/seller/dashboard" replace />} />
+            <Route path="dashboard" element={<SellerDashboard />} />
+            <Route path="store/:sellerId" element={<SellerStore sellerWorkspaceMode />} />
+            <Route path="products" element={<SellerProducts />} />
+            <Route path="listed-items" element={<SellerListedItems />} />
+            <Route path="orders" element={<SellerOrders />} />
+            <Route path="shipping" element={<SellerShipping />} />
+            <Route path="payments" element={<SellerPayments />} />
+            <Route path="customers" element={<SellerCustomers />} />
+            <Route path="reports" element={<SellerReports />} />
+            <Route path="reviews" element={<SellerReviews />} />
+            <Route path="marketing" element={<SellerMarketing />} />
+            <Route path="settings" element={<SellerSettings />} />
+          </Route>
           <Route
             path="/admin/messages"
             element={
@@ -246,6 +316,7 @@ function App() {
               </AdminRoute>
             }
           />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
       {!hideFooter && <Footer />}

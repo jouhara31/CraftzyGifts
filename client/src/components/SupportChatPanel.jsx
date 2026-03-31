@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { formatMessageTimestamp } from "../utils/messaging";
+import { formatMessageTimestamp, resolveMessagingImage } from "../utils/messaging";
 import SupportAvatar from "./SupportAvatar";
 
 const formatDayLabel = (value) => {
@@ -116,9 +116,12 @@ export default function SupportChatPanel({
   emptyTitle = "No messages yet",
   emptyText = "Start the conversation to see messages here.",
   draft = "",
+  attachment = "",
   sending = false,
   disabled = false,
   onDraftChange,
+  onAttachmentFileChange,
+  onAttachmentClear,
   onSend,
   onRetry,
 }) {
@@ -133,6 +136,7 @@ export default function SupportChatPanel({
   const [activeEmojiGroup, setActiveEmojiGroup] = useState(emojiGroups[0].key);
   const currentEmojiGroup =
     emojiGroups.find((group) => group.key === activeEmojiGroup) || emojiGroups[0];
+  const attachmentPreview = resolveMessagingImage(attachment);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -161,6 +165,29 @@ export default function SupportChatPanel({
     const currentDraft = String(draft || "");
     const spacer = currentDraft && !/\s$/.test(currentDraft) ? " " : "";
     onDraftChange?.(`${currentDraft}${spacer}${text}`.trimStart());
+  };
+
+  const renderAttachment = (value = "", alt = "Attachment") => {
+    const resolved = resolveMessagingImage(value);
+    if (!resolved) return null;
+    const isImage =
+      /^data:image\//i.test(resolved) ||
+      /\.(png|jpe?g|webp|gif|svg)(\?|$)/i.test(resolved);
+
+    if (isImage) {
+      return <img src={resolved} alt={alt} className="support-chat-attachment-image" />;
+    }
+
+    return (
+      <a
+        href={resolved}
+        target="_blank"
+        rel="noreferrer"
+        className="support-chat-attachment-link"
+      >
+        Open attachment
+      </a>
+    );
   };
 
   return (
@@ -223,6 +250,11 @@ export default function SupportChatPanel({
                       <article
                         className={`support-chat-bubble ${mine ? "mine" : "theirs"}`.trim()}
                       >
+                        {message?.attachmentUrl ? (
+                          <div className="support-chat-attachment">
+                            {renderAttachment(message.attachmentUrl, "Message attachment")}
+                          </div>
+                        ) : null}
                         <p>{message.text}</p>
                         <ChatBubbleMeta timestamp={message.createdAt} />
                       </article>
@@ -242,6 +274,18 @@ export default function SupportChatPanel({
           onSend?.();
         }}
       >
+        {attachmentPreview ? (
+          <div className="support-chat-composer-preview">
+            {renderAttachment(attachmentPreview, "Pending attachment")}
+            <button
+              className="btn ghost support-chat-attachment-clear"
+              type="button"
+              onClick={() => onAttachmentClear?.()}
+            >
+              Remove
+            </button>
+          </div>
+        ) : null}
         <label className="support-chat-input">
           <span className="sr-only">Type your message</span>
           <textarea
@@ -255,6 +299,19 @@ export default function SupportChatPanel({
         </label>
         <div className="support-chat-composer-foot">
           <div className="support-chat-toolbelt">
+            {onAttachmentFileChange ? (
+              <label className="support-chat-action-btn support-chat-file-btn">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={onAttachmentFileChange}
+                  disabled={sending || disabled}
+                />
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m9.5 13.5 5.7-5.7a3 3 0 1 1 4.2 4.2l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.2-8.2" />
+                </svg>
+              </label>
+            ) : null}
             <div className="support-chat-popover-wrap" ref={quickReplyRef}>
               <button
                 className="support-chat-action-btn"

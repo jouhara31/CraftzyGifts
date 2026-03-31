@@ -64,7 +64,10 @@ const buildStockErrorMessage = (item, details, fallbackMessage) => {
 
   if (type === "product_stock") {
     const productName = String(details?.productName || item?.name || "This product").trim();
-    return `${productName} is currently unavailable.`;
+    const variantLabel = String(details?.variantLabel || "").trim();
+    return variantLabel
+      ? `${productName} - ${variantLabel} is currently unavailable.`
+      : `${productName} is currently unavailable.`;
   }
 
   const fallback = String(fallbackMessage || "").trim();
@@ -168,6 +171,10 @@ export default function Checkout() {
     (sum, item) => sum + getCustomizationCharge(item) * item.quantity,
     0
   );
+  const customizationChargeLabel =
+    items.length > 0 && items.every((item) => isGenericHamperItem(item))
+      ? "Making charge"
+      : "Customization charges";
   const deliveryCharge = subtotal + customizationTotal >= 999 ? 0 : 99;
   const total = subtotal + customizationTotal + deliveryCharge;
   const userRole = sessionClaims.role;
@@ -459,6 +466,8 @@ export default function Checkout() {
           items: items.map((item) => ({
             productId: item.id,
             quantity: item.quantity,
+            variantId: item?.selectedVariant?.id || item?.variantId,
+            selectedVariant: item?.selectedVariant,
             customization: item.customization,
           })),
           shippingAddress: {
@@ -708,10 +717,19 @@ export default function Checkout() {
                 const baseSelections = buildBaseSelectionSummary(item.customization, 3);
                 const addonSelections = buildAddonItemSummary(item.customization, 3);
                 const hasBaseSelection = getCustomizationBaseItems(item.customization).length > 0;
+                const variantLabel = String(item?.selectedVariant?.label || "").trim();
 
                 return (
-                  <div key={`checkout-item-${item.id}`} className="checkout-item-summary">
+                  <div
+                    key={`checkout-item-${item.cartItemKey || item.id}`}
+                    className="checkout-item-summary"
+                  >
                     <strong>{item.name || "Hamper"}</strong>
+                    {variantLabel ? <p>Variant: {variantLabel}</p> : null}
+                    <p>
+                      Qty: {Number(item?.quantity || 1)} · ₹
+                      {formatPrice(getItemPrice(item) + getCustomizationCharge(item))} each
+                    </p>
                     {hasBaseSelection && (
                       <p>
                         {isBulkBuild && totalHampers > 0
@@ -741,7 +759,7 @@ export default function Checkout() {
             </div>
             {customizationTotal > 0 && (
               <div className="price-row">
-                <span>Customization charges</span>
+                <span>{customizationChargeLabel}</span>
                 <span>₹{formatPrice(customizationTotal)}</span>
               </div>
             )}

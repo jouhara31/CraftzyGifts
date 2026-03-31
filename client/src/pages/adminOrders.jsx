@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
+import {
+  downloadInvoiceDocument,
+  downloadPdfDocument,
+  prepareInvoiceDocumentWindow,
+  preparePdfDocumentWindow,
+} from "../utils/orderInvoice";
 
 import { API_URL } from "../apiBase";
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
@@ -49,6 +55,8 @@ export default function AdminOrders() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [actingId, setActingId] = useState("");
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState("");
+  const [downloadingLabelId, setDownloadingLabelId] = useState("");
   const [statusDraft, setStatusDraft] = useState({});
   const [detailOrder, setDetailOrder] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -113,6 +121,105 @@ export default function AdminOrders() {
     } finally {
       setActingId("");
       setStatusDraft((prev) => ({ ...prev, [orderId]: "" }));
+    }
+  };
+
+  const handleInvoiceDownload = async (orderId) => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    const invoiceWindow = prepareInvoiceDocumentWindow();
+    setDownloadingInvoiceId(orderId);
+    setError("");
+    setNotice("");
+    try {
+      const res = await fetch(`${API_URL}/api/orders/${orderId}/invoice`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        if (invoiceWindow && !invoiceWindow.closed) {
+          invoiceWindow.close();
+        }
+        navigate("/login");
+        return;
+      }
+      if (!res.ok) {
+        let message = "Unable to download invoice.";
+        const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+        if (contentType.includes("application/json")) {
+          const data = await res.json().catch(() => null);
+          message = data?.message || message;
+        }
+        if (invoiceWindow && !invoiceWindow.closed) {
+          invoiceWindow.close();
+        }
+        setError(message);
+        return;
+      }
+      await downloadInvoiceDocument(res, invoiceWindow);
+      setNotice("Invoice opened.");
+    } catch {
+      if (invoiceWindow && !invoiceWindow.closed) {
+        invoiceWindow.close();
+      }
+      setError("Unable to download invoice.");
+    } finally {
+      setDownloadingInvoiceId("");
+    }
+  };
+
+  const handleShippingLabelDownload = async (orderId) => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    const labelWindow = preparePdfDocumentWindow({
+      title: "Preparing shipping label",
+      message: "Preparing shipping label PDF...",
+    });
+    setDownloadingLabelId(orderId);
+    setError("");
+    setNotice("");
+    try {
+      const res = await fetch(`${API_URL}/api/orders/${orderId}/shipping-label`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        if (labelWindow && !labelWindow.closed) {
+          labelWindow.close();
+        }
+        navigate("/login");
+        return;
+      }
+      if (!res.ok) {
+        let message = "Unable to download shipping label.";
+        const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+        if (contentType.includes("application/json")) {
+          const data = await res.json().catch(() => null);
+          message = data?.message || message;
+        }
+        if (labelWindow && !labelWindow.closed) {
+          labelWindow.close();
+        }
+        setError(message);
+        return;
+      }
+      await downloadPdfDocument(res, labelWindow, {
+        subtitle: "Backend-generated shipping label PDF",
+      });
+      setNotice("Shipping label opened.");
+    } catch {
+      if (labelWindow && !labelWindow.closed) {
+        labelWindow.close();
+      }
+      setError("Unable to download shipping label.");
+    } finally {
+      setDownloadingLabelId("");
     }
   };
 
@@ -206,59 +313,116 @@ export default function AdminOrders() {
           <span>Date</span>
           <span>Actions</span>
         </div>
-        {visibleOrders.map((order) => (
-          <div key={order._id} className="order-row admin-order-row">
-            <span data-label="Order">{order._id?.slice(-8)?.toUpperCase()}</span>
-            <span data-label="Customer">{order.customer?.name || "Customer"}</span>
-            <span data-label="Seller">{order.seller?.storeName || order.seller?.name || "Seller"}</span>
-            <span data-label="Product">{order.product?.name || "Product"}</span>
-            <span data-label="Status">{formatStatus(order.status)}</span>
-            <span data-label="Payment">
-              {String(order.paymentMode || "").toUpperCase()} / {order.paymentStatus}
-            </span>
-            <span className="order-total" data-label="Total">{money(order.total)}</span>
-            <span data-label="Date">{new Date(order.createdAt).toLocaleDateString("en-IN")}</span>
-            <span data-label="Actions">
-              <div className="dropdown-inline admin-order-actions">
-                {STATUS_NEXT[order.status]?.length ? (
-                  <>
-                    <select
-                      className="search-input admin-order-status-select"
-                      value={statusDraft[order._id] || ""}
-                      onChange={(event) =>
-                        setStatusDraft((prev) => ({ ...prev, [order._id]: event.target.value }))
-                      }
-                    >
-                      <option value="">Update status</option>
-                      {(STATUS_NEXT[order.status] || []).map((status) => (
-                        <option key={status} value={status}>
-                          {formatStatus(status)}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="btn ghost"
-                      type="button"
-                      disabled={!statusDraft[order._id] || actingId === order._id}
-                      onClick={() => updateStatus(order._id, statusDraft[order._id])}
-                    >
-                      {actingId === order._id ? "Updating..." : "Apply"}
-                    </button>
-                  </>
-                ) : (
-                  <span className="field-hint">No updates</span>
-                )}
-                <button
-                  className="btn ghost"
-                  type="button"
-                  onClick={() => setDetailOrder(order)}
-                >
-                  View details
-                </button>
-              </div>
-            </span>
-          </div>
-        ))}
+        {visibleOrders.map((order) => {
+          const orderStatus = String(order?.status || "");
+          const paymentStatus = String(order?.paymentStatus || "").trim().toLowerCase();
+          const invoiceAvailable =
+            orderStatus !== "pending_payment" &&
+            !(orderStatus === "cancelled" && ["pending", "failed"].includes(paymentStatus));
+          const shippingLabelAvailable =
+            orderStatus !== "pending_payment" && orderStatus !== "cancelled";
+
+          return (
+            <div key={order._id} className="order-row admin-order-row">
+              <span data-label="Order">{order._id?.slice(-8)?.toUpperCase()}</span>
+              <span data-label="Customer">{order.customer?.name || "Customer"}</span>
+              <span data-label="Seller">
+                {order.seller?.storeName || order.seller?.name || "Seller"}
+              </span>
+              <span data-label="Product">{order.product?.name || "Product"}</span>
+              <span data-label="Status">{formatStatus(order.status)}</span>
+              <span data-label="Payment">
+                {String(order.paymentMode || "").toUpperCase()} / {order.paymentStatus}
+              </span>
+              <span className="order-total" data-label="Total">
+                {money(order.total)}
+              </span>
+              <span data-label="Date">
+                {new Date(order.createdAt).toLocaleDateString("en-IN")}
+              </span>
+              <span data-label="Actions">
+                <div className="dropdown-inline admin-order-actions">
+                  {STATUS_NEXT[order.status]?.length ? (
+                    <>
+                      <select
+                        className="search-input admin-order-status-select"
+                        value={statusDraft[order._id] || ""}
+                        onChange={(event) =>
+                          setStatusDraft((prev) => ({
+                            ...prev,
+                            [order._id]: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Update status</option>
+                        {(STATUS_NEXT[order.status] || []).map((status) => (
+                          <option key={status} value={status}>
+                            {formatStatus(status)}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="btn ghost"
+                        type="button"
+                        disabled={!statusDraft[order._id] || actingId === order._id}
+                        onClick={() => updateStatus(order._id, statusDraft[order._id])}
+                      >
+                        {actingId === order._id ? "Updating..." : "Apply"}
+                      </button>
+                    </>
+                  ) : (
+                    <span className="field-hint">No updates</span>
+                  )}
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={() => setDetailOrder(order)}
+                  >
+                    View details
+                  </button>
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    disabled={!invoiceAvailable || downloadingInvoiceId === order._id}
+                    onClick={() => handleInvoiceDownload(order._id)}
+                  >
+                    {downloadingInvoiceId === order._id ? (
+                      "Preparing..."
+                    ) : (
+                      <>
+                        <svg
+                          viewBox="0 0 24 24"
+                          aria-hidden="true"
+                          focusable="false"
+                          width="16"
+                          height="16"
+                        >
+                          <path
+                            d="M12 3v10m0 0 4-4m-4 4-4-4M5 15v4h14v-4"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>{" "}
+                        Invoice
+                      </>
+                    )}
+                  </button>
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    disabled={!shippingLabelAvailable || downloadingLabelId === order._id}
+                    onClick={() => handleShippingLabelDownload(order._id)}
+                  >
+                    {downloadingLabelId === order._id ? "Preparing label..." : "Shipping label"}
+                  </button>
+                </div>
+              </span>
+            </div>
+          );
+        })}
       </div>
       {detailOrder && (
         <div className="admin-modal-backdrop" onClick={() => setDetailOrder(null)}>
