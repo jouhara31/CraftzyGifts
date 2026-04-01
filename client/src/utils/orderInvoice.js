@@ -174,7 +174,7 @@ const getInvoiceDocumentFileName = (response) => {
     }
   }
 
-  const plainMatch = disposition.match(/filename="?([^\";]+)"?/i);
+  const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
   if (plainMatch?.[1]) {
     return plainMatch[1];
   }

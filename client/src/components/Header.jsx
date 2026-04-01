@@ -548,7 +548,6 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const { cartCount, wishlistCount } = counts;
 
   const toAuthPath = (path) => (user ? path : "/login");
-  const sellerActive = (path) => location.pathname.startsWith(path);
   const showCategoryToggle =
     typeof onFilterClick === "function" && location.pathname === "/products";
   const isHomeRoute = location.pathname === "/";

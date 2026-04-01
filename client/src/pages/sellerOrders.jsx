@@ -471,15 +471,6 @@ export default function SellerOrders() {
           const referenceImageTexts = referenceImages.filter(
             (reference) => !isImageReference(reference)
           );
-          const hasCustomizationDetails =
-            baseSelections.length > 0 ||
-            selectedItemCount > 0 ||
-            selectedOptionCount > 0 ||
-            Boolean(asText(customization.wishCardText)) ||
-            Boolean(asText(customization.ideaDescription)) ||
-            Boolean(asText(customization.specialNote)) ||
-            referenceImagePreviews.length > 0 ||
-            referenceImageTexts.length > 0;
           const isExpanded = Boolean(expandedOrders[orderId]);
           const detailsId = `order-customization-${orderId || "unknown"}`;
           const hasExpandableDetails = true;

@@ -278,12 +278,6 @@ export default function SellerDashboard() {
     () => String(new URLSearchParams(location.search).get(CONTACT_REQUEST_QUERY_KEY) || "").trim(),
     [location.search]
   );
-  const sellerStorePath = useMemo(() => {
-    const sellerId = String(
-      sellerProfile?.id || sellerProfile?._id || readUserIdFromToken()
-    ).trim();
-    return sellerId ? `/seller/store/${sellerId}` : "/seller/dashboard";
-  }, [sellerProfile]);
   const loadDashboard = useCallback(async ({ silent = false } = {}) => {
     const token = localStorage.getItem("token");
     if (!token) {

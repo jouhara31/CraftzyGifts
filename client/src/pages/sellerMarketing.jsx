@@ -9,7 +9,6 @@ const asText = (value) => String(value ?? "").trim();
 export default function SellerMarketing() {
   const navigate = useNavigate();
   useHashScroll();
-  const [profile, setProfile] = useState(null);
   const [products, setProducts] = useState([]);
   const [marketing, setMarketing] = useState({
     promoHeadline: "",
@@ -32,7 +31,6 @@ export default function SellerMarketing() {
   }, [navigate]);
 
   const applyMarketingSnapshot = useCallback((profileData = {}) => {
-    setProfile(profileData);
     setMarketing({
       promoHeadline: asText(profileData?.sellerMarketing?.promoHeadline),
       promoSubheadline: asText(profileData?.sellerMarketing?.promoSubheadline),
