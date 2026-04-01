@@ -21,6 +21,10 @@ import {
 } from "../utils/messaging";
 
 const DEFAULT_VISIBLE_SELLERS = 7;
+const formatTicketStatus = (value = "") =>
+  String(value || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 
 const getSellerStatusMeta = (value) => {
   const normalized = String(value || "").trim().toLowerCase();

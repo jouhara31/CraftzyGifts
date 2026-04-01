@@ -1163,11 +1163,6 @@ export default function AdminAccount() {
   }, [activeTab, loadApiIntegrations]);
 
   useEffect(() => {
-    if (isEditing) return;
-    setAddressDraft(addressDraftValue);
-  }, [addressDraftValue, isEditing]);
-
-  useEffect(() => {
     if (!profileImageModalOpen) return undefined;
     const onEscape = (event) => {
       if (event.key === "Escape") {
@@ -1343,6 +1338,12 @@ export default function AdminAccount() {
   const languageValue = profile.language || defaultLanguage;
   const createdAtLabel = formatShortDate(profile?.createdAt);
   const aboutText = String(profile.about || "").trim();
+
+  useEffect(() => {
+    if (isEditing) return;
+    setAddressDraft(addressDraftValue);
+  }, [addressDraftValue, isEditing]);
+
   const metricCards = [
     {
       label: "Total Products",
