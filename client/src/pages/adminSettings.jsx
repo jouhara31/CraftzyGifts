@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
 
 import { API_URL } from "../apiBase";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 const DEFAULT_SETTINGS = {
   platformName: "CraftzyGifts",
   currencyCode: "INR",
@@ -13,17 +14,6 @@ const DEFAULT_SETTINGS = {
   autoApproveSellers: false,
   enableOrderEmailAlerts: true,
   maintenanceMode: false,
-};
-
-const readApiPayload = async (response) => {
-  const text = await response.text();
-  if (!text) return {};
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { message: text };
-  }
 };
 
 const normalizeSettings = (value = {}) => ({
@@ -50,21 +40,25 @@ export default function AdminSettings() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const navigate = useNavigate();
+  const clearAndRedirect = useCallback(() => {
+    clearAuthSession();
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   const loadSettings = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API_URL}/api/admin/settings`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await readApiPayload(response);
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/settings`);
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
       if (!response.ok) {
         setError(data.message || "Unable to load settings.");
         return;
@@ -75,7 +69,7 @@ export default function AdminSettings() {
     } finally {
       setLoading(false);
     }
-  }, [navigate]);
+  }, [clearAndRedirect]);
 
   useEffect(() => {
     loadSettings();
@@ -90,9 +84,8 @@ export default function AdminSettings() {
   };
 
   const saveSettings = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -100,11 +93,10 @@ export default function AdminSettings() {
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/api/admin/settings`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/settings`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           ...settings,
@@ -113,7 +105,10 @@ export default function AdminSettings() {
           settlementDelayDays: Number(settings.settlementDelayDays || 0),
         }),
       });
-      const data = await readApiPayload(response);
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
       if (!response.ok) {
         setError(data.message || "Unable to save settings.");
         return;

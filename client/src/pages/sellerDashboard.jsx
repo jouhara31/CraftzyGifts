@@ -4,71 +4,22 @@ import { getProductImage } from "../utils/productMedia";
 import useHashScroll from "../utils/useHashScroll";
 
 import { API_URL } from "../apiBase";
-const USER_PROFILE_IMAGE_KEY = "user_profile_image";
-const DASHBOARD_REFRESH_INTERVAL_MS = 60000;
+import {
+  apiFetchJson,
+  clearAuthSession,
+  hasActiveSession,
+  persistStoredUser,
+  readStoredUser,
+  readStoredUserId,
+} from "../utils/authSession";
+const DASHBOARD_REFRESH_INTERVAL_MS = 3 * 60 * 1000;
+const DASHBOARD_FOCUS_REFRESH_THROTTLE_MS = 45 * 1000;
 const CUSTOMER_MESSAGES_HASH = "#customer-messages";
 const CUSTOMER_MESSAGES_SECTION_ID = "customer-messages";
 const CONTACT_REQUEST_QUERY_KEY = "contactRequest";
 const SELLER_DASHBOARD_CACHE_KEY = "seller_dashboard_snapshot";
 
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
-
-const readStoredUser = () => {
-  try {
-    const stored = JSON.parse(localStorage.getItem("user") || "{}");
-    if (stored && typeof stored === "object" && !stored.profileImage) {
-      const fallbackImage = localStorage.getItem(USER_PROFILE_IMAGE_KEY) || "";
-      if (fallbackImage) stored.profileImage = fallbackImage;
-    }
-    return stored;
-  } catch {
-    return {};
-  }
-};
-
-const readUserIdFromToken = () => {
-  try {
-    const token = localStorage.getItem("token");
-    if (!token) return "";
-    const payload = token.split(".")?.[1];
-    if (!payload) return "";
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-    const decoded = JSON.parse(atob(padded));
-    return String(decoded?.id || "").trim();
-  } catch {
-    return "";
-  }
-};
-
-const persistUserToStorage = (nextUser) => {
-  if (!nextUser || typeof nextUser !== "object") return;
-  const profileImage = typeof nextUser.profileImage === "string" ? nextUser.profileImage : "";
-
-  try {
-    localStorage.setItem("user", JSON.stringify(nextUser));
-    if (profileImage) {
-      localStorage.setItem(USER_PROFILE_IMAGE_KEY, profileImage);
-    } else {
-      localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-    }
-    return;
-  } catch {
-    // Fallback for quota errors.
-  }
-
-  try {
-    const { profileImage: _profileImage, ...rest } = nextUser;
-    localStorage.setItem("user", JSON.stringify(rest));
-    if (profileImage) {
-      localStorage.setItem(USER_PROFILE_IMAGE_KEY, profileImage);
-    } else {
-      localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-    }
-  } catch {
-    // Ignore localStorage failures.
-  }
-};
 
 const readSellerDashboardSnapshot = () => {
   try {
@@ -242,6 +193,7 @@ export default function SellerDashboard() {
   const location = useLocation();
   const initialDashboardSnapshot = useMemo(() => readSellerDashboardSnapshot(), []);
   const hasHydratedDashboardRef = useRef(Boolean(initialDashboardSnapshot));
+  const lastDashboardLoadRef = useRef(initialDashboardSnapshot ? Date.now() : 0);
   const [sellerProfile, setSellerProfile] = useState(
     () => initialDashboardSnapshot?.sellerProfile || readStoredUser()
   );
@@ -268,19 +220,15 @@ export default function SellerDashboard() {
   useHashScroll();
   const clearSessionAndRedirect = useCallback(() => {
     clearSellerDashboardSnapshot();
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-    window.dispatchEvent(new Event("user:updated"));
-    navigate("/login");
+    clearAuthSession();
+    navigate("/login", { replace: true });
   }, [navigate]);
   const focusedContactRequestId = useMemo(
     () => String(new URLSearchParams(location.search).get(CONTACT_REQUEST_QUERY_KEY) || "").trim(),
     [location.search]
   );
   const loadDashboard = useCallback(async ({ silent = false } = {}) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (!hasActiveSession()) {
       clearSessionAndRedirect();
       return;
     }
@@ -290,25 +238,28 @@ export default function SellerDashboard() {
     }
     setError("");
     try {
-      const headers = { Authorization: `Bearer ${token}` };
       const contactQuery = new URLSearchParams({ limit: "5" });
       if (focusedContactRequestId) {
         contactQuery.set(CONTACT_REQUEST_QUERY_KEY, focusedContactRequestId);
       }
-      const [profileRes, productsRes, ordersRes, contactRes, notificationsRes] = await Promise.all([
-        fetch(`${API_URL}/api/users/me`, { headers }),
-        fetch(`${API_URL}/api/products/seller/me`, { headers }),
-        fetch(`${API_URL}/api/orders/seller`, { headers }),
-        fetch(`${API_URL}/api/users/me/contact-requests?${contactQuery.toString()}`, { headers }),
-        fetch(`${API_URL}/api/users/me/notifications?limit=8`, { headers }),
-      ]);
-      const [profileData, productsData, ordersData, contactData, notificationsData] = await Promise.all([
-        profileRes.json(),
-        productsRes.json(),
-        ordersRes.json(),
-        contactRes.json(),
-        notificationsRes.json(),
-      ]);
+      const [profileResult, productsResult, ordersResult, contactResult, notificationsResult] =
+        await Promise.all([
+          apiFetchJson(`${API_URL}/api/users/me`),
+          apiFetchJson(`${API_URL}/api/products/seller/me`),
+          apiFetchJson(`${API_URL}/api/orders/seller`),
+          apiFetchJson(`${API_URL}/api/users/me/contact-requests?${contactQuery.toString()}`),
+          apiFetchJson(`${API_URL}/api/users/me/notifications?limit=8`),
+        ]);
+      const profileRes = profileResult.response;
+      const productsRes = productsResult.response;
+      const ordersRes = ordersResult.response;
+      const contactRes = contactResult.response;
+      const notificationsRes = notificationsResult.response;
+      const profileData = profileResult.data;
+      const productsData = productsResult.data;
+      const ordersData = ordersResult.data;
+      const contactData = contactResult.data;
+      const notificationsData = notificationsResult.data;
 
       if (
         profileRes.status === 401 ||
@@ -356,7 +307,7 @@ export default function SellerDashboard() {
       const pendingOrders = (Array.isArray(ordersData) ? ordersData : []).filter(
         (order) => order.status === "placed"
       ).length;
-      persistUserToStorage({
+      persistStoredUser({
         ...existingUser,
         id: profileData.id,
         name: profileData.name,
@@ -369,7 +320,7 @@ export default function SellerDashboard() {
         profileImage: profileData.profileImage,
         storeCoverImage: profileData.storeCoverImage,
         sellerPendingOrders: pendingOrders,
-      });
+      }, { dispatch: false });
       persistSellerDashboardSnapshot({
         userId: profileData.id,
         sellerProfile: profileData || {},
@@ -385,6 +336,7 @@ export default function SellerDashboard() {
           contactRes.ok && Array.isArray(contactData?.items) ? contactData.items : [],
         contactRequestTotal: contactRes.ok ? Number(contactData?.total || 0) : 0,
       });
+      lastDashboardLoadRef.current = Date.now();
       window.dispatchEvent(new Event("user:updated"));
     } catch {
       setError("Unable to load seller dashboard.");
@@ -401,13 +353,39 @@ export default function SellerDashboard() {
     loadDashboard();
   }, [loadDashboard]);
 
+  const refreshDashboardIfStale = useCallback(() => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      return;
+    }
+    if (Date.now() - lastDashboardLoadRef.current < DASHBOARD_FOCUS_REFRESH_THROTTLE_MS) {
+      return;
+    }
+    loadDashboard({ silent: true });
+  }, [loadDashboard]);
+
   useEffect(() => {
     const intervalId = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
       loadDashboard({ silent: true });
     }, DASHBOARD_REFRESH_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
   }, [loadDashboard]);
+
+  useEffect(() => {
+    const handleVisibilitySync = () => {
+      refreshDashboardIfStale();
+    };
+
+    window.addEventListener("focus", handleVisibilitySync);
+    document.addEventListener("visibilitychange", handleVisibilitySync);
+    return () => {
+      window.removeEventListener("focus", handleVisibilitySync);
+      document.removeEventListener("visibilitychange", handleVisibilitySync);
+    };
+  }, [refreshDashboardIfStale]);
 
   useEffect(() => {
     const handleNotificationSync = () => {
@@ -679,22 +657,19 @@ export default function SellerDashboard() {
 
   const markNotificationsRead = useCallback(
     async ({ ids = [], all = false } = {}) => {
-      const token = localStorage.getItem("token");
-      if (!token) return null;
+      if (!hasActiveSession()) return null;
 
       setNotificationsBusy(true);
       try {
-        const res = await fetch(`${API_URL}/api/users/me/notifications/read`, {
+        const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/notifications/read`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ ids, all }),
         });
-        const data = await res.json();
-        if (!res.ok) {
-          if (res.status === 401) {
+        if (!response.ok) {
+          if (response.status === 401) {
             clearSessionAndRedirect();
           }
           return null;
@@ -737,38 +712,32 @@ export default function SellerDashboard() {
       sellerProfile?.id || sellerProfile?._id || fallbackUser?.id || fallbackUser?._id || ""
     ).trim();
     if (!ownSellerId) {
-      ownSellerId = readUserIdFromToken();
+      ownSellerId = readStoredUserId();
     }
-    if (!ownSellerId) {
-      const token = localStorage.getItem("token");
-      if (token) {
-        try {
-          const res = await fetch(`${API_URL}/api/users/me`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const data = await res.json();
-          if (res.ok) {
-            ownSellerId = String(data?.id || data?._id || "").trim();
-            if (ownSellerId) {
-              setSellerProfile(data);
-              persistUserToStorage({
-                ...fallbackUser,
-                id: ownSellerId,
-                name: data.name,
-                email: data.email,
-                role: data.role,
-                sellerStatus: data.sellerStatus,
-                storeName: data.storeName,
-                phone: data.phone,
-                supportEmail: data.supportEmail,
-                profileImage: data.profileImage,
-                storeCoverImage: data.storeCoverImage,
-              });
-            }
+    if (!ownSellerId && hasActiveSession()) {
+      try {
+        const { response, data } = await apiFetchJson(`${API_URL}/api/users/me`);
+        if (response.ok) {
+          ownSellerId = String(data?.id || data?._id || "").trim();
+          if (ownSellerId) {
+            setSellerProfile(data);
+            persistStoredUser({
+              ...fallbackUser,
+              id: ownSellerId,
+              name: data.name,
+              email: data.email,
+              role: data.role,
+              sellerStatus: data.sellerStatus,
+              storeName: data.storeName,
+              phone: data.phone,
+              supportEmail: data.supportEmail,
+              profileImage: data.profileImage,
+              storeCoverImage: data.storeCoverImage,
+            });
           }
-        } catch {
-          // Fallback handled below.
         }
+      } catch {
+        // Fallback handled below.
       }
     }
     if (!ownSellerId) {

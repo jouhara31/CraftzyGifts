@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
+import { optimizeImageFile } from "../utils/imageUpload";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 
 import { API_URL } from "../apiBase";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
@@ -108,15 +110,6 @@ const persistUserToStorage = (user) => {
 
   window.dispatchEvent(new Event("user:updated"));
 };
-
-const readFileAsDataUrl = (file) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () =>
-      resolve(typeof reader.result === "string" ? reader.result : "");
-    reader.onerror = () => reject(new Error("File read failed"));
-    reader.readAsDataURL(file);
-  });
 
 function AdminProfileOverviewTab({
   quickInfoItems,
@@ -1081,26 +1074,29 @@ export default function AdminAccount() {
     setApiError("");
     setApiNotice("");
   }, []);
-  const requireToken = useCallback(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
-      return null;
-    }
-    return token;
+  const handleUnauthorized = useCallback(() => {
+    clearAuthSession();
+    navigate("/login");
   }, [navigate]);
+  const requireSession = useCallback(() => {
+    if (!hasActiveSession()) {
+      handleUnauthorized();
+      return false;
+    }
+    return true;
+  }, [handleUnauthorized]);
 
   const loadProfile = useCallback(async () => {
-    const token = requireToken();
-    if (!token) return;
+    if (!requireSession()) return;
 
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API_URL}/api/users/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await readApiPayload(response);
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me`);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!response.ok) {
         setError(data.message || "Unable to load profile.");
         return;
@@ -1113,27 +1109,27 @@ export default function AdminAccount() {
     } finally {
       setLoading(false);
     }
-  }, [requireToken]);
+  }, [handleUnauthorized, requireSession]);
 
   const loadApiIntegrations = useCallback(async () => {
-    const token = requireToken();
-    if (!token) return;
+    if (!requireSession()) return;
 
     setApiLoading(true);
     resetApiAlerts();
     try {
-      const [keysResponse, hooksResponse] = await Promise.all([
-        fetch(`${API_URL}/api/users/me/api-keys`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${API_URL}/api/users/me/webhooks`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
+      const [keysResult, hooksResult] = await Promise.all([
+        apiFetchJson(`${API_URL}/api/users/me/api-keys`),
+        apiFetchJson(`${API_URL}/api/users/me/webhooks`),
       ]);
-      const [keysData, hooksData] = await Promise.all([
-        readApiPayload(keysResponse),
-        readApiPayload(hooksResponse),
-      ]);
+      const keysResponse = keysResult.response;
+      const hooksResponse = hooksResult.response;
+      const keysData = keysResult.data;
+      const hooksData = hooksResult.data;
+
+      if (keysResponse.status === 401 || hooksResponse.status === 401) {
+        handleUnauthorized();
+        return;
+      }
 
       if (!keysResponse.ok) {
         setApiError(keysData.message || "Unable to load API keys.");
@@ -1151,7 +1147,7 @@ export default function AdminAccount() {
     } finally {
       setApiLoading(false);
     }
-  }, [requireToken, resetApiAlerts]);
+  }, [handleUnauthorized, requireSession, resetApiAlerts]);
 
   useEffect(() => {
     loadProfile();
@@ -1161,17 +1157,6 @@ export default function AdminAccount() {
     if (activeTab !== "api") return;
     loadApiIntegrations();
   }, [activeTab, loadApiIntegrations]);
-
-  useEffect(() => {
-    if (!profileImageModalOpen) return undefined;
-    const onEscape = (event) => {
-      if (event.key === "Escape") {
-        setProfileImageModalOpen(false);
-      }
-    };
-    document.addEventListener("keydown", onEscape);
-    return () => document.removeEventListener("keydown", onEscape);
-  }, [profileImageModalOpen]);
 
   const onProfileChange = (field) => (event) => {
     setProfile((prev) => ({ ...prev, [field]: event.target.value }));
@@ -1184,8 +1169,7 @@ export default function AdminAccount() {
   };
 
   const saveProfile = async () => {
-    const token = requireToken();
-    if (!token) return false;
+    if (!requireSession()) return false;
 
     const nextShippingAddress = {
       ...(profile.shippingAddress || {}),
@@ -1195,11 +1179,10 @@ export default function AdminAccount() {
     setSaving(true);
     resetAlerts();
     try {
-      const response = await fetch(`${API_URL}/api/users/me`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           name: profile.name,
@@ -1214,7 +1197,10 @@ export default function AdminAccount() {
           shippingAddress: nextShippingAddress,
         }),
       });
-      const data = await readApiPayload(response);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return false;
+      }
       if (!response.ok) {
         setError(data.message || "Unable to save profile.");
         return false;
@@ -1232,8 +1218,7 @@ export default function AdminAccount() {
   };
 
   const savePassword = async () => {
-    const token = requireToken();
-    if (!token) return;
+    if (!requireSession()) return;
 
     if (!passwordForm.currentPassword) {
       setError("Current password is required.");
@@ -1251,18 +1236,20 @@ export default function AdminAccount() {
     setPasswordSaving(true);
     resetAlerts();
     try {
-      const response = await fetch(`${API_URL}/api/users/me/password`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/password`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           currentPassword: passwordForm.currentPassword,
           newPassword: passwordForm.newPassword,
         }),
       });
-      const data = await readApiPayload(response);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!response.ok) {
         setError(data.message || "Unable to update password.");
         return;
@@ -1279,6 +1266,17 @@ export default function AdminAccount() {
       setPasswordSaving(false);
     }
   };
+
+  useEffect(() => {
+    if (!profileImageModalOpen) return undefined;
+    const onEscape = (event) => {
+      if (event.key === "Escape") {
+        setProfileImageModalOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onEscape);
+    return () => document.removeEventListener("keydown", onEscape);
+  }, [profileImageModalOpen]);
 
   const adminDisplayName = String(profile.name || "Admin").trim() || "Admin";
   const adminProfileName =
@@ -1643,33 +1641,40 @@ export default function AdminAccount() {
     }
 
     try {
-      const dataUrl = await readFileAsDataUrl(file);
-      setProfileImageDraft(dataUrl);
+      const uploadedUrl = await optimizeImageFile(file, {
+        maxWidth: 1280,
+        maxHeight: 1280,
+        quality: 0.8,
+        uploadFolder: "profiles",
+        uploadPrefix: "admin-avatar",
+      });
+      setProfileImageDraft(uploadedUrl);
       setProfileImageDraftName(file.name);
       setError("");
-    } catch {
-      setError("Unable to read selected image.");
+    } catch (uploadError) {
+      setError(uploadError?.message || "Unable to read selected image.");
     } finally {
       event.target.value = "";
     }
   };
 
   const applyProfileImage = async () => {
-    const token = requireToken();
-    if (!token) return;
+    if (!requireSession()) return;
 
     setImageSaving(true);
     resetAlerts();
     try {
-      const response = await fetch(`${API_URL}/api/users/me`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ profileImage: profileImageDraft }),
       });
-      const data = await readApiPayload(response);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!response.ok) {
         setError(data.message || "Unable to update profile image.");
         return;
@@ -1823,24 +1828,25 @@ export default function AdminAccount() {
   };
 
   const handleCreateApiKey = async () => {
-    const token = requireToken();
-    if (!token) return;
+    if (!requireSession()) return;
 
     setApiKeySaving(true);
     resetApiAlerts();
     try {
-      const response = await fetch(`${API_URL}/api/users/me/api-keys`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/api-keys`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           name: apiKeyForm.name,
           type: apiKeyForm.type,
         }),
       });
-      const data = await readApiPayload(response);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!response.ok) {
         setApiError(data.message || "Unable to create API key.");
         return;
@@ -1864,8 +1870,7 @@ export default function AdminAccount() {
   };
 
   const handleRevokeApiKey = async (keyId) => {
-    const token = requireToken();
-    if (!token) return;
+    if (!requireSession()) return;
     if (!keyId) return;
     const proceed = window.confirm("Revoke this API key? This action cannot be undone.");
     if (!proceed) return;
@@ -1873,14 +1878,16 @@ export default function AdminAccount() {
     setApiKeySaving(true);
     resetApiAlerts();
     try {
-      const response = await fetch(`${API_URL}/api/users/me/api-keys/${keyId}/revoke`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/api-keys/${keyId}/revoke`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
       });
-      const data = await readApiPayload(response);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!response.ok) {
         setApiError(data.message || "Unable to revoke API key.");
         return;
@@ -1911,8 +1918,7 @@ export default function AdminAccount() {
   };
 
   const handleCreateWebhook = async () => {
-    const token = requireToken();
-    if (!token) return;
+    if (!requireSession()) return;
     if (!webhookForm.url.trim()) {
       setApiError("Webhook URL is required.");
       return;
@@ -1926,18 +1932,20 @@ export default function AdminAccount() {
     setWebhookSaving(true);
     resetApiAlerts();
     try {
-      const response = await fetch(`${API_URL}/api/users/me/webhooks`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/webhooks`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           url: webhookForm.url,
           events,
         }),
       });
-      const data = await readApiPayload(response);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!response.ok) {
         setApiError(data.message || "Unable to create webhook.");
         return;
@@ -1960,8 +1968,7 @@ export default function AdminAccount() {
   };
 
   const handleDeleteWebhook = async (webhookId) => {
-    const token = requireToken();
-    if (!token) return;
+    if (!requireSession()) return;
     if (!webhookId) return;
     const proceed = window.confirm("Delete this webhook? This action cannot be undone.");
     if (!proceed) return;
@@ -1969,14 +1976,16 @@ export default function AdminAccount() {
     setWebhookSaving(true);
     resetApiAlerts();
     try {
-      const response = await fetch(`${API_URL}/api/users/me/webhooks/${webhookId}`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/webhooks/${webhookId}`, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
       });
-      const data = await readApiPayload(response);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!response.ok) {
         setApiError(data.message || "Unable to delete webhook.");
         return;

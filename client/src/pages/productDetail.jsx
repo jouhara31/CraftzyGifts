@@ -12,6 +12,7 @@ import {
   isPurchaseBlockedRole,
   readStoredSessionClaims,
 } from "../utils/authRoute";
+import { hasActiveSession } from "../utils/authSession";
 import {
   loadSellerStore as loadCachedSellerStore,
   prefetchSellerStore,
@@ -170,8 +171,7 @@ export default function ProductDetail() {
   const purchaseBlockedMessage = getPurchaseBlockedMessage(userRole);
 
   const requireLogin = () => {
-    const token = localStorage.getItem("token");
-    if (!token || sessionClaims.isExpired) {
+    if (!hasActiveSession() || sessionClaims.isExpired) {
       navigate("/login");
       return false;
     }
@@ -488,10 +488,9 @@ export default function ProductDetail() {
       }
 
       try {
-        const token = localStorage.getItem("token");
         const data = await loadCachedSellerStore(sellerId, {
           ...SELLER_STORE_SUMMARY_OPTIONS,
-          token,
+          authenticated: hasActiveSession(),
         });
         if (ignore) return;
         setSellerStoreData({
@@ -515,7 +514,7 @@ export default function ProductDetail() {
     if (!sellerId) return;
     prefetchSellerStore(sellerId, {
       ...SELLER_STORE_PREFETCH_OPTIONS,
-      token: localStorage.getItem("token"),
+      authenticated: hasActiveSession(),
     });
   };
 

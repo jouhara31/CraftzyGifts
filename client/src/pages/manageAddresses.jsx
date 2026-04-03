@@ -3,23 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 
 import { API_URL } from "../apiBase";
-const USER_PROFILE_IMAGE_KEY = "user_profile_image";
-
-const readApiPayload = async (response) => {
-  const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    return await response.json();
-  }
-
-  const text = await response.text();
-  if (!text) return {};
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { message: text };
-  }
-};
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 
 const formatAddressLabel = (address) => {
   if (!address || typeof address !== "object") return "";
@@ -41,23 +25,17 @@ export default function ManageAddresses() {
 
   useEffect(() => {
     const load = async () => {
-      const token = localStorage.getItem("token");
-      if (!token) {
+      if (!hasActiveSession()) {
+        clearAuthSession();
         navigate("/login");
         return;
       }
 
       try {
-        const res = await fetch(`${API_URL}/api/users/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await readApiPayload(res);
+        const { response: res, data } = await apiFetchJson(`${API_URL}/api/users/me`);
         if (!res.ok) {
           if (res.status === 401) {
-            localStorage.removeItem("token");
-            localStorage.removeItem("user");
-            localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-            window.dispatchEvent(new Event("user:updated"));
+            clearAuthSession();
             navigate("/login");
             return;
           }

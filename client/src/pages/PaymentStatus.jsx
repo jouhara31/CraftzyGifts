@@ -6,6 +6,7 @@ import {
   addPendingPaymentGroup,
   removePendingPaymentGroup,
 } from "../utils/paymentTracking";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 
 const PAYMENT_STATUS_POLL_INTERVAL_MS = 5000;
 
@@ -117,8 +118,7 @@ export default function PaymentStatus() {
 
   const loadOrders = useCallback(
     async ({ silent = false } = {}) => {
-      const token = localStorage.getItem("token");
-      if (!token) {
+      if (!hasActiveSession()) {
         navigate("/login", {
           replace: true,
           state: { notice: "Please login to check payment status." },
@@ -133,15 +133,9 @@ export default function PaymentStatus() {
       }
 
       try {
-        const res = await fetch(`${API_URL}/api/orders/my`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
+        const { response: res, data } = await apiFetchJson(`${API_URL}/api/orders/my`);
         if (res.status === 401) {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          localStorage.removeItem("user_profile_image");
-          window.dispatchEvent(new Event("user:updated"));
+          clearAuthSession();
           navigate("/login", {
             replace: true,
             state: { notice: "Session expired. Please login again." },

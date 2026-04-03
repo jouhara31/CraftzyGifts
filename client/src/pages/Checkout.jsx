@@ -26,6 +26,7 @@ import {
   getCustomizationBaseItems,
   isBulkHamperCustomization,
 } from "../utils/hamperBuildSummary";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 
 import { API_URL } from "../apiBase";
 const isGenericHamperItem = (item) =>
@@ -187,6 +188,48 @@ export default function Checkout() {
   const supportedPaymentModes = paymentConfig.supportedModes.filter(
     (mode) => PAYMENT_MODE_LABELS[mode]
   );
+  const verifyCheckoutPayment = async ({ paymentGroupId, gatewayResponse }) => {
+    const { response, data } = await apiFetchJson(
+      `${API_URL}/api/orders/checkout-session/verify-payment`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          paymentGroupId,
+          ...(gatewayResponse || {}),
+        }),
+      }
+    );
+
+    if (response.status === 401) {
+      clearAuthSession();
+      throw new Error("Session expired. Please login again.");
+    }
+    if (!response.ok) {
+      throw new Error(data?.message || "Unable to confirm payment.");
+    }
+    return Array.isArray(data?.orders) ? data.orders : [];
+  };
+  const recordCheckoutPaymentFailure = async ({ paymentGroupId, reason, gatewayResponse }) => {
+    if (!paymentGroupId) return;
+    try {
+      await apiFetchJson(`${API_URL}/api/orders/checkout-session/payment-failed`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          paymentGroupId,
+          reason,
+          ...(gatewayResponse || {}),
+        }),
+      });
+    } catch {
+      // Failure reporting is best-effort; the retry path still works through payment status.
+    }
+  };
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -210,8 +253,7 @@ export default function Checkout() {
   };
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token || sessionClaims.isExpired) {
+    if (!hasActiveSession() || sessionClaims.isExpired) {
       navigate("/login", { replace: true });
       return;
     }
@@ -236,8 +278,7 @@ export default function Checkout() {
     let ignore = false;
 
     const loadAddressBook = async () => {
-      const token = localStorage.getItem("token");
-      if (!token || sessionClaims.isExpired) {
+      if (!hasActiveSession() || sessionClaims.isExpired) {
         if (!ignore) setAddressBookLoading(false);
         return;
       }
@@ -245,12 +286,15 @@ export default function Checkout() {
       try {
         setAddressBookLoading(true);
         setAddressBookError("");
-        const res = await fetch(`${API_URL}/api/users/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        const data = await res.json().catch(() => ({}));
+        const { response: res, data } = await apiFetchJson(`${API_URL}/api/users/me`);
+        if (res.status === 401) {
+          clearAuthSession();
+          if (!ignore) {
+            setAddressBookLoading(false);
+            navigate("/login", { replace: true });
+          }
+          return;
+        }
         if (!res.ok) {
           throw new Error(data?.message || "Unable to load your saved addresses.");
         }
@@ -427,8 +471,7 @@ export default function Checkout() {
       setError(purchaseBlockedMessage);
       return;
     }
-    const token = localStorage.getItem("token");
-    if (!token || sessionClaims.isExpired) {
+    if (!hasActiveSession() || sessionClaims.isExpired) {
       setError("Please login to place your order.");
       navigate("/login");
       return;
@@ -456,11 +499,10 @@ export default function Checkout() {
     let onlineSessionCreated = false;
     let paymentGroupId = "";
     try {
-      const res = await fetch(`${API_URL}/api/orders/checkout-session`, {
+      const { response: res, data } = await apiFetchJson(`${API_URL}/api/orders/checkout-session`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           items: items.map((item) => ({
@@ -482,8 +524,12 @@ export default function Checkout() {
           paymentMode: form.paymentMode,
         }),
       });
-
-      const data = await res.json();
+      if (res.status === 401) {
+        clearAuthSession();
+        setError("Session expired. Please login again.");
+        navigate("/login");
+        return;
+      }
       if (!res.ok) {
         throw new Error(
           buildStockErrorMessage(primaryItem, data?.details, data?.message || "Order failed")
@@ -547,22 +593,40 @@ export default function Checkout() {
           );
         },
         onSuccess: async (response) => {
-          addPendingPaymentGroup(paymentGroupId);
+          const verifiedOrders = await verifyCheckoutPayment({
+            paymentGroupId,
+            gatewayResponse: response,
+          });
+          const waitingForGateway = verifiedOrders.some(
+            (order) => String(order?.paymentStatus || "").trim() !== "paid"
+          );
+          if (waitingForGateway) {
+            addPendingPaymentGroup(paymentGroupId);
+          }
           navigate(
             buildPaymentStatusPath({
               paymentGroupId,
-              outcome: "pending",
+              outcome: waitingForGateway ? "pending" : "success",
             }),
             {
               state: {
                 paymentGroupId,
-                outcome: "pending",
+                outcome: waitingForGateway ? "pending" : "success",
                 notice:
-                  "Payment submitted. We are waiting for gateway confirmation. Orders will update automatically.",
+                  waitingForGateway
+                    ? "Payment submitted. We are waiting for gateway confirmation. Orders will update automatically."
+                    : "Payment confirmed successfully.",
               },
             }
           );
           return response;
+        },
+        onFailure: async (error) => {
+          await recordCheckoutPaymentFailure({
+            paymentGroupId,
+            reason: error?.message,
+            gatewayResponse: error?.details,
+          });
         },
       });
 
@@ -602,7 +666,7 @@ export default function Checkout() {
 
   if (
     typeof localStorage !== "undefined" &&
-    (!localStorage.getItem("token") || sessionClaims.isExpired || isPurchaseBlocked)
+    (!hasActiveSession() || sessionClaims.isExpired || isPurchaseBlocked)
   ) {
     return null;
   }

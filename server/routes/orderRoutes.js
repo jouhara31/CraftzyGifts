@@ -11,6 +11,8 @@ const {
   getSellerFinanceSummary,
   payOrder,
   paymentWebhook,
+  reportCheckoutSessionPaymentFailure,
+  reportOrderPaymentFailure,
   requestReturn,
   submitOrderReview,
   reviewReturn,
@@ -18,6 +20,8 @@ const {
   updateOrderShipment,
   updateSellerReviewModeration,
   updateOrderStatus,
+  verifyCheckoutSessionPayment,
+  verifyOrderPayment,
 } = require("../controllers/orderController");
 const { auth, requireRole, requireApprovedSeller } = require("../middleware/auth");
 const { createRateLimiter } = require("../middleware/rateLimit");
@@ -49,11 +53,33 @@ router.post(
   checkoutRateLimit,
   createCheckoutSession
 );
+router.post(
+  "/checkout-session/verify-payment",
+  auth,
+  requireRole("customer"),
+  paymentRateLimit,
+  verifyCheckoutSessionPayment
+);
+router.post(
+  "/checkout-session/payment-failed",
+  auth,
+  requireRole("customer"),
+  paymentRateLimit,
+  reportCheckoutSessionPaymentFailure
+);
 router.get("/my", auth, requireRole("customer"), getMyOrders);
 router.get("/:id/invoice", auth, getMyOrderInvoice);
 router.get("/:id/shipping-label", auth, getMyOrderShippingLabel);
 router.post("/payment/webhook", paymentWebhook);
 router.post("/:id/pay", auth, requireRole("customer"), paymentRateLimit, payOrder);
+router.post("/:id/pay/verify", auth, requireRole("customer"), paymentRateLimit, verifyOrderPayment);
+router.post(
+  "/:id/pay/failure",
+  auth,
+  requireRole("customer"),
+  paymentRateLimit,
+  reportOrderPaymentFailure
+);
 router.post("/:id/cancel", auth, requireRole("customer"), checkoutRateLimit, cancelMyOrder);
 router.post("/:id/return", auth, requireRole("customer"), checkoutRateLimit, requestReturn);
 router.patch("/:id/review", auth, requireRole("customer"), checkoutRateLimit, submitOrderReview);

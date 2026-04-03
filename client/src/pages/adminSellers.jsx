@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
 
 import { API_URL } from "../apiBase";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 
 export default function AdminSellers() {
   const [sellers, setSellers] = useState([]);
@@ -12,11 +13,14 @@ export default function AdminSellers() {
   const [notice, setNotice] = useState("");
   const [actingId, setActingId] = useState("");
   const navigate = useNavigate();
+  const clearAndRedirect = useCallback(() => {
+    clearAuthSession();
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   const loadSellers = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -25,11 +29,14 @@ export default function AdminSellers() {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.set("status", statusFilter);
 
-      const res = await fetch(`${API_URL}/api/admin/sellers?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
+      const { response, data } = await apiFetchJson(
+        `${API_URL}/api/admin/sellers?${params.toString()}`
+      );
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setError(data.message || "Unable to load sellers.");
         return;
       }
@@ -37,16 +44,15 @@ export default function AdminSellers() {
     } catch {
       setError("Unable to load sellers.");
     }
-  }, [navigate, statusFilter]);
+  }, [clearAndRedirect, statusFilter]);
 
   useEffect(() => {
     loadSellers();
   }, [loadSellers]);
 
   const updateSellerStatus = async (sellerId, status) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -54,16 +60,18 @@ export default function AdminSellers() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/admin/sellers/${sellerId}/status`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/sellers/${sellerId}/status`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ status }),
       });
-      const data = await res.json();
-      if (!res.ok) {
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setError(data.message || "Unable to update seller status.");
         return;
       }

@@ -10,6 +10,7 @@ import {
 import { prefetchProductDetail } from "../utils/productDetailCache";
 import { fetchJsonCached } from "../utils/jsonCache";
 import { getCategoryImage } from "../utils/productMedia";
+import { hasActiveSession } from "../utils/authSession";
 
 import { API_URL } from "../apiBase";
 
@@ -24,7 +25,7 @@ export default function Home() {
   const location = useLocation();
 
   useEffect(() => {
-    const checkAuth = () => setIsLoggedIn(Boolean(localStorage.getItem("token")));
+    const checkAuth = () => setIsLoggedIn(hasActiveSession());
     checkAuth();
     window.addEventListener("user:updated", checkAuth);
     return () => window.removeEventListener("user:updated", checkAuth);
@@ -325,9 +326,7 @@ export default function Home() {
               const detailLink = item._id ? `/products/${item._id}` : "/products";
               const prefetchCurrentProduct = () => {
                 if (!item?._id) return;
-                prefetchProductDetail(String(item._id), {
-                  token: localStorage.getItem("token"),
-                });
+                prefetchProductDetail(String(item._id));
               };
               return (
                 <article key={item._id || item.name} className="product-card">

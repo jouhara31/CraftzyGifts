@@ -60,6 +60,7 @@ export const openRazorpayCheckout = async ({
   notes,
   onSuccess,
   onDismiss,
+  onFailure,
 }) => {
   const Razorpay = await loadRazorpayScript();
   if (!Razorpay) {
@@ -118,7 +119,17 @@ export const openRazorpayCheckout = async ({
       const message = String(
         errorDetails?.description || errorDetails?.reason || "Payment failed. Please try again."
       ).trim();
-      rejectOnce(new Error(message));
+      const paymentError = new Error(message);
+      paymentError.details = {
+        ...errorDetails,
+        razorpay_order_id: String(
+          errorDetails?.metadata?.order_id || checkout?.orderId || ""
+        ).trim(),
+        razorpay_payment_id: String(errorDetails?.metadata?.payment_id || "").trim(),
+      };
+      Promise.resolve(onFailure?.(paymentError, event))
+        .catch(() => null)
+        .finally(() => rejectOnce(paymentError));
     });
 
     instance.open();

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_URL } from "../apiBase";
-import { clearAuthSession } from "../utils/authSession";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 import useHashScroll from "../utils/useHashScroll";
 
 const asText = (value) => String(value ?? "").trim();
@@ -129,8 +129,7 @@ export default function SellerShipping() {
   }, []);
 
   const loadPage = useCallback(async () => {
-    const token = asText(localStorage.getItem("token"));
-    if (!token) {
+    if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
@@ -138,19 +137,18 @@ export default function SellerShipping() {
     setLoading(true);
     setError("");
     try {
-      const headers = { Authorization: `Bearer ${token}` };
-      const [profileRes, ordersRes] = await Promise.all([
-        fetch(`${API_URL}/api/users/me`, { headers }),
-        fetch(`${API_URL}/api/orders/seller`, { headers }),
+      const [profileResult, ordersResult] = await Promise.all([
+        apiFetchJson(`${API_URL}/api/users/me`),
+        apiFetchJson(`${API_URL}/api/orders/seller`),
       ]);
+      const profileRes = profileResult.response;
+      const ordersRes = ordersResult.response;
+      const profileData = profileResult.data;
+      const ordersData = ordersResult.data;
       if (profileRes.status === 401 || ordersRes.status === 401) {
         clearAndRedirect();
         return;
       }
-      const [profileData, ordersData] = await Promise.all([
-        profileRes.json().catch(() => ({})),
-        ordersRes.json().catch(() => []),
-      ]);
       if (!profileRes.ok) {
         setError(profileData?.message || "Unable to load shipping settings.");
         return;
@@ -219,8 +217,7 @@ export default function SellerShipping() {
 
   const handleSettingsSave = async (event) => {
     event.preventDefault();
-    const token = asText(localStorage.getItem("token"));
-    if (!token) {
+    if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
@@ -229,11 +226,10 @@ export default function SellerShipping() {
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/api/users/me`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           pickupAddress,
@@ -251,7 +247,6 @@ export default function SellerShipping() {
           },
         }),
       });
-      const data = await response.json().catch(() => ({}));
       if (response.status === 401) {
         clearAndRedirect();
         return;
@@ -287,8 +282,7 @@ export default function SellerShipping() {
   };
 
   const handleShipmentSave = async (orderId) => {
-    const token = asText(localStorage.getItem("token"));
-    if (!token) {
+    if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
@@ -298,11 +292,10 @@ export default function SellerShipping() {
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/api/orders/${orderId}/shipment`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/orders/${orderId}/shipment`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           courierName: asText(draft.courierName),
@@ -313,7 +306,6 @@ export default function SellerShipping() {
           packagingNotes: asText(draft.packagingNotes),
         }),
       });
-      const data = await response.json().catch(() => ({}));
       if (response.status === 401) {
         clearAndRedirect();
         return;

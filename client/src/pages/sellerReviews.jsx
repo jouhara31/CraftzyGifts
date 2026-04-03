@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_URL } from "../apiBase";
-import { clearAuthSession } from "../utils/authSession";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 
 const asText = (value) => String(value ?? "").trim();
 
@@ -38,8 +38,7 @@ export default function SellerReviews() {
   }, [navigate]);
 
   const loadReviews = useCallback(async () => {
-    const token = asText(localStorage.getItem("token"));
-    if (!token) {
+    if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
@@ -47,10 +46,7 @@ export default function SellerReviews() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API_URL}/api/orders/seller`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json().catch(() => []);
+      const { response, data } = await apiFetchJson(`${API_URL}/api/orders/seller`);
       if (response.status === 401) {
         clearAndRedirect();
         return;
@@ -125,8 +121,7 @@ export default function SellerReviews() {
   };
 
   const saveReview = async (orderId) => {
-    const token = asText(localStorage.getItem("token"));
-    if (!token) {
+    if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
@@ -136,11 +131,10 @@ export default function SellerReviews() {
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/api/orders/${orderId}/review-moderation`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/orders/${orderId}/review-moderation`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           sellerReply: asText(draft.sellerReply),
@@ -148,7 +142,6 @@ export default function SellerReviews() {
           flaggedForAdmin: Boolean(draft.flaggedForAdmin),
         }),
       });
-      const data = await response.json().catch(() => ({}));
       if (response.status === 401) {
         clearAndRedirect();
         return;

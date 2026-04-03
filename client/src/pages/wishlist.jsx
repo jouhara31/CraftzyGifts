@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import { addToCart } from "../utils/cart";
+import { hasActiveSession } from "../utils/authSession";
 import { getProductImage } from "../utils/productMedia";
 import { getWishlist, toggleWishlist } from "../utils/wishlist";
 
@@ -67,8 +68,7 @@ export default function Wishlist() {
   };
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (!hasActiveSession()) {
       navigate("/login");
     }
   }, [navigate]);

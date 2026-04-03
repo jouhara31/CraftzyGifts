@@ -1,4 +1,5 @@
 import { API_URL } from "../apiBase";
+import { apiFetchJson, hasActiveSession } from "./authSession";
 
 const createApiError = (message, status = 500, data = null) => {
   const error = new Error(message || "Request failed.");
@@ -16,25 +17,21 @@ const readJson = async (response) => {
 };
 
 const request = async (path, { method = "GET", body } = {}) => {
-  const token = String(localStorage.getItem("token") || "").trim();
-  if (!token) {
+  if (!hasActiveSession()) {
     throw createApiError("Login required.", 401);
   }
 
-  const headers = {
-    Authorization: `Bearer ${token}`,
-  };
+  const headers = {};
 
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
+  const { response, data } = await apiFetchJson(`${API_URL}${path}`, {
     method,
     headers,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  const data = await readJson(response);
 
   if (!response.ok) {
     throw createApiError(data?.message || "Unable to complete request.", response.status, data);

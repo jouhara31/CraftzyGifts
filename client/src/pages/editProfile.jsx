@@ -3,7 +3,12 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 
 import { API_URL } from "../apiBase";
-const USER_PROFILE_IMAGE_KEY = "user_profile_image";
+import {
+  apiFetchJson,
+  clearAuthSession,
+  hasActiveSession,
+  persistStoredUser,
+} from "../utils/authSession";
 
 const EMPTY_ADDRESS = {
   label: "",
@@ -11,48 +16,6 @@ const EMPTY_ADDRESS = {
   city: "",
   state: "",
   pincode: "",
-};
-
-const readApiPayload = async (response) => {
-  const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    return await response.json();
-  }
-
-  const text = await response.text();
-  if (!text) return {};
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { message: text };
-  }
-};
-
-const persistUserToStorage = (user) => {
-  if (!user || typeof user !== "object") return;
-  const profileImage = typeof user.profileImage === "string" ? user.profileImage : "";
-  try {
-    localStorage.setItem("user", JSON.stringify(user));
-    if (profileImage) {
-      localStorage.setItem(USER_PROFILE_IMAGE_KEY, profileImage);
-    } else {
-      localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-    }
-  } catch {
-    try {
-      const { profileImage: _profileImage, ...rest } = user;
-      localStorage.setItem("user", JSON.stringify(rest));
-      if (profileImage) {
-        localStorage.setItem(USER_PROFILE_IMAGE_KEY, profileImage);
-      } else {
-        localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-      }
-    } catch {
-      // Ignore storage quota errors to avoid crashes.
-    }
-  }
-  window.dispatchEvent(new Event("user:updated"));
 };
 
 const normalizeAddress = (address) => ({
@@ -106,30 +69,26 @@ export default function EditProfile() {
     () => (Array.isArray(savedAddresses) ? savedAddresses.length : 0),
     [savedAddresses]
   );
+  const clearAndRedirect = () => {
+    clearAuthSession();
+    navigate("/login");
+  };
 
   useEffect(() => {
     const load = async () => {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        navigate("/login");
+      if (!hasActiveSession()) {
+        clearAndRedirect();
         return;
       }
 
       try {
-        const res = await fetch(`${API_URL}/api/users/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await readApiPayload(res);
+        const { response: res, data } = await apiFetchJson(`${API_URL}/api/users/me`);
         if (!res.ok) {
           if (res.status === 401) {
-            localStorage.removeItem("token");
-            localStorage.removeItem("user");
-            localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-            window.dispatchEvent(new Event("user:updated"));
-            navigate("/login");
+            clearAndRedirect();
             return;
           }
-          setError(data.message || "Unable to load profile.");
+          setError(data?.message || "Unable to load profile.");
           return;
         }
 
@@ -250,9 +209,8 @@ export default function EditProfile() {
   const saveProfile = async () => {
     setNotice("");
     setError("");
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -277,25 +235,19 @@ export default function EditProfile() {
         })),
       };
 
-      const res = await fetch(`${API_URL}/api/users/me`, {
+      const { response: res, data } = await apiFetchJson(`${API_URL}/api/users/me`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });
-      const data = await readApiPayload(res);
       if (!res.ok) {
         if (res.status === 401) {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-          window.dispatchEvent(new Event("user:updated"));
-          navigate("/login");
+          clearAndRedirect();
           return;
         }
-        setError(data.message || "Unable to save profile.");
+        setError(data?.message || "Unable to save profile.");
         return;
       }
       setNotice("Profile updated.");
@@ -326,7 +278,7 @@ export default function EditProfile() {
           : []
       );
       setEmail(data.email || "");
-      persistUserToStorage({
+      persistStoredUser({
         id: data.id,
         name: data.name,
         email: data.email,
@@ -348,9 +300,8 @@ export default function EditProfile() {
   const changePassword = async () => {
     setPasswordNotice("");
     setPasswordError("");
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -369,31 +320,25 @@ export default function EditProfile() {
 
     setPasswordSaving(true);
     try {
-      const res = await fetch(`${API_URL}/api/users/me/password`, {
+      const { response: res, data } = await apiFetchJson(`${API_URL}/api/users/me/password`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           currentPassword: passwordForm.currentPassword,
           newPassword: passwordForm.newPassword,
         }),
       });
-      const data = await readApiPayload(res);
       if (!res.ok) {
         if (res.status === 401) {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-          window.dispatchEvent(new Event("user:updated"));
-          navigate("/login");
+          clearAndRedirect();
           return;
         }
-        setPasswordError(data.message || "Unable to update password.");
+        setPasswordError(data?.message || "Unable to update password.");
         return;
       }
-      setPasswordNotice(data.message || "Password updated.");
+      setPasswordNotice(data?.message || "Password updated.");
       setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
     } catch {
       setPasswordError("Unable to update password.");

@@ -8,14 +8,13 @@ import {
 
 export default function SellerAccountRoute({ children }) {
   const location = useLocation();
-  const token = localStorage.getItem("token");
 
-  if (!token || isTokenExpired(token)) {
+  if (isTokenExpired()) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  const role = readActiveUserRole(token);
-  const sellerStatus = readActiveSellerStatus(token);
+  const role = readActiveUserRole();
+  const sellerStatus = readActiveSellerStatus();
 
   if (role !== "seller") {
     return <Navigate to={fallbackPathForRole(role, sellerStatus)} replace />;

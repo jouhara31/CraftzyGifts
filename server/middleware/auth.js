@@ -1,19 +1,21 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const { ACCESS_COOKIE_NAME, readCookie } = require("../utils/sessionCookies");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   throw new Error("JWT_SECRET is required");
 }
 
-const readAuthToken = (req, { allowQuery = false } = {}) => {
-  const header = req.headers.authorization || "";
-  if (header.startsWith("Bearer ")) {
-    return header.slice(7);
+const readAuthToken = (req) => {
+  const cookieToken = readCookie(req, ACCESS_COOKIE_NAME);
+  if (cookieToken) {
+    return cookieToken;
   }
 
-  if (allowQuery) {
-    return String(req.query?.accessToken || "").trim() || null;
+  const header = String(req.headers.authorization || "").trim();
+  if (header.startsWith("Bearer ")) {
+    return String(header.slice(7) || "").trim() || null;
   }
 
   return null;
@@ -54,7 +56,7 @@ const optionalAuth = (req, _res, next) => {
 };
 
 const authStream = (req, res, next) => {
-  const token = readAuthToken(req, { allowQuery: true });
+  const token = readAuthToken(req);
 
   if (!token) {
     return res.status(401).json({ message: "Unauthorized" });

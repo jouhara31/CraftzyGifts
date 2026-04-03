@@ -3,16 +3,23 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import Header from "../components/Header";
 import logoPng from "../assets/logo.png";
 import { addToCart } from "../utils/cart";
+import { optimizeImageFile } from "../utils/imageUpload";
 import { getProductImage } from "../utils/productMedia";
 import { getWishlist, toggleWishlist } from "../utils/wishlist";
 
 import { API_URL } from "../apiBase";
-import { clearAuthSession, logoutSession } from "../utils/authSession";
+import {
+  apiFetchJson,
+  clearAuthSession,
+  hasActiveSession,
+  logoutSession,
+  persistStoredUser,
+  readStoredUser,
+} from "../utils/authSession";
 import {
   buildSellerSidebarSections,
   isWorkspacePathActive,
 } from "../utils/sellerWorkspace";
-const USER_PROFILE_IMAGE_KEY = "user_profile_image";
 
 const ROLE_LABEL = {
   customer: "Customer",
@@ -84,159 +91,10 @@ const normalizeCustomerTab = (value) => {
 const buildCustomerTabPath = (tab) =>
   tab === CUSTOMER_ACCOUNT_DEFAULT_TAB ? "/profile" : `/profile?tab=${tab}`;
 
-
-const loadImageFromSource = (source) =>
-  new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Image load failed"));
-    image.src = source;
-  });
-
-const readFileAsDataUrl = (file) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-    reader.onerror = () => reject(new Error("File read failed"));
-    reader.readAsDataURL(file);
-  });
-
-const optimizeProfileImage = async (file) => {
-  const objectUrl = URL.createObjectURL(file);
-  try {
-    const image = await loadImageFromSource(objectUrl);
-    const sourceWidth = image.naturalWidth || image.width || 1;
-    const sourceHeight = image.naturalHeight || image.height || 1;
-    const maxBytes = 360 * 1024;
-    const dimensions = [1280, 1024, 800, 640];
-    const qualities = [0.88, 0.8, 0.72, 0.64, 0.56];
-    let bestDataUrl = "";
-    let bestBytes = Number.POSITIVE_INFINITY;
-
-    for (const maxDimension of dimensions) {
-      const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
-      const width = Math.max(1, Math.round(sourceWidth * scale));
-      const height = Math.max(1, Math.round(sourceHeight * scale));
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) continue;
-      ctx.drawImage(image, 0, 0, width, height);
-
-      for (const quality of qualities) {
-        const candidate = canvas.toDataURL("image/jpeg", quality);
-        const candidateBytes = dataUrlByteLength(candidate);
-        if (candidateBytes < bestBytes) {
-          bestBytes = candidateBytes;
-          bestDataUrl = candidate;
-        }
-        if (candidateBytes <= maxBytes) {
-          return candidate;
-        }
-      }
-    }
-
-    if (bestDataUrl) return bestDataUrl;
-    return await readFileAsDataUrl(file);
-  } catch {
-    return await readFileAsDataUrl(file);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-};
-
-const optimizeDataUrlForUpload = async (dataUrl) => {
-  try {
-    const image = await loadImageFromSource(dataUrl);
-    const sourceWidth = image.naturalWidth || image.width || 1;
-    const sourceHeight = image.naturalHeight || image.height || 1;
-    const maxBytes = 360 * 1024;
-    const dimensions = [1280, 1024, 800, 640];
-    const qualities = [0.88, 0.8, 0.72, 0.64, 0.56];
-    let bestDataUrl = dataUrl;
-    let bestBytes = dataUrlByteLength(dataUrl);
-
-    for (const maxDimension of dimensions) {
-      const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
-      const width = Math.max(1, Math.round(sourceWidth * scale));
-      const height = Math.max(1, Math.round(sourceHeight * scale));
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) continue;
-      ctx.drawImage(image, 0, 0, width, height);
-
-      for (const quality of qualities) {
-        const candidate = canvas.toDataURL("image/jpeg", quality);
-        const candidateBytes = dataUrlByteLength(candidate);
-        if (candidateBytes < bestBytes) {
-          bestBytes = candidateBytes;
-          bestDataUrl = candidate;
-        }
-        if (candidateBytes <= maxBytes) {
-          return candidate;
-        }
-      }
-    }
-
-    return bestDataUrl;
-  } catch {
-    return dataUrl;
-  }
-};
-
-const dataUrlByteLength = (dataUrl = "")  => {
-  const parts = String(dataUrl || "").split(",");
-  if (parts.length < 2) return 0;
-  const base64 = parts[1];
-  const padding = (base64.match(/=+$/) || [""])[0].length;
-  return Math.floor((base64.length * 3) / 4) - padding;
-};
-
-const readApiPayload = async (response) => {
-  const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    return await response.json();
-  }
-
-  const text = await response.text();
-  if (!text) return {};
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { message: text };
-  }
-};
-
-const persistUserToStorage = (user) => {
-  if (!user || typeof user !== "object") return;
-  const profileImage = typeof user.profileImage === "string" ? user.profileImage : "";
-  try {
-    localStorage.setItem("user", JSON.stringify(user));
-    if (profileImage) {
-      localStorage.setItem(USER_PROFILE_IMAGE_KEY, profileImage);
-    } else {
-      localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-    }
-  } catch {
-    try {
-      const { profileImage: _profileImage, ...rest } = user;
-      localStorage.setItem("user", JSON.stringify(rest));
-      if (profileImage) {
-        localStorage.setItem(USER_PROFILE_IMAGE_KEY, profileImage);
-      } else {
-        localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-      }
-    } catch {
-      // Ignore storage quota errors to avoid crashes.
-    }
-  }
-  window.dispatchEvent(new Event("user:updated"));
+const createUnauthorizedError = () => {
+  const error = new Error("Session expired. Please login again.");
+  error.status = 401;
+  return error;
 };
 
 const buildSidebarSections = (role, { sellerStorePath = "/seller/dashboard" } = {}) => {
@@ -456,18 +314,20 @@ const ProfileMenuIcon = ({ name }) => {
   );
 };
 
-const fetchRoleOverview = async (role, token) => {
-  const headers = { Authorization: `Bearer ${token}` };
-
+const fetchRoleOverview = async (role) => {
   if (role === "seller") {
-    const [productRes, orderRes] = await Promise.all([
-      fetch(`${API_URL}/api/products/seller/me`, { headers }),
-      fetch(`${API_URL}/api/orders/seller`, { headers }),
+    const [productResult, orderResult] = await Promise.all([
+      apiFetchJson(`${API_URL}/api/products/seller/me`),
+      apiFetchJson(`${API_URL}/api/orders/seller`),
     ]);
-    const [productsData, ordersData] = await Promise.all([
-      productRes.json(),
-      orderRes.json(),
-    ]);
+    const productRes = productResult.response;
+    const orderRes = orderResult.response;
+    const productsData = productResult.data;
+    const ordersData = orderResult.data;
+
+    if ([productRes, orderRes].some((response) => response.status === 401)) {
+      throw createUnauthorizedError();
+    }
 
     if (!productRes.ok) throw new Error(productsData.message || "Unable to load seller products.");
     if (!orderRes.ok) throw new Error(ordersData.message || "Unable to load seller orders.");
@@ -497,8 +357,12 @@ const fetchRoleOverview = async (role, token) => {
   }
 
   if (role === "admin") {
-    const sellersRes = await fetch(`${API_URL}/api/admin/sellers`, { headers });
-    const sellersData = await sellersRes.json();
+    const { response: sellersRes, data: sellersData } = await apiFetchJson(
+      `${API_URL}/api/admin/sellers`
+    );
+    if (sellersRes.status === 401) {
+      throw createUnauthorizedError();
+    }
     if (!sellersRes.ok) {
       throw new Error(sellersData.message || "Unable to load seller accounts.");
     }
@@ -523,8 +387,10 @@ const fetchRoleOverview = async (role, token) => {
     };
   }
 
-  const ordersRes = await fetch(`${API_URL}/api/orders/my`, { headers });
-  const ordersData = await ordersRes.json();
+  const { response: ordersRes, data: ordersData } = await apiFetchJson(`${API_URL}/api/orders/my`);
+  if (ordersRes.status === 401) {
+    throw createUnauthorizedError();
+  }
   if (!ordersRes.ok) throw new Error(ordersData.message || "Unable to load your orders.");
 
   const orders = Array.isArray(ordersData) ? ordersData : [];
@@ -604,24 +470,20 @@ export default function Profile() {
   const showSidebarAvatarImage = Boolean(profile?.profileImage);
   const clearSessionAndRedirect = useCallback((path = "/login") => {
     clearAuthSession();
-    navigate(path);
+    navigate(path, { replace: path === "/login" });
   }, [navigate]);
 
   useEffect(() => {
     const load = async () => {
-      const token = localStorage.getItem("token");
-      if (!token) {
+      if (!hasActiveSession()) {
         clearSessionAndRedirect("/login");
         return;
       }
 
       try {
-        const res = await fetch(`${API_URL}/api/users/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await readApiPayload(res);
-        if (!res.ok) {
-          if (res.status === 401) {
+        const { response, data } = await apiFetchJson(`${API_URL}/api/users/me`);
+        if (!response.ok) {
+          if (response.status === 401) {
             clearSessionAndRedirect("/login");
             return;
           }
@@ -639,12 +501,12 @@ export default function Profile() {
           profileImage: data.profileImage,
         };
         if (data.role === "admin") {
-          persistUserToStorage(nextUserSnapshot);
+          persistStoredUser(nextUserSnapshot);
           navigate("/admin/account", { replace: true });
           return;
         }
         if (data.role === "seller") {
-          persistUserToStorage(nextUserSnapshot);
+          persistStoredUser(nextUserSnapshot);
           const sellerProfileId = String(data.id || data._id || "").trim();
           if (sellerProfileId) {
             navigate(`/seller/store/${sellerProfileId}`, { replace: true });
@@ -657,14 +519,18 @@ export default function Profile() {
           setOverview({ cards: [], rowsTitle: "", rows: [] });
         } else {
           try {
-            const roleOverview = await fetchRoleOverview(data.role, token);
+            const roleOverview = await fetchRoleOverview(data.role);
             setOverview(roleOverview);
           } catch (overviewLoadError) {
+            if (overviewLoadError?.status === 401) {
+              clearSessionAndRedirect("/login");
+              return;
+            }
             setOverview({ cards: [], rowsTitle: "", rows: [] });
             setOverviewError(overviewLoadError.message || "Unable to load role summary.");
           }
         }
-        persistUserToStorage(nextUserSnapshot);
+        persistStoredUser(nextUserSnapshot);
       } catch {
         setError("Unable to load profile.");
       }
@@ -679,22 +545,21 @@ export default function Profile() {
       return;
     }
 
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!hasActiveSession()) {
+      clearSessionAndRedirect("/login");
+      return;
+    }
 
     let cancelled = false;
     const loadCustomerOrders = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/orders/my`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await readApiPayload(res);
+        const { response, data } = await apiFetchJson(`${API_URL}/api/orders/my`);
         if (cancelled) return;
-        if (res.status === 401) {
+        if (response.status === 401) {
           clearSessionAndRedirect("/login");
           return;
         }
-        if (!res.ok) {
+        if (!response.ok) {
           setCustomerOrders([]);
           setCustomerOrdersError(data.message || "Unable to load orders.");
           return;
@@ -829,11 +694,17 @@ export default function Profile() {
 
     setError("");
     try {
-      const optimizedImage = await optimizeProfileImage(file);
-      setProfileImageDraft(optimizedImage);
+      const uploadedImage = await optimizeImageFile(file, {
+        maxWidth: 1280,
+        maxHeight: 1280,
+        quality: 0.8,
+        uploadFolder: "profiles",
+        uploadPrefix: "avatar",
+      });
+      setProfileImageDraft(uploadedImage);
       setProfileImageDraftName(file.name);
-    } catch {
-      setError("Unable to process selected image.");
+    } catch (uploadError) {
+      setError(uploadError?.message || "Unable to process selected image.");
     } finally {
       inputElement.value = "";
     }
@@ -852,145 +723,64 @@ export default function Profile() {
     imageName = profileImageDraftName,
     closeAfterSave = true
   ) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearSessionAndRedirect("/login");
       return;
     }
 
     setImageUpdating(true);
     setError("");
     setNotice("");
-    const previousProfileImage = String(profile?.profileImage || "");
-    let optimisticApplied = false;
     try {
-      let nextImageValue = typeof imageValue === "string" ? imageValue : "";
-      if (nextImageValue.startsWith("data:image/")) {
-        nextImageValue = await optimizeDataUrlForUpload(nextImageValue);
-      }
+      const nextImageValue = typeof imageValue === "string" ? imageValue.trim() : "";
 
-      if (nextImageValue) {
-        optimisticApplied = true;
-        setProfile((prev) => ({
-          ...(prev || {}),
-          profileImage: nextImageValue,
-        }));
-      }
-
-      const res = await fetch(`${API_URL}/api/users/me`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           profileImage: nextImageValue,
         }),
       });
-      const data = await readApiPayload(res);
-      if (!res.ok) {
-        if (optimisticApplied) {
-          setProfile((prev) => ({
-            ...(prev || {}),
-            profileImage: previousProfileImage,
-          }));
-        }
-        if (res.status === 401) {
+      if (!response.ok) {
+        if (response.status === 401) {
           clearSessionAndRedirect("/login");
           return;
         }
         const message = data?.message || "Unable to update profile image.";
-        setError(`${message} (HTTP ${res.status})`);
+        setError(`${message} (HTTP ${response.status})`);
         return;
       }
 
-      let existingUser = {};
-      try {
-        existingUser = JSON.parse(localStorage.getItem("user") || "{}");
-      } catch {
-        existingUser = {};
-      }
+      const existingUser = readStoredUser() || {};
       const serverProfileImage = typeof data?.profileImage === "string" ? data.profileImage : "";
-      const resolvedProfile = {
+      const finalProfile = {
         ...(profile || {}),
         ...(data && typeof data === "object" ? data : {}),
-        profileImage: serverProfileImage || (nextImageValue ? nextImageValue : ""),
+        profileImage: serverProfileImage || nextImageValue,
       };
-      setProfile(resolvedProfile);
-
-      const rollbackToPreviousImage = () => {
-        setProfile((prev) => ({
-          ...(prev || {}),
-          profileImage: previousProfileImage,
-        }));
-        persistUserToStorage({
-          ...existingUser,
-          profileImage: previousProfileImage,
-        });
-      };
-
-      try {
-        const verifyRes = await fetch(`${API_URL}/api/users/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (verifyRes.status === 401) {
-          clearSessionAndRedirect("/login");
-          return;
-        }
-        if (!verifyRes.ok) {
-          rollbackToPreviousImage();
-          setError("Unable to confirm profile image save. Please try again.");
-          return;
-        }
-        const verifyData = await readApiPayload(verifyRes);
-        const verifyProfileImage =
-          typeof verifyData?.profileImage === "string" ? verifyData.profileImage : "";
-        if (nextImageValue && !verifyProfileImage) {
-          rollbackToPreviousImage();
-          setError("Unable to persist profile image on server. Please try again.");
-          return;
-        }
-        if (!nextImageValue && verifyProfileImage) {
-          rollbackToPreviousImage();
-          setError("Unable to remove profile image on server. Please try again.");
-          return;
-        }
-        const finalProfile = {
-          ...resolvedProfile,
-          ...(verifyData && typeof verifyData === "object" ? verifyData : {}),
-          profileImage: verifyProfileImage,
-        };
-        setProfile(finalProfile);
-        persistUserToStorage({
-          ...existingUser,
-          id: finalProfile.id,
-          name: finalProfile.name,
-          email: finalProfile.email,
-          role: finalProfile.role,
-          sellerStatus: finalProfile.sellerStatus,
-          storeName: finalProfile.storeName,
-          phone: finalProfile.phone,
-          supportEmail: finalProfile.supportEmail,
-          profileImage: finalProfile.profileImage,
-        });
-        if (imageName) {
-          setProfileImageDraftName(imageName);
-        }
-        setNotice("Profile picture updated.");
-        if (closeAfterSave) {
-          closeProfileImageModal();
-        }
-      } catch {
-        rollbackToPreviousImage();
-        setError("Unable to confirm profile image save. Please try again.");
+      setProfile(finalProfile);
+      persistStoredUser({
+        ...existingUser,
+        id: finalProfile.id,
+        name: finalProfile.name,
+        email: finalProfile.email,
+        role: finalProfile.role,
+        sellerStatus: finalProfile.sellerStatus,
+        storeName: finalProfile.storeName,
+        phone: finalProfile.phone,
+        supportEmail: finalProfile.supportEmail,
+        profileImage: finalProfile.profileImage,
+      });
+      if (imageName) {
+        setProfileImageDraftName(imageName);
+      }
+      setNotice("Profile picture updated.");
+      if (closeAfterSave) {
+        closeProfileImageModal();
       }
     } catch (updateError) {
-      if (optimisticApplied) {
-        setProfile((prev) => ({
-          ...(prev || {}),
-          profileImage: previousProfileImage,
-        }));
-      }
       const detail =
         typeof updateError?.message === "string" && updateError.message.trim()
           ? ` ${updateError.message}`

@@ -14,8 +14,9 @@ const parseImageSource = (value, fallback = "") => {
   const text = String(value || "").trim();
   if (!text) return "";
   const isHttp = /^https?:\/\//i.test(text);
+  const isRelativeUpload = text.startsWith("/");
   const isDataImage = /^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(text);
-  if (!isHttp && !isDataImage) return fallback;
+  if (!isHttp && !isRelativeUpload && !isDataImage) return fallback;
   return text;
 };
 

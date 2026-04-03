@@ -1,31 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import logoPng from "../assets/logo.png";
-import { logoutSession } from "../utils/authSession";
+import { logoutSession, readStoredUser, readStoredUserId } from "../utils/authSession";
 import { readStoredSessionClaims } from "../utils/authRoute";
 import { buildSellerWorkspaceSections, isWorkspacePathActive } from "../utils/sellerWorkspace";
 import SellerNotificationBell from "./SellerNotificationBell";
 
 const readStoredSellerId = () => {
-  try {
-    const stored = JSON.parse(localStorage.getItem("user") || "{}");
-    const sellerId = String(stored?.id || stored?._id || "").trim();
-    if (sellerId) return sellerId;
-  } catch {
-    // Ignore malformed local storage.
-  }
-
-  try {
-    const token = String(localStorage.getItem("token") || "").trim();
-    const payload = token.split(".")?.[1];
-    if (!payload) return "";
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-    const decoded = JSON.parse(atob(padded));
-    return String(decoded?.id || "").trim();
-  } catch {
-    return "";
-  }
+  const sellerId = readStoredUserId();
+  if (sellerId) return sellerId;
+  const stored = readStoredUser() || {};
+  return String(stored?.id || stored?._id || "").trim();
 };
 
 const QUICK_ACCESS_ITEMS = (sellerStorePath) => [
@@ -365,13 +350,14 @@ export default function SellerSidebarLayout() {
         </Link>
         <div className="admin-classic-actions seller-classic-actions">
           <SellerNotificationBell />
-          <Link className="admin-text-action admin-view-site-desktop" to={sellerStorePath}>
+          <Link className="admin-text-action" to={sellerStorePath}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4.5 8.2h15v11.3h-15z" />
               <path d="M7 8.2V5.7a1.7 1.7 0 0 1 1.7-1.7h6.6A1.7 1.7 0 0 1 17 5.7v2.5" />
               <path d="M8.5 12.5h7" />
             </svg>
-            <span className="admin-view-site-label admin-view-site-desktop">My Store</span>
+            <span className="admin-view-site-label admin-view-site-desktop">Visit store</span>
+            <span className="admin-view-site-label admin-view-site-mobile">Store</span>
           </Link>
           <Link className="admin-text-action" to="/">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -379,8 +365,8 @@ export default function SellerSidebarLayout() {
               <path d="M10 14 19 5" />
               <path d="M19 13v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4" />
             </svg>
-            <span className="admin-view-site-label admin-view-site-desktop">Home</span>
-            <span className="admin-view-site-label admin-view-site-mobile">Home</span>
+            <span className="admin-view-site-label admin-view-site-desktop">Visit site</span>
+            <span className="admin-view-site-label admin-view-site-mobile">Site</span>
           </Link>
           <button
             className="admin-text-action admin-view-site-desktop"

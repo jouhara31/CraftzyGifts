@@ -5,12 +5,23 @@ const REFRESH_TOKEN_KEY = "refresh_token";
 const USER_KEY = "user";
 const USER_PROFILE_IMAGE_KEY = "user_profile_image";
 const AUTH_RETRY_HEADER = "X-Auth-Retry";
+const SESSION_MARKER = "cookie-session";
+const REFRESH_SESSION_MARKER = "refresh-cookie-session";
 
 let refreshPromise = null;
 let nativeFetchRef = null;
 let fetchInterceptorInstalled = false;
 
 const hasWindow = () => typeof window !== "undefined";
+
+export const readStoredProfileImage = () => {
+  if (!hasWindow()) return "";
+  try {
+    return localStorage.getItem(USER_PROFILE_IMAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+};
 
 const getNativeFetch = () => {
   if (nativeFetchRef) return nativeFetchRef;
@@ -27,20 +38,101 @@ const resolveRequestUrl = (input) => {
   return String(input?.url || "");
 };
 
-const isManagedApiRequest = (url) =>
-  Boolean(url) &&
-  url.startsWith(`${API_URL}/api`) &&
-  !/\/api\/auth\/(login|register|refresh|logout)\b/i.test(url);
+const isApiRequest = (url) => Boolean(url) && url.startsWith(`${API_URL}/api`);
 
-const readStoredUser = () => {
+const isRetriableApiRequest = (url) =>
+  isApiRequest(url) &&
+  !/\/api\/auth\/(login|register|refresh|logout|session)\b/i.test(url);
+
+export const readStoredUser = () => {
+  if (!hasWindow()) return null;
   try {
     const raw = localStorage.getItem(USER_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!parsed.profileImage) {
+      const fallbackImage = readStoredProfileImage();
+      if (fallbackImage) {
+        parsed.profileImage = fallbackImage;
+      }
+    }
+    return parsed;
   } catch {
     return null;
   }
+};
+
+export const persistStoredUser = (nextUser, { dispatch = true } = {}) => {
+  if (!hasWindow() || !nextUser || typeof nextUser !== "object") return;
+
+  const profileImage = typeof nextUser.profileImage === "string" ? nextUser.profileImage : "";
+
+  try {
+    localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+    if (profileImage) {
+      localStorage.setItem(USER_PROFILE_IMAGE_KEY, profileImage);
+    } else {
+      localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
+    }
+  } catch {
+    try {
+      const { profileImage: _profileImage, ...rest } = nextUser;
+      localStorage.setItem(USER_KEY, JSON.stringify(rest));
+      if (profileImage) {
+        localStorage.setItem(USER_PROFILE_IMAGE_KEY, profileImage);
+      } else {
+        localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
+      }
+    } catch {
+      return;
+    }
+  }
+
+  if (dispatch) {
+    window.dispatchEvent(new Event("user:updated"));
+  }
+};
+
+export const readStoredUserId = () => {
+  const user = readStoredUser();
+  return String(user?.id || user?._id || "").trim();
+};
+
+const persistSessionMarkers = () => {
+  localStorage.setItem(TOKEN_KEY, SESSION_MARKER);
+  localStorage.setItem(REFRESH_TOKEN_KEY, REFRESH_SESSION_MARKER);
+};
+
+const clearSessionMarkers = () => {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+};
+
+const sanitizeManagedHeaders = (headers) => {
+  const authHeader = String(headers.get("Authorization") || "").trim();
+  if (
+    authHeader === `Bearer ${SESSION_MARKER}` ||
+    authHeader === `Bearer ${REFRESH_SESSION_MARKER}` ||
+    authHeader === "Bearer"
+  ) {
+    headers.delete("Authorization");
+  }
+
+  const refreshHeader = String(headers.get("X-Refresh-Token") || "").trim();
+  if (refreshHeader === REFRESH_SESSION_MARKER || refreshHeader === SESSION_MARKER) {
+    headers.delete("X-Refresh-Token");
+  }
+};
+
+const withApiCredentials = (init = {}) => {
+  const headers = new Headers(init?.headers || undefined);
+  sanitizeManagedHeaders(headers);
+  return {
+    ...(init || {}),
+    headers,
+    credentials: "include",
+  };
 };
 
 export const readAccessToken = () => {
@@ -53,10 +145,35 @@ export const readRefreshToken = () => {
   return String(localStorage.getItem(REFRESH_TOKEN_KEY) || "").trim();
 };
 
+export const hasActiveSession = () => readAccessToken() === SESSION_MARKER;
+
+export const readResponsePayload = async (response) => {
+  const text = await response.text();
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
+};
+
+export const apiFetch = (input, init) => {
+  if (typeof globalThis.fetch === "function") {
+    return globalThis.fetch(input, init);
+  }
+  return getNativeFetch()(input, init);
+};
+
+export const apiFetchJson = async (input, init) => {
+  const response = await apiFetch(input, init);
+  const data = await readResponsePayload(response);
+  return { response, data };
+};
+
 export const clearAuthSession = ({ dispatch = true } = {}) => {
   if (!hasWindow()) return;
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  clearSessionMarkers();
   localStorage.removeItem(USER_KEY);
   localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
   if (dispatch) {
@@ -65,21 +182,10 @@ export const clearAuthSession = ({ dispatch = true } = {}) => {
   }
 };
 
-export const persistAuthSession = ({
-  token = "",
-  refreshToken = "",
-  user = null,
-} = {}) => {
+export const persistAuthSession = ({ user = null } = {}) => {
   if (!hasWindow()) return;
 
-  const normalizedToken = String(token || "").trim();
-  const normalizedRefreshToken = String(refreshToken || "").trim();
-  if (normalizedToken) {
-    localStorage.setItem(TOKEN_KEY, normalizedToken);
-  }
-  if (normalizedRefreshToken) {
-    localStorage.setItem(REFRESH_TOKEN_KEY, normalizedRefreshToken);
-  }
+  persistSessionMarkers();
 
   const normalizedUser =
     user && typeof user === "object"
@@ -90,43 +196,59 @@ export const persistAuthSession = ({
       : null;
 
   if (normalizedUser) {
-    localStorage.setItem(USER_KEY, JSON.stringify(normalizedUser));
-    if (typeof normalizedUser.profileImage === "string" && normalizedUser.profileImage) {
-      localStorage.setItem(USER_PROFILE_IMAGE_KEY, normalizedUser.profileImage);
-    } else {
-      localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-    }
+    persistStoredUser(normalizedUser, { dispatch: false });
   }
 
   window.dispatchEvent(new Event("user:updated"));
   window.dispatchEvent(new Event("auth:token-updated"));
 };
 
+export const hydrateAuthSession = async () => {
+  if (!hasWindow()) return null;
+  try {
+    const response = await getNativeFetch()(
+      `${API_URL}/api/auth/session`,
+      withApiCredentials({
+        method: "GET",
+      })
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data?.user) {
+      clearAuthSession();
+      return null;
+    }
+    persistAuthSession({ user: data.user });
+    return data;
+  } catch {
+    clearAuthSession();
+    return null;
+  }
+};
+
 export const refreshAccessToken = async () => {
   if (!hasWindow()) return null;
   if (refreshPromise) return refreshPromise;
-
-  const refreshToken = readRefreshToken();
-  if (!refreshToken) return null;
+  if (!readRefreshToken() && !readStoredUser()) return null;
 
   refreshPromise = (async () => {
     try {
-      const res = await getNativeFetch()(`${API_URL}/api/auth/refresh`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ refreshToken }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.token) {
+      const response = await getNativeFetch()(
+        `${API_URL}/api/auth/refresh`,
+        withApiCredentials({
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: "{}",
+        })
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.user) {
         clearAuthSession();
         return null;
       }
 
       persistAuthSession({
-        token: data.token,
-        refreshToken: data.refreshToken,
         user: data.user,
       });
       return data;
@@ -142,17 +264,17 @@ export const refreshAccessToken = async () => {
 };
 
 export const logoutSession = async () => {
-  const refreshToken = readRefreshToken();
   try {
-    if (refreshToken) {
-      await getNativeFetch()(`${API_URL}/api/auth/logout`, {
+    await getNativeFetch()(
+      `${API_URL}/api/auth/logout`,
+      withApiCredentials({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ refreshToken }),
-      });
-    }
+        body: "{}",
+      })
+    );
   } catch {
     // Ignore logout transport errors and clear the local session anyway.
   } finally {
@@ -160,15 +282,16 @@ export const logoutSession = async () => {
   }
 };
 
-const buildRetriedInit = (input, init, token) => {
+const buildRetriedInit = (input, init) => {
   const headers = new Headers(init?.headers || undefined);
-  headers.set("Authorization", `Bearer ${token}`);
   headers.set(AUTH_RETRY_HEADER, "1");
+  sanitizeManagedHeaders(headers);
 
   if (typeof input === "string" || input instanceof URL) {
     return {
       ...(init || {}),
       headers,
+      credentials: "include",
     };
   }
 
@@ -183,26 +306,27 @@ export const installAuthFetchInterceptor = () => {
   nativeFetchRef = window.fetch.bind(window);
 
   window.fetch = async (input, init) => {
-    const response = await nativeFetchRef(input, init);
     const url = resolveRequestUrl(input);
-    const hasRetried = new Headers(init?.headers || undefined).get(AUTH_RETRY_HEADER) === "1";
+    const managedInit = isApiRequest(url) ? withApiCredentials(init) : init;
+    const response = await nativeFetchRef(input, managedInit);
+    const hasRetried =
+      new Headers(managedInit?.headers || undefined).get(AUTH_RETRY_HEADER) === "1";
 
     if (
       response.status !== 401 ||
       hasRetried ||
-      !isManagedApiRequest(url) ||
-      !readRefreshToken() ||
+      !isRetriableApiRequest(url) ||
       !(typeof input === "string" || input instanceof URL)
     ) {
       return response;
     }
 
     const refreshed = await refreshAccessToken();
-    if (!refreshed?.token) {
+    if (!refreshed?.user) {
       return response;
     }
 
-    const retriedInit = buildRetriedInit(input, init, refreshed.token);
+    const retriedInit = buildRetriedInit(input, managedInit);
     if (!retriedInit) {
       return response;
     }

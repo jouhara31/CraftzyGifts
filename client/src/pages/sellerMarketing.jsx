@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_URL } from "../apiBase";
-import { clearAuthSession } from "../utils/authSession";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 import useHashScroll from "../utils/useHashScroll";
 
 const asText = (value) => String(value ?? "").trim();
@@ -46,8 +46,7 @@ export default function SellerMarketing() {
   }, []);
 
   const loadPage = useCallback(async () => {
-    const token = asText(localStorage.getItem("token"));
-    if (!token) {
+    if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
@@ -55,19 +54,18 @@ export default function SellerMarketing() {
     setLoading(true);
     setError("");
     try {
-      const headers = { Authorization: `Bearer ${token}` };
-      const [profileRes, productsRes] = await Promise.all([
-        fetch(`${API_URL}/api/users/me`, { headers }),
-        fetch(`${API_URL}/api/products/seller/me`, { headers }),
+      const [profileResult, productsResult] = await Promise.all([
+        apiFetchJson(`${API_URL}/api/users/me`),
+        apiFetchJson(`${API_URL}/api/products/seller/me`),
       ]);
+      const profileRes = profileResult.response;
+      const productsRes = productsResult.response;
+      const profileData = profileResult.data;
+      const productsData = productsResult.data;
       if (profileRes.status === 401 || productsRes.status === 401) {
         clearAndRedirect();
         return;
       }
-      const [profileData, productsData] = await Promise.all([
-        profileRes.json().catch(() => ({})),
-        productsRes.json().catch(() => []),
-      ]);
       if (!profileRes.ok) {
         setError(profileData?.message || "Unable to load seller marketing settings.");
         return;
@@ -106,8 +104,7 @@ export default function SellerMarketing() {
 
   const handleSave = async (event) => {
     event.preventDefault();
-    const token = asText(localStorage.getItem("token"));
-    if (!token) {
+    if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
@@ -116,11 +113,10 @@ export default function SellerMarketing() {
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/api/users/me`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           sellerMarketing: {
@@ -135,7 +131,6 @@ export default function SellerMarketing() {
           },
         }),
       });
-      const data = await response.json().catch(() => ({}));
       if (response.status === 401) {
         clearAndRedirect();
         return;

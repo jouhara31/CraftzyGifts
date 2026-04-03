@@ -4,6 +4,7 @@ const Order = require("../models/Order");
 const { ensureCustomizationMaster } = require("../utils/customizationMaster");
 const { ensureCategoryMaster, syncCategoryMaster } = require("../utils/categoryMaster");
 const { maybeCreateInventoryNotifications } = require("../utils/sellerNotifications");
+const { handleControllerError } = require("../utils/apiError");
 
 const MAX_SELLING_PRICE = 200000;
 const MAX_MRP = 500000;
@@ -649,21 +650,23 @@ const parseMasterOptionId = (value, fallback = "") => {
   return text || fallback;
 };
 
-const isAcceptedImageSource = (entry) => {
+const isAcceptedImageSource = (entry, { allowDataUrl = false } = {}) => {
   const text = String(entry || "").trim();
   if (!text) return false;
 
   const isHttp = /^https?:\/\//i.test(text);
-  const isDataImage = /^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(text);
-  if (!isHttp && !isDataImage) return false;
+  const isRelativeUpload = text.startsWith("/");
+  const isDataImage =
+    allowDataUrl && /^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(text);
+  if (!isHttp && !isRelativeUpload && !isDataImage) return false;
   return true;
 };
 
-const parseImageUrls = (value, fallback = []) => {
+const parseImageUrls = (value, fallback = [], options = {}) => {
   const toNormalizedList = (items = []) =>
     items
       .map((entry) => String(entry || "").trim())
-      .filter(isAcceptedImageSource)
+      .filter((entry) => isAcceptedImageSource(entry, options))
       .slice(0, 5);
 
   if (Array.isArray(value)) {
@@ -677,10 +680,10 @@ const parseImageUrls = (value, fallback = []) => {
   return fallback;
 };
 
-const parseImageSource = (value, fallback = "") => {
+const parseImageSource = (value, fallback = "", options = { allowDataUrl: true }) => {
   const text = String(value || "").trim();
   if (!text) return fallback;
-  return isAcceptedImageSource(text) ? text : fallback;
+  return isAcceptedImageSource(text, options) ? text : fallback;
 };
 
 const validateProductTextFields = ({ name, description, category, subcategory }) => {
@@ -985,7 +988,7 @@ exports.getProducts = async (req, res) => {
       hasNext: currentPage < pages,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -994,7 +997,7 @@ exports.getCategoryMaster = async (_req, res) => {
     const config = await ensureCategoryMaster();
     res.json(Array.isArray(config?.groups) ? config.groups : []);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -1114,7 +1117,7 @@ exports.getProductById = async (req, res) => {
         productId: String(entry?.product || product?._id || "").trim(),
         rating: Number(entry?.review?.rating || 0),
         comment: String(entry?.review?.comment || "").trim(),
-        images: parseImageUrls(entry?.review?.images, []),
+        images: parseImageUrls(entry?.review?.images, [], { allowDataUrl: true }),
         customerName: String(entry?.customer?.name || "Customer").trim(),
         verifiedPurchase: true,
         createdAt: entry?.review?.updatedAt || entry?.review?.createdAt || entry?.createdAt || null,
@@ -1173,7 +1176,7 @@ exports.getProductById = async (req, res) => {
       feedbacks,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -1208,7 +1211,7 @@ exports.getSellerProducts = async (req, res) => {
       })
     );
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -1245,7 +1248,7 @@ exports.saveSellerCustomizationCatalog = async (req, res) => {
       publishedCount: customizableProducts.length,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -1320,7 +1323,7 @@ exports.getSellerCustomizationCatalog = async (req, res) => {
       catalogProduct,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -1473,7 +1476,7 @@ exports.getPublicSellerStore = async (req, res) => {
         productId: String(entry?.product?._id || entry?.product || "").trim(),
         rating: Number(entry?.review?.rating || 0),
         comment: String(entry?.review?.comment || "").trim(),
-        images: parseImageUrls(entry?.review?.images, []),
+        images: parseImageUrls(entry?.review?.images, [], { allowDataUrl: true }),
         customerName: String(entry?.customer?.name || "Customer").trim(),
         productName: String(entry?.product?.name || "Gift hamper").trim(),
         verifiedPurchase: true,
@@ -1533,7 +1536,7 @@ exports.getPublicSellerStore = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -1563,7 +1566,7 @@ exports.getCustomizationMasterOptions = async (req, res) => {
 
     res.json({ options });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -1757,7 +1760,7 @@ exports.createProduct = async (req, res) => {
     });
     res.status(201).json(product);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -1963,7 +1966,7 @@ exports.bulkImportProducts = async (req, res) => {
       items: results,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2184,7 +2187,9 @@ exports.updateProduct = async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(updates, "images")) {
       const finalImages = Array.isArray(updates.images)
         ? updates.images
-        : parseImageUrls(product.images, product.image ? [product.image] : []);
+        : parseImageUrls(product.images, product.image ? [product.image] : [], {
+            allowDataUrl: true,
+          });
       if (finalImages.length < MIN_PRODUCT_IMAGES) {
         return res.status(400).json({
           message: `Upload at least ${MIN_PRODUCT_IMAGES} product images.`,
@@ -2271,7 +2276,7 @@ exports.updateProduct = async (req, res) => {
     });
     res.json(product);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2298,6 +2303,7 @@ exports.deleteProduct = async (req, res) => {
     await product.deleteOne();
     res.json({ message: "Product deleted successfully." });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
+

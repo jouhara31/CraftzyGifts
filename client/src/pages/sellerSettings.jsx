@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { API_URL } from "../apiBase";
-import { clearAuthSession } from "../utils/authSession";
+import {
+  apiFetchJson,
+  clearAuthSession,
+  hasActiveSession,
+  persistStoredUser,
+  readRefreshToken,
+  readStoredUser,
+} from "../utils/authSession";
 import useHashScroll from "../utils/useHashScroll";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -81,8 +88,7 @@ export default function SellerSettings() {
   }, [navigate]);
 
   const loadProfile = useCallback(async () => {
-    const token = String(localStorage.getItem("token") || "").trim();
-    if (!token) {
+    if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
@@ -90,10 +96,7 @@ export default function SellerSettings() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API_URL}/api/users/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json().catch(() => ({}));
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me`);
       if (response.status === 401) {
         clearAndRedirect();
         return;
@@ -150,18 +153,15 @@ export default function SellerSettings() {
   }, [clearAndRedirect]);
 
   const loadSessions = useCallback(async () => {
-    const token = String(localStorage.getItem("token") || "").trim();
-    if (!token) return;
+    if (!hasActiveSession()) return;
 
     setSessionsLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/users/me/sessions`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/sessions`, {
         headers: {
-          Authorization: `Bearer ${token}`,
-          "X-Refresh-Token": String(localStorage.getItem("refresh_token") || "").trim(),
+          "X-Refresh-Token": readRefreshToken(),
         },
       });
-      const data = await response.json().catch(() => ({}));
       if (response.status === 401) {
         clearAndRedirect();
         return;
@@ -190,8 +190,7 @@ export default function SellerSettings() {
 
   const handleSave = async (event) => {
     event.preventDefault();
-    const token = String(localStorage.getItem("token") || "").trim();
-    if (!token) {
+    if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
@@ -220,11 +219,10 @@ export default function SellerSettings() {
     setNotice("");
 
     try {
-      const response = await fetch(`${API_URL}/api/users/me`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           instagramUrl: normalizedValue,
@@ -252,7 +250,6 @@ export default function SellerSettings() {
           },
         }),
       });
-      const data = await response.json().catch(() => ({}));
       if (response.status === 401) {
         clearAndRedirect();
         return;
@@ -262,29 +259,19 @@ export default function SellerSettings() {
         return;
       }
 
-      let currentUser = {};
-      try {
-        const parsed = JSON.parse(localStorage.getItem("user") || "{}");
-        currentUser = parsed && typeof parsed === "object" ? parsed : {};
-      } catch {
-        currentUser = {};
-      }
-      localStorage.setItem(
-        "user",
-        JSON.stringify({
-          ...(currentUser && typeof currentUser === "object" ? currentUser : {}),
-          instagramUrl: data?.instagramUrl || normalizedValue,
-          returnWindowDays: Number(data?.returnWindowDays ?? parsedReturnWindowDays),
-          supportEmail: data?.supportEmail || normalizedSupportEmail,
-          legalBusinessName: data?.legalBusinessName || legalBusinessName.trim(),
-          gstNumber: data?.gstNumber || gstNumber.trim().toUpperCase(),
-          billingAddress:
-            data?.billingAddress && typeof data.billingAddress === "object"
-              ? data.billingAddress
-              : billingAddress,
-        })
-      );
-      window.dispatchEvent(new Event("user:updated"));
+      const currentUser = readStoredUser() || {};
+      persistStoredUser({
+        ...(currentUser && typeof currentUser === "object" ? currentUser : {}),
+        instagramUrl: data?.instagramUrl || normalizedValue,
+        returnWindowDays: Number(data?.returnWindowDays ?? parsedReturnWindowDays),
+        supportEmail: data?.supportEmail || normalizedSupportEmail,
+        legalBusinessName: data?.legalBusinessName || legalBusinessName.trim(),
+        gstNumber: data?.gstNumber || gstNumber.trim().toUpperCase(),
+        billingAddress:
+          data?.billingAddress && typeof data.billingAddress === "object"
+            ? data.billingAddress
+            : billingAddress,
+      });
       setProfile((prev) => ({ ...(prev || {}), ...data }));
       setInstagramUrl(String(data?.instagramUrl || normalizedValue || "").trim());
       setReturnWindowDays(String(data?.returnWindowDays ?? parsedReturnWindowDays));
@@ -355,8 +342,7 @@ export default function SellerSettings() {
   };
 
   const requestVerificationLink = async () => {
-    const token = String(localStorage.getItem("token") || "").trim();
-    if (!token) {
+    if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
@@ -364,13 +350,9 @@ export default function SellerSettings() {
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/api/auth/verify-email/request`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/auth/verify-email/request`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       });
-      const data = await response.json().catch(() => ({}));
       if (response.status === 401) {
         clearAndRedirect();
         return;
@@ -388,9 +370,8 @@ export default function SellerSettings() {
   };
 
   const revokeSession = async (sessionId) => {
-    const token = String(localStorage.getItem("token") || "").trim();
-    const refreshToken = String(localStorage.getItem("refresh_token") || "").trim();
-    if (!token) {
+    const refreshToken = readRefreshToken();
+    if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
@@ -399,14 +380,12 @@ export default function SellerSettings() {
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/api/users/me/sessions/${sessionId}`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/sessions/${sessionId}`, {
         method: "DELETE",
         headers: {
-          Authorization: `Bearer ${token}`,
           "X-Refresh-Token": refreshToken,
         },
       });
-      const data = await response.json().catch(() => ({}));
       if (response.status === 401) {
         clearAndRedirect();
         return;

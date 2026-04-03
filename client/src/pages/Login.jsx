@@ -3,7 +3,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 
 import { API_URL } from "../apiBase";
-import { persistAuthSession } from "../utils/authSession";
+import { apiFetchJson, persistAuthSession } from "../utils/authSession";
+import { resolveAuthenticatedHomeForUser } from "../utils/authRoute";
 
 export default function Login() {
   const [form, setForm] = useState({ email: "", password: "" });
@@ -26,31 +27,18 @@ export default function Login() {
   };
 
   const finishLogin = (data) => {
-    persistAuthSession({
-      token: data.token,
-      refreshToken: data.refreshToken,
-      user: data.user,
-    });
-    let nextPath = "/";
-    if (data?.user?.role === "seller") {
-      nextPath =
-        String(data?.user?.sellerStatus || "").trim().toLowerCase() === "approved"
-          ? "/seller/dashboard"
-          : "/seller/pending";
-    } else if (data?.user?.role === "admin") {
-      nextPath = "/admin/dashboard";
-    }
+    persistAuthSession({ user: data.user });
+    const nextPath = resolveAuthenticatedHomeForUser(data?.user);
     navigate(nextPath);
   };
 
   const requestOtp = async () => {
-    const res = await fetch(`${API_URL}/api/auth/login`, {
+    const { response, data } = await apiFetchJson(`${API_URL}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 202 && data?.requiresOtp) {
+    if (response.status === 202 && data?.requiresOtp) {
       setOtpStep({
         email: data.email || form.email,
         challengeToken: data.challengeToken,
@@ -66,7 +54,7 @@ export default function Login() {
       });
       return { handled: true };
     }
-    if (!res.ok) {
+    if (!response.ok) {
       setStatus({
         type: "error",
         message: data?.message || "Login failed. Please try again.",
@@ -82,7 +70,7 @@ export default function Login() {
     if (status) setStatus(null);
     try {
       if (otpStep?.challengeToken) {
-        const res = await fetch(`${API_URL}/api/auth/login/verify-otp`, {
+        const { response, data } = await apiFetchJson(`${API_URL}/api/auth/login/verify-otp`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -91,8 +79,7 @@ export default function Login() {
             otp: otpCode,
           }),
         });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok) {
+        if (response.ok) {
           finishLogin(data);
           return;
         }

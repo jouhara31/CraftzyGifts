@@ -4,6 +4,7 @@ import AdminSidebarLayout from "../components/AdminSidebarLayout";
 import { getProductImage } from "../utils/productMedia";
 
 import { API_URL } from "../apiBase";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 const LOW_STOCK_THRESHOLD = 5;
 const toCsvCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
@@ -61,21 +62,25 @@ export default function AdminProducts() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [quickView, setQuickView] = useState(null);
   const navigate = useNavigate();
+  const clearAndRedirect = useCallback(() => {
+    clearAuthSession();
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   const loadProducts = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
     setError("");
     try {
-      const res = await fetch(`${API_URL}/api/admin/products`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/products`);
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setError(data.message || "Unable to load products.");
         return;
       }
@@ -91,16 +96,15 @@ export default function AdminProducts() {
     } catch {
       setError("Unable to load products.");
     }
-  }, [navigate]);
+  }, [clearAndRedirect]);
 
   useEffect(() => {
     loadProducts();
   }, [loadProducts]);
 
   const updateProduct = async (productId, updates, successMessage) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -108,16 +112,18 @@ export default function AdminProducts() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/admin/products/${productId}`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/products/${productId}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(updates),
       });
-      const data = await res.json();
-      if (!res.ok) {
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setError(data.message || "Unable to update product.");
         return;
       }
@@ -286,9 +292,8 @@ export default function AdminProducts() {
       return;
     }
 
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -307,18 +312,20 @@ export default function AdminProducts() {
     try {
       const results = await Promise.all(
         selectedIds.map(async (productId) => {
-          const res = await fetch(`${API_URL}/api/admin/products/${productId}`, {
+          const { response, data } = await apiFetchJson(`${API_URL}/api/admin/products/${productId}`, {
             method: "PATCH",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
             },
             body: JSON.stringify(updates),
           });
-          const data = await res.json();
-          return { ok: res.ok, data, id: productId };
+          return { ok: response.ok, status: response.status, data, id: productId };
         })
       );
+      if (results.some((result) => result.status === 401)) {
+        clearAndRedirect();
+        return;
+      }
 
       const successful = results.filter((result) => result.ok).map((result) => result.data);
       const failed = results.find((result) => !result.ok);

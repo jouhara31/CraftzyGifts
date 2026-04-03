@@ -1,4 +1,5 @@
 import { API_URL } from "../apiBase";
+import { hasActiveSession } from "./authSession";
 
 const STREAM_RECONNECT_DELAY_MS = 5000;
 
@@ -26,11 +27,10 @@ export const openNotificationStream = ({ onUpdate, onSessionExpired } = {}) => {
     cleanupStream();
     if (closed) return;
 
-    const token = String(localStorage.getItem("token") || "").trim();
-    if (!token) return;
+    if (!hasActiveSession()) return;
 
-    const streamUrl = `${API_URL}/api/users/me/notifications/stream?accessToken=${encodeURIComponent(token)}`;
-    eventSource = new window.EventSource(streamUrl);
+    const streamUrl = `${API_URL}/api/users/me/notifications/stream`;
+    eventSource = new window.EventSource(streamUrl, { withCredentials: true });
 
     eventSource.addEventListener("notification", (event) => {
       try {

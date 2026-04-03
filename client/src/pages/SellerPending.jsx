@@ -1,12 +1,12 @@
 import { Link, Navigate } from "react-router-dom";
 import Header from "../components/Header";
 import { fallbackPathForRole, readStoredSessionClaims } from "../utils/authRoute";
+import { hasActiveSession } from "../utils/authSession";
 
 export default function SellerPending() {
-  const token = typeof localStorage !== "undefined" ? localStorage.getItem("token") : "";
   const { role, sellerStatus, isExpired } = readStoredSessionClaims();
 
-  if (!token || isExpired) {
+  if (!hasActiveSession() || isExpired) {
     return <Navigate to="/login" replace />;
   }
 

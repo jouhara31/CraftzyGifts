@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
+import { optimizeImageFiles } from "../utils/imageUpload";
 import { getProductImage } from "../utils/productMedia";
 import {
   addPendingPaymentGroup,
@@ -23,6 +24,7 @@ import {
 import { buildPaymentStatusPath } from "../utils/paymentStatusRoute";
 
 import { API_URL } from "../apiBase";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 const ONLINE_PAYMENT_MODES = new Set(["upi", "card"]);
 const ACTIVE_ORDER_STATUSES = new Set(["placed", "processing", "shipped", "return_requested"]);
 const COMPLETED_ORDER_STATUSES = new Set(["delivered", "refunded"]);
@@ -82,7 +84,6 @@ const REVIEW_MAX_LENGTH = 280;
 const REVIEW_RATINGS = [5, 4, 3, 2, 1];
 const REVIEW_IMAGE_LIMIT = 4;
 const REVIEW_IMAGE_MAX_SIZE_BYTES = 3 * 1024 * 1024;
-const USER_PROFILE_IMAGE_KEY = "user_profile_image";
 const PAYMENT_STATUS_POLL_INTERVAL_MS = 5000;
 const HIDDEN_ORDER_OPTION_KEYS = new Set(["hamperBase", "hamperPackage"]);
 const DEFAULT_RETURN_WINDOW_DAYS = 7;
@@ -172,7 +173,7 @@ const formatPaymentStatus = (status) =>
 
 const isOnlinePendingPaymentOrder = (order = {}) =>
   asText(order?.status) === "pending_payment" &&
-  asText(order?.paymentStatus) === "pending" &&
+  ["pending", "failed"].includes(asText(order?.paymentStatus)) &&
   ONLINE_PAYMENT_MODES.has(asText(order?.paymentMode));
 
 const canCancelOrder = (order = {}) =>
@@ -285,18 +286,10 @@ const normalizeReviewImages = (value = []) =>
         .map((entry) => String(entry || "").trim())
         .filter(
           (entry) =>
-            /^https?:\/\//i.test(entry) || /^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(entry)
+            /^https?:\/\//i.test(entry) || entry.startsWith("/")
         )
     )
   ).slice(0, REVIEW_IMAGE_LIMIT);
-
-const fileToDataUrl = (file) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Unable to read selected image."));
-    reader.readAsDataURL(file);
-  });
 
 const buildReviewDraftFromOrder = (order = {}) => ({
   rating: Number(order?.review?.rating || 0),
@@ -338,6 +331,16 @@ export default function Orders() {
   );
   const navigate = useNavigate();
   const location = useLocation();
+  const handleUnauthorized = useCallback(
+    (notice = "Session expired. Please login again.") => {
+      clearAuthSession();
+      navigate("/login", {
+        replace: true,
+        state: notice ? { notice } : {},
+      });
+    },
+    [navigate]
+  );
 
   const syncTrackedPaymentGroups = useCallback((nextGroups) => {
     setTrackedPaymentGroups(
@@ -361,34 +364,19 @@ export default function Orders() {
     [syncTrackedPaymentGroups]
   );
 
-  const handleUnauthorized = useCallback(() => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-    window.dispatchEvent(new Event("user:updated"));
-    navigate("/login", {
-      replace: true,
-      state: { notice: "Session expired. Please login again." },
-    });
-  }, [navigate]);
-
   const loadOrders = useCallback(async ({ silent = false } = {}) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      handleUnauthorized();
       return;
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/orders/my`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (res.status === 401) {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/orders/my`);
+      if (response.status === 401) {
         handleUnauthorized();
         return;
       }
-      if (!res.ok) {
+      if (!response.ok) {
         if (!silent) {
           setError(data.message || "Unable to fetch orders.");
         }
@@ -403,7 +391,7 @@ export default function Orders() {
         setError("Unable to fetch orders.");
       }
     }
-  }, [handleUnauthorized, navigate]);
+  }, [handleUnauthorized]);
 
   useEffect(() => {
     loadOrders();
@@ -474,11 +462,58 @@ export default function Orders() {
     await loadOrders({ silent: true });
     setNotice("Payment status refreshed.");
   }, [loadOrders]);
+  const verifyPaymentGroup = useCallback(
+    async ({ paymentGroupId, gatewayResponse }) => {
+      const { response, data } = await apiFetchJson(
+        `${API_URL}/api/orders/checkout-session/verify-payment`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            paymentGroupId,
+            ...(gatewayResponse || {}),
+          }),
+        }
+      );
+
+      if (response.status === 401) {
+        handleUnauthorized();
+        throw new Error("Session expired. Please login again.");
+      }
+      if (!response.ok) {
+        throw new Error(data?.message || "Unable to confirm payment.");
+      }
+      return Array.isArray(data?.orders) ? data.orders : [];
+    },
+    [handleUnauthorized]
+  );
+  const recordPaymentGroupFailure = useCallback(
+    async ({ paymentGroupId, reason, gatewayResponse }) => {
+      if (!paymentGroupId) return;
+      try {
+        await apiFetchJson(`${API_URL}/api/orders/checkout-session/payment-failed`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            paymentGroupId,
+            reason,
+            ...(gatewayResponse || {}),
+          }),
+        });
+      } catch {
+        // Best-effort only; retry remains available from the orders list.
+      }
+    },
+    []
+  );
 
   const handlePayNow = async (orderId) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      handleUnauthorized();
       return;
     }
 
@@ -487,19 +522,17 @@ export default function Orders() {
     setNotice("");
     let paymentGroupId = "";
     try {
-      const res = await fetch(`${API_URL}/api/orders/${orderId}/pay`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/orders/${orderId}/pay`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
       });
-      const data = await res.json();
-      if (res.status === 401) {
+      if (response.status === 401) {
         handleUnauthorized();
         return;
       }
-      if (!res.ok) {
+      if (!response.ok) {
         setError(data.message || "Unable to start payment.");
         return;
       }
@@ -538,26 +571,46 @@ export default function Orders() {
           );
         },
         onSuccess: async (response) => {
+          const verifiedOrders = await verifyPaymentGroup({
+            paymentGroupId,
+            gatewayResponse: response,
+          });
+          const waitingForGateway = verifiedOrders.some(
+            (entry) => asText(entry?.paymentStatus) !== "paid"
+          );
           if (paymentGroupId) {
-            trackPaymentGroup(paymentGroupId);
+            if (waitingForGateway) {
+              trackPaymentGroup(paymentGroupId);
+            } else {
+              untrackPaymentGroup(paymentGroupId);
+            }
           }
           navigate(
             buildPaymentStatusPath({
               paymentGroupId,
               orderId,
-              outcome: "pending",
+              outcome: waitingForGateway ? "pending" : "success",
             }),
             {
               state: {
                 paymentGroupId,
                 orderId,
-                outcome: "pending",
+                outcome: waitingForGateway ? "pending" : "success",
                 notice:
-                  "Payment submitted. We are waiting for secure gateway confirmation.",
+                  waitingForGateway
+                    ? "Payment submitted. We are waiting for secure gateway confirmation."
+                    : "Payment confirmed successfully.",
               },
             }
           );
           return response;
+        },
+        onFailure: async (error) => {
+          await recordPaymentGroupFailure({
+            paymentGroupId,
+            reason: error?.message,
+            gatewayResponse: error?.details,
+          });
         },
       });
 
@@ -593,9 +646,8 @@ export default function Orders() {
   };
 
   const handleCancelOrder = async (orderId) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      handleUnauthorized();
       return;
     }
 
@@ -603,22 +655,20 @@ export default function Orders() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/orders/${orderId}/cancel`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/orders/${orderId}/cancel`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           reason: String(cancelReasonDrafts[orderId] || "").trim(),
         }),
       });
-      const data = await res.json();
-      if (res.status === 401) {
+      if (response.status === 401) {
         handleUnauthorized();
         return;
       }
-      if (!res.ok) {
+      if (!response.ok) {
         setError(data.message || "Unable to cancel order.");
         return;
       }
@@ -638,9 +688,8 @@ export default function Orders() {
   };
 
   const handleReturnRequest = async (orderId) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      handleUnauthorized();
       return;
     }
     const reason = String(returnReasonDrafts[orderId] || "").trim();
@@ -653,22 +702,20 @@ export default function Orders() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/orders/${orderId}/return`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/orders/${orderId}/return`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           reason,
         }),
       });
-      const data = await res.json();
-      if (res.status === 401) {
+      if (response.status === 401) {
         handleUnauthorized();
         return;
       }
-      if (!res.ok) {
+      if (!response.ok) {
         setError(data.message || "Unable to request return.");
         return;
       }
@@ -792,18 +839,23 @@ export default function Orders() {
     }
 
     try {
-      const uploaded = await Promise.all(selectedFiles.map((file) => fileToDataUrl(file)));
+      const uploaded = await optimizeImageFiles(selectedFiles, {
+        maxWidth: 1400,
+        maxHeight: 1400,
+        quality: 0.8,
+        uploadFolder: "reviews",
+        uploadPrefix: "review-image",
+      });
       const nextImages = normalizeReviewImages([...existingImages, ...uploaded]);
       updateReviewDraft(orderId, "images", nextImages);
-    } catch {
-      setError("Unable to read selected image.");
+    } catch (uploadError) {
+      setError(uploadError?.message || "Unable to read selected image.");
     }
   };
 
   const handleReviewSubmit = async (orderId) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      handleUnauthorized();
       return;
     }
 
@@ -825,32 +877,22 @@ export default function Orders() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/orders/${orderId}/review`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/orders/${orderId}/review`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ rating, comment, images }),
       });
-      const raw = await res.text();
-      let data = {};
-      if (raw) {
-        try {
-          data = JSON.parse(raw);
-        } catch {
-          data = { message: raw };
-        }
-      }
-      if (res.status === 401) {
+      if (response.status === 401) {
         handleUnauthorized();
         return;
       }
-      if (!res.ok) {
+      if (!response.ok) {
         const message = String(data?.message || "").trim();
         if (message && !message.toLowerCase().includes("<!doctype")) {
           setError(message);
-        } else if (raw.toLowerCase().includes("cannot patch")) {
+        } else if (message.toLowerCase().includes("cannot patch")) {
           setError("Feedback API not available. Please restart backend server and try again.");
         } else {
           setError("Unable to send feedback.");
@@ -1213,7 +1255,11 @@ export default function Orders() {
                       disabled={isBusy}
                       onClick={() => handlePayNow(orderId)}
                     >
-                      {actingOrderId === orderId ? "Processing..." : "Pay now"}
+                      {actingOrderId === orderId
+                        ? "Processing..."
+                        : order.paymentStatus === "failed"
+                          ? "Retry payment"
+                          : "Pay now"}
                     </button>
                     <button
                       className="btn ghost"

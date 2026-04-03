@@ -1,4 +1,5 @@
 import { API_URL } from "../apiBase";
+import { apiFetch, hasActiveSession } from "./authSession";
 const CACHE_TTL_MS = 90 * 1000;
 const sellerStoreCache = new Map();
 const inFlightRequests = new Map();
@@ -20,7 +21,7 @@ const normalizeOptions = (options = {}) => {
     includeProductRatings: includeProducts && options.includeProductRatings !== false,
     limit: includeProducts ? normalizePositiveInt(options.limit, 24, 60) : 0,
     feedbackLimit: includeFeedbacks ? normalizePositiveInt(options.feedbackLimit, 8, 30) : 0,
-    authMode: options.token ? "auth" : "public",
+    authMode: options.authenticated || hasActiveSession() ? "auth" : "public",
   };
 };
 
@@ -78,8 +79,7 @@ const fetchSellerStoreFromApi = async (sellerId, options = {}) => {
   if (!key) throw new Error("Seller store not found.");
 
   const cacheKey = buildCacheKey(key, options);
-  const headers = options.token ? { Authorization: `Bearer ${options.token}` } : undefined;
-  const res = await fetch(buildStoreUrl(key, options), { headers });
+  const res = await apiFetch(buildStoreUrl(key, options));
 
   if (!res.ok) {
     throw new Error(

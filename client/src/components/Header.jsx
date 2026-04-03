@@ -5,7 +5,15 @@ import logoPng from "../assets/logo.png";
 import logoCartPng from "../assets/logo-cart.png";
 import { getCart } from "../utils/cart";
 import { getWishlist } from "../utils/wishlist";
-import { logoutSession } from "../utils/authSession";
+import {
+  apiFetchJson,
+  clearAuthSession,
+  hasActiveSession,
+  logoutSession,
+  persistStoredUser,
+  readStoredUser,
+  readStoredUserId,
+} from "../utils/authSession";
 import { readStoredSessionClaims } from "../utils/authRoute";
 import { openNotificationStream } from "../utils/notificationStream";
 import {
@@ -19,77 +27,6 @@ import {
 } from "../utils/categoryMaster";
 
 import { API_URL } from "../apiBase";
-const USER_PROFILE_IMAGE_KEY = "user_profile_image";
-
-const readStoredProfileImage = () => {
-  try {
-    return localStorage.getItem(USER_PROFILE_IMAGE_KEY) || "";
-  } catch {
-    return "";
-  }
-};
-
-const readStoredUser = () => {
-  try {
-    const stored = localStorage.getItem("user");
-    if (!stored) return null;
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object") return null;
-    if (!parsed.profileImage) {
-      const fallbackImage = readStoredProfileImage();
-      if (fallbackImage) {
-        parsed.profileImage = fallbackImage;
-      }
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-};
-
-const readUserIdFromToken = () => {
-  try {
-    const token = localStorage.getItem("token");
-    if (!token) return "";
-    const payload = token.split(".")?.[1];
-    if (!payload) return "";
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-    const decoded = JSON.parse(atob(padded));
-    return String(decoded?.id || "").trim();
-  } catch {
-    return "";
-  }
-};
-
-const persistUserWithProfileImage = (nextUser) => {
-  if (!nextUser || typeof nextUser !== "object") return;
-  const profileImage = typeof nextUser.profileImage === "string" ? nextUser.profileImage : "";
-
-  try {
-    localStorage.setItem("user", JSON.stringify(nextUser));
-    if (profileImage) {
-      localStorage.setItem(USER_PROFILE_IMAGE_KEY, profileImage);
-    } else {
-      localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-    }
-    return;
-  } catch {
-    // Fallback: keep lightweight user payload while storing profile image separately.
-  }
-
-  try {
-    const { profileImage: _profileImage, ...rest } = nextUser;
-    localStorage.setItem("user", JSON.stringify(rest));
-    if (profileImage) {
-      localStorage.setItem(USER_PROFILE_IMAGE_KEY, profileImage);
-    } else {
-      localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
-    }
-  } catch {
-    // Ignore storage quota errors.
-  }
-};
 
 const readCounts = (currentUser) => {
   if (!currentUser) {
@@ -320,35 +257,28 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   useEffect(() => {
     if (!user || user.profileImage) return;
 
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!hasActiveSession()) return;
 
     let active = true;
     const hydrateProfileImage = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/users/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.status === 401) {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
+        const { response, data } = await apiFetchJson(`${API_URL}/api/users/me`);
+        if (response.status === 401) {
+          clearAuthSession();
           if (active) {
             setUser(null);
             setCounts(readCounts(null));
           }
-          window.dispatchEvent(new Event("user:updated"));
           return;
         }
-        if (!res.ok) return;
-        const data = await res.json();
+        if (!response.ok) return;
         if (!active || !data || typeof data !== "object") return;
 
         const mergedUser = {
           ...(readStoredUser() || {}),
           ...data,
         };
-        persistUserWithProfileImage(mergedUser);
+        persistStoredUser(mergedUser);
         setUser(mergedUser);
         setCounts(readCounts(mergedUser));
       } catch {
@@ -490,7 +420,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       window.innerWidth || 0,
       document.documentElement?.clientWidth || 0
     );
-    const width = Math.max(280, Math.min(360, viewportWidth - 24));
+    const width = Math.max(300, Math.min(420, viewportWidth - 24));
     const left = Math.max(12, Math.min(rect.right - width, viewportWidth - width - 12));
 
     setNotificationMenuStyle({
@@ -582,7 +512,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const sellerAvatarSrc =
     user?.profileImage || user?.avatar || user?.photo || user?.image || user?.imageUrl || "";
   const sellerAvatarInitial = sellerNameLabel.slice(0, 1).toUpperCase() || "S";
-  const sellerId = String(user?.id || user?._id || readUserIdFromToken()).trim();
+  const sellerId = String(user?.id || user?._id || readStoredUserId()).trim();
   const sellerStorePath = sellerId ? `/seller/store/${sellerId}` : "/seller/dashboard";
   const sellerHeaderNavItems = buildSellerHeaderNavItems({ sellerStorePath });
   const accountMenuPath = accountMenuUsesStore ? sellerStorePath : "/profile";
@@ -713,32 +643,25 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     const eventName = isSellerNav ? "seller:notifications-updated" : "customer:notifications-updated";
 
     const fetchNotifications = async () => {
-      const token = localStorage.getItem("token");
-      if (!token) return;
+      if (!hasActiveSession()) return;
 
       if (active && !hasLoadedOnce) {
         setNotificationLoading(true);
       }
 
       try {
-        const res = await fetch(`${API_URL}/api/users/me/notifications?limit=6`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
+        const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/notifications?limit=6`);
         if (!active) return;
 
-        if (res.status === 401) {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          localStorage.removeItem(USER_PROFILE_IMAGE_KEY);
+        if (response.status === 401) {
+          clearAuthSession();
           setUser(null);
           syncNotificationState([], 0);
-          window.dispatchEvent(new Event("user:updated"));
           navigate("/login");
           return;
         }
 
-        if (!res.ok) return;
+        if (!response.ok) return;
         syncNotificationState(data?.items, data?.unreadCount);
       } catch {
         if (!active) return;
@@ -766,20 +689,23 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   }, [isSellerNav, navigate, showNotificationMenu, user]);
 
   const markNotificationsRead = async ({ ids = [], all = false } = {}) => {
-    const token = localStorage.getItem("token");
-    if (!token) return null;
+    if (!hasActiveSession()) return null;
 
     try {
-      const res = await fetch(`${API_URL}/api/users/me/notifications/read`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/notifications/read`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ ids, all }),
       });
-      const data = await res.json();
-      if (!res.ok) return null;
+      if (response.status === 401) {
+        clearAuthSession();
+        setUser(null);
+        syncNotificationState([], 0);
+        return null;
+      }
+      if (!response.ok) return null;
 
       const normalizedIds = Array.isArray(ids)
         ? ids.map((value) => String(value || "").trim()).filter(Boolean)

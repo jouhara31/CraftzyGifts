@@ -8,6 +8,7 @@ const ADMIN_NAV_ITEMS = [
   { label: "Dashboard", path: "/admin/dashboard" },
   { label: "Sellers", path: "/admin/sellers" },
   { label: "Messages", path: "/admin/messages" },
+  { label: "Notifications", path: "/admin/notifications" },
   { label: "Orders", path: "/admin/orders" },
   { label: "Products", path: "/admin/products" },
   { label: "Categories", path: "/admin/categories" },
@@ -46,6 +47,15 @@ function AdminNavIcon({ path }) {
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M5 6.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H10l-4 3v-3H5A1.5 1.5 0 0 1 3.5 16V8A1.5 1.5 0 0 1 5 6.5Z" />
         <path d="M8 10h8M8 13.5h5" />
+      </svg>
+    );
+  }
+
+  if (path === "/admin/notifications") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 4.2a4.8 4.8 0 0 0-4.8 4.8v2.2c0 1.1-.4 2.2-1.2 3l-1 1.1h13.9l-1-1.1a4.3 4.3 0 0 1-1.2-3V9A4.8 4.8 0 0 0 12 4.2Z" />
+        <path d="M9.7 18a2.3 2.3 0 0 0 4.6 0" />
       </svg>
     );
   }
@@ -296,8 +306,8 @@ export default function AdminSidebarLayout({
               <path d="M10 14 19 5" />
               <path d="M19 13v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4" />
             </svg>
-            <span className="admin-view-site-label admin-view-site-desktop">Home</span>
-            <span className="admin-view-site-label admin-view-site-mobile">Home</span>
+            <span className="admin-view-site-label admin-view-site-desktop">Visit site</span>
+            <span className="admin-view-site-label admin-view-site-mobile">Site</span>
           </Link>
           <button
             className="admin-text-action admin-view-site-desktop"

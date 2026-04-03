@@ -5,6 +5,7 @@ const {
   login,
   refresh,
   logout,
+  session,
   requestPasswordReset,
   resetPassword,
   requestEmailVerification,
@@ -42,6 +43,7 @@ const passwordResetRateLimit = createRateLimiter({
 router.post("/register", registerRateLimit, register);
 router.post("/login", loginRateLimit, login);
 router.post("/login/verify-otp", loginRateLimit, verifyLoginOtp);
+router.get("/session", refreshRateLimit, session);
 router.post("/refresh", refreshRateLimit, refresh);
 router.post("/logout", refreshRateLimit, logout);
 router.post("/forgot-password", passwordResetRateLimit, requestPasswordReset);

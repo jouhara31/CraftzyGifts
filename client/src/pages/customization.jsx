@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import Header from "../components/Header";
 import CustomizationPanel from "../components/customizationPanel";
 import { getProductImage } from "../utils/productMedia";
+import { optimizeImageFiles } from "../utils/imageUpload";
 import { clearBuyNowCheckoutItem } from "../utils/buyNowCheckout";
 import { addToCart, getCart, setCustomization } from "../utils/cart";
 import {
@@ -16,6 +17,7 @@ import {
   isPurchaseBlockedRole,
   readStoredSessionClaims,
 } from "../utils/authRoute";
+import { hasActiveSession } from "../utils/authSession";
 
 import { API_URL } from "../apiBase";
 const OPTION_LABELS = {
@@ -151,34 +153,10 @@ const isImageReference = (value) => {
   if (!text) return false;
   return (
     text.startsWith("data:image/") ||
+    text.startsWith("/") ||
     text.startsWith("http://") ||
     text.startsWith("https://")
   );
-};
-
-const readFilesAsDataUrls = async (files = []) => {
-  const selected = Array.from(files || []).slice(0, 3);
-  if (selected.length === 0) return [];
-
-  const urls = await Promise.all(
-    selected.map(
-      (file) =>
-        new Promise((resolve) => {
-          if (!file || !String(file.type || "").startsWith("image/")) {
-            resolve("");
-            return;
-          }
-
-          const reader = new FileReader();
-          reader.onload = () =>
-            resolve(typeof reader.result === "string" ? reader.result : "");
-          reader.onerror = () => resolve("");
-          reader.readAsDataURL(file);
-        })
-    )
-  );
-
-  return urls.filter(Boolean).slice(0, 3);
 };
 
 const truncate = (text, size = 44) =>
@@ -233,8 +211,7 @@ export default function Customization() {
 
   useEffect(() => {
     const load = async () => {
-      const token = localStorage.getItem("token");
-      if (!token || sessionClaims.isExpired) {
+      if (!hasActiveSession() || sessionClaims.isExpired) {
         navigate("/login");
         setLoading(false);
         return;
@@ -1793,10 +1770,21 @@ export default function Customization() {
                 accept="image/*"
                 multiple
                 onChange={async (event) => {
-                  const references = await readFilesAsDataUrls(
-                    event.target.files || []
-                  );
-                  setBuildReferenceImageNames(references);
+                  try {
+                    const references = await optimizeImageFiles(
+                      Array.from(event.target.files || []).slice(0, 3),
+                      {
+                        maxWidth: 1400,
+                        maxHeight: 1400,
+                        quality: 0.82,
+                        uploadFolder: "customization",
+                        uploadPrefix: "reference",
+                      }
+                    );
+                    setBuildReferenceImageNames(references);
+                  } finally {
+                    event.target.value = "";
+                  }
                 }}
                 disabled={isDisabled}
               />

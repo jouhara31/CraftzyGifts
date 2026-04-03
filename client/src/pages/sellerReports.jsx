@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_URL } from "../apiBase";
-import { clearAuthSession } from "../utils/authSession";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 import useHashScroll from "../utils/useHashScroll";
 
 const asText = (value) => String(value ?? "").trim();
@@ -32,8 +32,7 @@ export default function SellerReports() {
   }, [navigate]);
 
   const loadReports = useCallback(async () => {
-    const token = asText(localStorage.getItem("token"));
-    if (!token) {
+    if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
@@ -41,19 +40,18 @@ export default function SellerReports() {
     setLoading(true);
     setError("");
     try {
-      const headers = { Authorization: `Bearer ${token}` };
-      const [ordersRes, productsRes] = await Promise.all([
-        fetch(`${API_URL}/api/orders/seller`, { headers }),
-        fetch(`${API_URL}/api/products/seller/me`, { headers }),
+      const [ordersResult, productsResult] = await Promise.all([
+        apiFetchJson(`${API_URL}/api/orders/seller`),
+        apiFetchJson(`${API_URL}/api/products/seller/me`),
       ]);
+      const ordersRes = ordersResult.response;
+      const productsRes = productsResult.response;
+      const ordersData = ordersResult.data;
+      const productsData = productsResult.data;
       if (ordersRes.status === 401 || productsRes.status === 401) {
         clearAndRedirect();
         return;
       }
-      const [ordersData, productsData] = await Promise.all([
-        ordersRes.json().catch(() => []),
-        productsRes.json().catch(() => []),
-      ]);
       if (!ordersRes.ok) {
         setError(ordersData?.message || "Unable to load seller reports.");
         return;

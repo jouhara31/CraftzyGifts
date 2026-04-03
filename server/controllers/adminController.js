@@ -15,6 +15,7 @@ const {
   normalizePlatformSettings,
   toPlatformSettingsPayload,
 } = require("../utils/platformSettings");
+const { handleControllerError } = require("../utils/apiError");
 
 const SELLER_STATUS_SET = new Set(["pending", "approved", "rejected"]);
 const PRODUCT_STATUS_SET = new Set(["active", "inactive"]);
@@ -232,7 +233,7 @@ exports.getSellers = async (req, res) => {
       .lean();
     res.json(sellers);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -260,7 +261,7 @@ exports.updateSellerStatus = async (req, res) => {
       createdAt: seller.createdAt,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -272,7 +273,7 @@ exports.getAdminProducts = async (req, res) => {
       .lean();
     res.json(products);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -350,7 +351,7 @@ exports.updateAdminProduct = async (req, res) => {
     await product.populate("seller", "name email storeName sellerStatus");
     res.json(product);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -364,7 +365,7 @@ exports.getAdminOrders = async (req, res) => {
       .lean();
     res.json(orders);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -377,7 +378,7 @@ exports.getAdminOverview = async (req, res) => {
     const payload = await getCachedAdminOverviewPayload();
     res.json(payload);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -389,7 +390,7 @@ exports.getAdminCustomizationOptions = async (req, res) => {
       updatedAt: config?.updatedAt,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -408,7 +409,7 @@ exports.updateAdminCustomizationOptions = async (req, res) => {
       updatedAt: config.updatedAt,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -417,7 +418,7 @@ exports.getAdminPlatformSettings = async (req, res) => {
     const settings = await ensurePlatformSettings();
     res.json(toPlatformSettingsPayload(settings));
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -426,7 +427,7 @@ exports.getAdminCategories = async (req, res) => {
     const config = await ensureCategoryMaster();
     res.json(toCategoryMasterPayload(config));
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -480,7 +481,7 @@ exports.createAdminCategory = async (req, res) => {
     await config.save();
     return res.status(201).json(toCategoryMasterPayload(config));
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -536,7 +537,7 @@ exports.updateAdminCategory = async (req, res) => {
     await config.save();
     return res.json(toCategoryMasterPayload(config));
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -561,7 +562,7 @@ exports.deleteAdminCategory = async (req, res) => {
     await config.save();
     return res.json(toCategoryMasterPayload(config));
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -584,6 +585,7 @@ exports.updateAdminPlatformSettings = async (req, res) => {
     await settings.save();
     res.json(toPlatformSettingsPayload(settings));
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
+

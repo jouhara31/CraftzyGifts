@@ -40,6 +40,15 @@ const signAccessToken = (user) =>
     expiresIn: JWT_EXPIRES_IN,
   });
 
+const getAccessTokenExpiresAt = (token) => {
+  const payload = jwt.decode(token);
+  const expSeconds = Number(payload?.exp || 0);
+  if (!Number.isFinite(expSeconds) || expSeconds <= 0) {
+    return null;
+  }
+  return new Date(expSeconds * 1000);
+};
+
 const hashRefreshToken = (token) =>
   crypto.createHash("sha256").update(String(token || "")).digest("hex");
 
@@ -101,10 +110,13 @@ const issueAuthSession = async (user, req) => {
 
   await persistRefreshSessions(user, [nextSession, ...existingSessions]);
 
+  const accessToken = signAccessToken(user);
+
   return {
-    token: signAccessToken(user),
+    token: accessToken,
     refreshToken,
     tokenExpiresIn: JWT_EXPIRES_IN,
+    accessTokenExpiresAt: getAccessTokenExpiresAt(accessToken),
     refreshTokenExpiresAt: nextSession.expiresAt,
     user: buildPublicUserPayload(user),
   };
@@ -155,6 +167,7 @@ module.exports = {
   REFRESH_TOKEN_EXPIRES_IN_DAYS,
   MAX_REFRESH_SESSIONS,
   buildPublicUserPayload,
+  getAccessTokenExpiresAt,
   hashRefreshToken,
   issueAuthSession,
   refreshAuthSession,

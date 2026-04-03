@@ -9,6 +9,7 @@ import {
 } from "../utils/orderInvoice";
 
 import { API_URL } from "../apiBase";
+import { apiFetch, apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 const STATUS_NEXT = {
   placed: ["processing", "cancelled"],
@@ -61,11 +62,14 @@ export default function AdminOrders() {
   const [detailOrder, setDetailOrder] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const navigate = useNavigate();
+  const clearAndRedirect = useCallback(() => {
+    clearAuthSession();
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   const loadOrders = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -73,11 +77,12 @@ export default function AdminOrders() {
     setNotice("");
     setIsRefreshing(true);
     try {
-      const res = await fetch(`${API_URL}/api/admin/orders`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/orders`);
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setError(data.message || "Unable to load orders.");
         return;
       }
@@ -87,13 +92,12 @@ export default function AdminOrders() {
     } finally {
       setIsRefreshing(false);
     }
-  }, [navigate]);
+  }, [clearAndRedirect]);
 
   const updateStatus = async (orderId, status) => {
     if (!status) return;
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -101,16 +105,18 @@ export default function AdminOrders() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/status`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/orders/${orderId}/status`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ status }),
       });
-      const data = await res.json();
-      if (!res.ok) {
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setError(data.message || "Unable to update order status.");
         return;
       }
@@ -125,9 +131,8 @@ export default function AdminOrders() {
   };
 
   const handleInvoiceDownload = async (orderId) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -136,14 +141,12 @@ export default function AdminOrders() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/orders/${orderId}/invoice`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch(`${API_URL}/api/orders/${orderId}/invoice`);
       if (res.status === 401) {
         if (invoiceWindow && !invoiceWindow.closed) {
           invoiceWindow.close();
         }
-        navigate("/login");
+        clearAndRedirect();
         return;
       }
       if (!res.ok) {
@@ -172,9 +175,8 @@ export default function AdminOrders() {
   };
 
   const handleShippingLabelDownload = async (orderId) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -186,14 +188,12 @@ export default function AdminOrders() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/orders/${orderId}/shipping-label`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch(`${API_URL}/api/orders/${orderId}/shipping-label`);
       if (res.status === 401) {
         if (labelWindow && !labelWindow.closed) {
           labelWindow.close();
         }
-        navigate("/login");
+        clearAndRedirect();
         return;
       }
       if (!res.ok) {

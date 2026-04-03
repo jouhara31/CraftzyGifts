@@ -6,6 +6,12 @@ import { optimizeImageFile } from "../utils/imageUpload";
 import { getProductImage } from "../utils/productMedia";
 import { prefetchProductDetail } from "../utils/productDetailCache";
 import {
+  apiFetchJson,
+  clearAuthSession,
+  hasActiveSession,
+  readStoredUserId,
+} from "../utils/authSession";
+import {
   clearSellerStoreCache,
   getCachedSellerStore,
   loadSellerStore,
@@ -89,18 +95,7 @@ const readStoredUser = () => {
 };
 
 const readUserIdFromToken = () => {
-  try {
-    const token = localStorage.getItem("token");
-    if (!token) return "";
-    const payload = token.split(".")?.[1];
-    if (!payload) return "";
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-    const decoded = JSON.parse(atob(padded));
-    return String(decoded?.id || "").trim();
-  } catch {
-    return "";
-  }
+  return String(readStoredUserId() || "").trim();
 };
 
 const persistStoredUser = (nextUser) => {
@@ -332,12 +327,11 @@ export default function SellerStore({ sellerWorkspaceMode = false }) {
     setViewer(storedViewer);
 
     const loadViewer = async () => {
-      const token = localStorage.getItem("token");
       const storedViewerId = String(
         storedViewer?.id || storedViewer?._id || readUserIdFromToken()
       ).trim();
       const shouldRefreshViewer =
-        Boolean(token) &&
+        hasActiveSession() &&
         Boolean(storedViewerId) &&
         storedViewerId === String(sellerId || "").trim();
 
@@ -346,10 +340,12 @@ export default function SellerStore({ sellerWorkspaceMode = false }) {
       }
 
       try {
-        const res = await fetch(`${API_URL}/api/users/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
+        const { response: res, data } = await apiFetchJson(`${API_URL}/api/users/me`);
+        if (res.status === 401) {
+          clearAuthSession();
+          if (!ignore) setViewer(readStoredUser());
+          return;
+        }
         if (!res.ok || ignore) return;
         setViewer(data);
         persistStoredUser({
@@ -381,8 +377,10 @@ export default function SellerStore({ sellerWorkspaceMode = false }) {
     let ignore = false;
 
     const loadStore = async () => {
-      const token = localStorage.getItem("token");
-      const cacheOptions = { ...STORE_CORE_LOAD_OPTIONS, token };
+      const cacheOptions = {
+        ...STORE_CORE_LOAD_OPTIONS,
+        authenticated: hasActiveSession(),
+      };
       const cached = getCachedSellerStore(sellerId, cacheOptions);
       if (cached) {
         const seller = cached?.seller || null;
@@ -578,10 +576,9 @@ export default function SellerStore({ sellerWorkspaceMode = false }) {
 
     const loadStoreFeedbacks = async () => {
       try {
-        const token = localStorage.getItem("token");
         const data = await loadSellerStore(sellerId, {
           ...STORE_FEEDBACK_LOAD_OPTIONS,
-          token,
+          authenticated: hasActiveSession(),
         });
         if (ignore) return;
         setStoreData((prev) => ({
@@ -658,8 +655,9 @@ export default function SellerStore({ sellerWorkspaceMode = false }) {
       return;
     }
 
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (!hasActiveSession()) {
+      clearAuthSession();
+      navigate("/login");
       setEditError("Login required to update store.");
       return;
     }
@@ -685,20 +683,20 @@ export default function SellerStore({ sellerWorkspaceMode = false }) {
       const submittedProfileImage = payload.profileImage;
       const submittedCoverImage = payload.storeCoverImage;
 
-      const res = await fetch(`${API_URL}/api/users/me`, {
+      const { response: res, data } = await apiFetchJson(`${API_URL}/api/users/me`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      if (res.status === 401) {
+        clearAuthSession();
+        navigate("/login");
+        setEditError("Session expired. Please login again.");
+        return;
+      }
       if (!res.ok) {
-        if (res.status === 401) {
-          setEditError("Session expired. Please login again.");
-          return;
-        }
         setEditError(data?.message || "Unable to save store changes.");
         return;
       }
@@ -901,12 +899,10 @@ export default function SellerStore({ sellerWorkspaceMode = false }) {
     setContactNotice("");
     setContactSubmitting(true);
     try {
-      const token = localStorage.getItem("token");
-      const res = await fetch(`${API_URL}/api/users/sellers/${sellerId}/contact`, {
+      const { response: res, data } = await apiFetchJson(`${API_URL}/api/users/sellers/${sellerId}/contact`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           name: contactForm.name,
@@ -914,7 +910,11 @@ export default function SellerStore({ sellerWorkspaceMode = false }) {
           message: contactForm.message,
         }),
       });
-      const data = await res.json();
+      if (res.status === 401 && hasActiveSession()) {
+        clearAuthSession();
+        setContactError("Session expired. Please login again.");
+        return;
+      }
       if (!res.ok) {
         setContactError(data?.message || "Unable to send your message right now.");
         return;

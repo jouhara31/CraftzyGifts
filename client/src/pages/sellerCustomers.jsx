@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_URL } from "../apiBase";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 import useHashScroll from "../utils/useHashScroll";
 
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
@@ -50,26 +51,33 @@ export default function SellerCustomers() {
   const [selectedCustomerKey, setSelectedCustomerKey] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const clearAndRedirect = useCallback(() => {
+    clearAuthSession();
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   const loadData = useCallback(async () => {
-    const token = String(localStorage.getItem("token") || "").trim();
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
     setLoading(true);
     setError("");
     try {
-      const headers = { Authorization: `Bearer ${token}` };
-      const [ordersRes, queriesRes] = await Promise.all([
-        fetch(`${API_URL}/api/orders/seller`, { headers }),
-        fetch(`${API_URL}/api/users/me/contact-requests?limit=24`, { headers }),
+      const [ordersResult, queriesResult] = await Promise.all([
+        apiFetchJson(`${API_URL}/api/orders/seller`),
+        apiFetchJson(`${API_URL}/api/users/me/contact-requests?limit=24`),
       ]);
-      const [ordersData, queriesData] = await Promise.all([
-        ordersRes.json().catch(() => []),
-        queriesRes.json().catch(() => ({})),
-      ]);
+      const ordersRes = ordersResult.response;
+      const queriesRes = queriesResult.response;
+      const ordersData = ordersResult.data;
+      const queriesData = queriesResult.data;
+
+      if ([ordersRes, queriesRes].some((response) => response.status === 401)) {
+        clearAndRedirect();
+        return;
+      }
 
       if (!ordersRes.ok) {
         setError(ordersData?.message || "Unable to load customer orders.");
@@ -87,7 +95,7 @@ export default function SellerCustomers() {
     } finally {
       setLoading(false);
     }
-  }, [navigate]);
+  }, [clearAndRedirect]);
 
   useEffect(() => {
     loadData();

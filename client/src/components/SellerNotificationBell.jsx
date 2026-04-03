@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { API_URL } from "../apiBase";
-import { clearAuthSession } from "../utils/authSession";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 import { openNotificationStream } from "../utils/notificationStream";
 
 const formatNotificationDate = (value) => {
@@ -35,16 +35,12 @@ export default function SellerNotificationBell() {
   }, []);
 
   const loadNotifications = useCallback(async () => {
-    const token = String(localStorage.getItem("token") || "").trim();
-    if (!token) return;
+    if (!hasActiveSession()) return;
 
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API_URL}/api/users/me/notifications?limit=6`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json().catch(() => ({}));
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/notifications?limit=6`);
 
       if (response.status === 401) {
         clearAndRedirect();
@@ -64,19 +60,20 @@ export default function SellerNotificationBell() {
   }, [clearAndRedirect, syncState]);
 
   const markRead = useCallback(async ({ ids = [], all = false } = {}) => {
-    const token = String(localStorage.getItem("token") || "").trim();
-    if (!token) return null;
+    if (!hasActiveSession()) return null;
 
     try {
-      const response = await fetch(`${API_URL}/api/users/me/notifications/read`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/notifications/read`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ ids, all }),
       });
-      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        clearAndRedirect();
+        return null;
+      }
       if (!response.ok) return null;
 
       const normalizedIds = Array.isArray(ids)

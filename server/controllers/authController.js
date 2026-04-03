@@ -12,11 +12,21 @@ const {
   validateLoginPayload,
 } = require("../utils/authValidation");
 const {
+  buildPublicUserPayload,
   hashRefreshToken,
   issueAuthSession,
   refreshAuthSession,
   revokeRefreshToken,
 } = require("../utils/authSessions");
+const { verifyAccessToken } = require("../middleware/auth");
+const {
+  ACCESS_COOKIE_NAME,
+  REFRESH_COOKIE_NAME,
+  clearSessionCookies,
+  readCookie,
+  setSessionCookies,
+} = require("../utils/sessionCookies");
+const { handleControllerError } = require("../utils/apiError");
 
 const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000;
 const PASSWORD_RESET_TTL_MINUTES = Math.round(PASSWORD_RESET_TTL_MS / 60000);
@@ -25,6 +35,7 @@ const EMAIL_VERIFICATION_TTL_HOURS = Math.round(EMAIL_VERIFICATION_TTL_MS / (60 
 const LOGIN_OTP_TTL_MS = 10 * 60 * 1000;
 const LOGIN_OTP_TTL_MINUTES = Math.round(LOGIN_OTP_TTL_MS / 60000);
 const MAX_LOGIN_OTP_ATTEMPTS = 5;
+const AUTH_ERROR_MESSAGE = "Unable to complete the authentication request right now.";
 
 const hashPasswordResetToken = (value = "") =>
   crypto.createHash("sha256").update(String(value || "")).digest("hex");
@@ -148,6 +159,47 @@ const sendLoginOtpEmail = async (user, otpCode) =>
     },
   });
 
+const buildSessionPayload = (session = {}) => ({
+  user: session.user,
+  tokenExpiresIn: session.tokenExpiresIn,
+  accessTokenExpiresAt: session.accessTokenExpiresAt || null,
+  refreshTokenExpiresAt: session.refreshTokenExpiresAt || null,
+});
+
+const sendSessionResponse = (res, req, session, message, statusCode = 200) => {
+  setSessionCookies(res, req, session);
+  return res.status(statusCode).json({
+    message,
+    ...buildSessionPayload(session),
+  });
+};
+
+const readRefreshTokenInput = (req) =>
+  String(
+    readCookie(req, REFRESH_COOKIE_NAME) ||
+      req.body?.refreshToken ||
+      req.headers["x-refresh-token"] ||
+      ""
+  ).trim();
+
+const findUserByRefreshToken = async (refreshToken) => {
+  const normalizedToken = String(refreshToken || "").trim();
+  if (!normalizedToken) return null;
+  return User.findOne({
+    "refreshTokens.tokenHash": hashRefreshToken(normalizedToken),
+  });
+};
+
+const getAuthenticatedUserFromAccessCookie = async (req) => {
+  const accessToken = String(readCookie(req, ACCESS_COOKIE_NAME) || "").trim();
+  if (!accessToken) return null;
+
+  const decoded = verifyAccessToken(accessToken);
+  const user = await User.findById(decoded.id);
+  if (!user) return null;
+  return user;
+};
+
 // REGISTER
 exports.register = async (req, res) => {
   try {
@@ -188,7 +240,7 @@ exports.register = async (req, res) => {
       ...buildEmailVerificationPreview(verificationToken),
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -222,12 +274,9 @@ exports.login = async (req, res) => {
 
     const session = await issueAuthSession(user, req);
 
-    res.json({
-      message: "Login successful",
-      ...session,
-    });
+    return sendSessionResponse(res, req, session, "Login successful");
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error, AUTH_ERROR_MESSAGE);
   }
 };
 
@@ -291,61 +340,88 @@ exports.verifyLoginOtp = async (req, res) => {
     await user.save();
 
     const session = await issueAuthSession(user, req);
-    return res.json({
-      message: "OTP verified successfully.",
-      ...session,
-    });
+    return sendSessionResponse(res, req, session, "OTP verified successfully.");
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error, AUTH_ERROR_MESSAGE);
   }
 };
 
-exports.refresh = async (req, res) => {
+exports.session = async (req, res) => {
   try {
-    const refreshToken = String(req.body?.refreshToken || "").trim();
-    if (!refreshToken) {
-      return res.status(400).json({ message: "Refresh token is required." });
+    const currentUser = await getAuthenticatedUserFromAccessCookie(req).catch(() => null);
+    if (currentUser) {
+      return res.json({
+        message: "Session restored successfully.",
+        user: buildPublicUserPayload(currentUser),
+      });
     }
 
-    const user = await User.findOne({
-      "refreshTokens.tokenHash": hashRefreshToken(refreshToken),
-    });
+    const refreshToken = readRefreshTokenInput(req);
+    if (!refreshToken) {
+      clearSessionCookies(res, req);
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const user = await findUserByRefreshToken(refreshToken);
     if (!user) {
+      clearSessionCookies(res, req);
       return res.status(401).json({ message: "Refresh token is invalid or expired." });
     }
 
     const session = await refreshAuthSession(user, refreshToken, req);
     if (!session) {
+      clearSessionCookies(res, req);
       return res.status(401).json({ message: "Refresh token is invalid or expired." });
     }
 
-    return res.json({
-      message: "Session refreshed successfully.",
-      ...session,
-    });
+    return sendSessionResponse(res, req, session, "Session restored successfully.");
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    clearSessionCookies(res, req);
+    return handleControllerError(res, error, AUTH_ERROR_MESSAGE);
+  }
+};
+
+exports.refresh = async (req, res) => {
+  try {
+    const refreshToken = readRefreshTokenInput(req);
+    if (!refreshToken) {
+      return res.status(400).json({ message: "Refresh token is required." });
+    }
+
+    const user = await findUserByRefreshToken(refreshToken);
+    if (!user) {
+      clearSessionCookies(res, req);
+      return res.status(401).json({ message: "Refresh token is invalid or expired." });
+    }
+
+    const session = await refreshAuthSession(user, refreshToken, req);
+    if (!session) {
+      clearSessionCookies(res, req);
+      return res.status(401).json({ message: "Refresh token is invalid or expired." });
+    }
+
+    return sendSessionResponse(res, req, session, "Session refreshed successfully.");
+  } catch (error) {
+    clearSessionCookies(res, req);
+    return handleControllerError(res, error, AUTH_ERROR_MESSAGE);
   }
 };
 
 exports.logout = async (req, res) => {
   try {
-    const refreshToken = String(req.body?.refreshToken || "").trim();
-    if (!refreshToken) {
-      return res.status(400).json({ message: "Refresh token is required." });
-    }
-
-    const user = await User.findOne({
-      "refreshTokens.tokenHash": hashRefreshToken(refreshToken),
-    });
+    const refreshToken = readRefreshTokenInput(req);
+    const user = refreshToken ? await findUserByRefreshToken(refreshToken) : null;
     if (!user) {
+      clearSessionCookies(res, req);
       return res.json({ message: "Session cleared." });
     }
 
     await revokeRefreshToken(user, refreshToken);
+    clearSessionCookies(res, req);
     return res.json({ message: "Logged out successfully." });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    clearSessionCookies(res, req);
+    return handleControllerError(res, error, AUTH_ERROR_MESSAGE);
   }
 };
 
@@ -377,7 +453,7 @@ exports.requestPasswordReset = async (req, res) => {
       ...preview,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error, AUTH_ERROR_MESSAGE);
   }
 };
 
@@ -423,7 +499,7 @@ exports.resetPassword = async (req, res) => {
       message: "Password reset successful. Please login with your new password.",
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error, AUTH_ERROR_MESSAGE);
   }
 };
 
@@ -449,7 +525,7 @@ exports.requestEmailVerification = async (req, res) => {
       ...buildEmailVerificationPreview(verificationToken),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error, AUTH_ERROR_MESSAGE);
   }
 };
 
@@ -482,6 +558,7 @@ exports.verifyEmail = async (req, res) => {
       message: "Email verified successfully. You can continue with your account.",
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error, AUTH_ERROR_MESSAGE);
   }
 };
+

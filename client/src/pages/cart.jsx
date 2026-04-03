@@ -16,6 +16,7 @@ import {
   isPurchaseBlockedRole,
   readStoredSessionClaims,
 } from "../utils/authRoute";
+import { hasActiveSession } from "../utils/authSession";
 import { fetchJsonCached } from "../utils/jsonCache";
 
 import { API_URL } from "../apiBase";
@@ -76,8 +77,7 @@ export default function Cart() {
   const purchaseBlockedMessage = getPurchaseBlockedMessage(userRole);
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token || sessionClaims.isExpired) {
+    if (!hasActiveSession() || sessionClaims.isExpired) {
       navigate("/login");
     }
   }, [navigate, sessionClaims.isExpired]);
@@ -204,8 +204,7 @@ export default function Cart() {
   }, []);
 
   const guardPurchaseAction = () => {
-    const token = localStorage.getItem("token");
-    if (!token || sessionClaims.isExpired) {
+    if (!hasActiveSession() || sessionClaims.isExpired) {
       navigate("/login");
       return false;
     }

@@ -3,20 +3,11 @@ import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
 
 import { API_URL } from "../apiBase";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 const toNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-};
-const readApiPayload = async (response) => {
-  const text = await response.text();
-  if (!text) return {};
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { message: text };
-  }
 };
 const formatStatus = (value = "") =>
   String(value || "")
@@ -123,22 +114,26 @@ export default function AdminDashboard() {
   const [financeLoading, setFinanceLoading] = useState(false);
   const [finance, setFinance] = useState({ summary: {}, batches: [] });
   const navigate = useNavigate();
+  const clearAndRedirect = useCallback(() => {
+    clearAuthSession();
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   const loadOverview = useCallback(async () => {
     setError("");
     setLoading(true);
     try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        navigate("/login");
+      if (!hasActiveSession()) {
+        clearAndRedirect();
         return;
       }
 
-      const res = await fetch(`${API_URL}/api/admin/overview`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await readApiPayload(res);
-      if (!res.ok) {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/overview`);
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setError(data.message || "Unable to load admin overview.");
         return;
       }
@@ -148,23 +143,23 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [navigate]);
+  }, [clearAndRedirect]);
 
   const loadPayouts = useCallback(async () => {
     setFinanceError("");
     setFinanceLoading(true);
     try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        navigate("/login");
+      if (!hasActiveSession()) {
+        clearAndRedirect();
         return;
       }
 
-      const res = await fetch(`${API_URL}/api/admin/finance/payouts`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await readApiPayload(res);
-      if (!res.ok) {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/finance/payouts`);
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setFinanceError(data.message || "Unable to load payout queue.");
         return;
       }
@@ -178,7 +173,7 @@ export default function AdminDashboard() {
     } finally {
       setFinanceLoading(false);
     }
-  }, [navigate]);
+  }, [clearAndRedirect]);
 
   useEffect(() => {
     loadOverview();
@@ -186,9 +181,8 @@ export default function AdminDashboard() {
   }, [loadOverview, loadPayouts]);
 
   const updateSellerStatus = async (sellerId, status) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -196,16 +190,18 @@ export default function AdminDashboard() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/admin/sellers/${sellerId}/status`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/sellers/${sellerId}/status`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ status }),
       });
-      const data = await res.json();
-      if (!res.ok) {
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setError(data.message || "Unable to update seller status.");
         return;
       }
@@ -219,9 +215,8 @@ export default function AdminDashboard() {
   };
 
   const updatePayoutStatus = async (batchId, status) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -229,16 +224,18 @@ export default function AdminDashboard() {
     setNotice("");
     setFinanceError("");
     try {
-      const res = await fetch(`${API_URL}/api/admin/finance/payouts/${batchId}`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/finance/payouts/${batchId}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ status }),
       });
-      const data = await readApiPayload(res);
-      if (!res.ok) {
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setFinanceError(data.message || "Unable to update payout batch.");
         return;
       }
@@ -339,7 +336,7 @@ export default function AdminDashboard() {
           </div>
           <div className="seller-toolbar">
             <button className="btn primary" type="button" onClick={() => navigate("/admin/products")}>
-              Add Product
+              View products
             </button>
             <button className="btn ghost" type="button" onClick={() => navigate("/admin/categories")}>
               Manage Categories

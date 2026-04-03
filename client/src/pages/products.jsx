@@ -16,6 +16,7 @@ import {
   isPurchaseBlockedRole,
   readStoredSessionClaims,
 } from "../utils/authRoute";
+import { hasActiveSession } from "../utils/authSession";
 import { fetchJsonCached } from "../utils/jsonCache";
 import { prefetchProductDetail } from "../utils/productDetailCache";
 
@@ -422,8 +423,7 @@ export default function Products() {
   };
 
   const requireLogin = () => {
-    const token = localStorage.getItem("token");
-    if (!token || sessionClaims.isExpired) {
+    if (!hasActiveSession() || sessionClaims.isExpired) {
       navigate("/login");
       return false;
     }
@@ -822,9 +822,7 @@ export default function Products() {
               {catalog.items.map((item) => {
                 const prefetchCurrentProduct = () => {
                   if (!item?._id) return;
-                  prefetchProductDetail(String(item._id), {
-                    token: localStorage.getItem("token"),
-                  });
+                  prefetchProductDetail(String(item._id));
                 };
                 const sellerName =
                   item?.seller?.storeName || item?.seller?.name || "Craftzy seller";

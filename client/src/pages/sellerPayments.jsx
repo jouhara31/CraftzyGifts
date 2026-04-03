@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useHashScroll from "../utils/useHashScroll";
 import { API_URL } from "../apiBase";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 const toCsvCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
@@ -33,26 +34,33 @@ export default function SellerPayments() {
   const [requestingPayout, setRequestingPayout] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const clearAndRedirect = useCallback(() => {
+    clearAuthSession();
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   const loadPayments = useCallback(async () => {
-    const token = String(localStorage.getItem("token") || "").trim();
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
     setLoading(true);
     setError("");
     try {
-      const headers = { Authorization: `Bearer ${token}` };
-      const [financeRes, profileRes] = await Promise.all([
-        fetch(`${API_URL}/api/orders/seller/finance`, { headers }),
-        fetch(`${API_URL}/api/users/me`, { headers }),
+      const [financeResult, profileResult] = await Promise.all([
+        apiFetchJson(`${API_URL}/api/orders/seller/finance`),
+        apiFetchJson(`${API_URL}/api/users/me`),
       ]);
-      const [financeData, profileData] = await Promise.all([
-        financeRes.json().catch(() => ({})),
-        profileRes.json().catch(() => ({})),
-      ]);
+      const financeRes = financeResult.response;
+      const profileRes = profileResult.response;
+      const financeData = financeResult.data;
+      const profileData = profileResult.data;
+
+      if ([financeRes, profileRes].some((response) => response.status === 401)) {
+        clearAndRedirect();
+        return;
+      }
 
       if (!financeRes.ok) {
         setError(financeData?.message || "Unable to load seller finance data.");
@@ -75,7 +83,7 @@ export default function SellerPayments() {
     } finally {
       setLoading(false);
     }
-  }, [navigate]);
+  }, [clearAndRedirect]);
 
   useEffect(() => {
     loadPayments();
@@ -161,9 +169,8 @@ export default function SellerPayments() {
   };
 
   const requestPayout = async () => {
-    const token = String(localStorage.getItem("token") || "").trim();
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -171,15 +178,17 @@ export default function SellerPayments() {
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/api/orders/seller/finance/payouts`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/orders/seller/finance/payouts`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({}),
       });
-      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
       if (!response.ok) {
         setError(data?.message || "Unable to create payout request.");
         return;

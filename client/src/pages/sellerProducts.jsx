@@ -9,6 +9,7 @@ import {
 } from "../utils/categoryMaster";
 import { optimizeImageFiles } from "../utils/imageUpload";
 import { getProductImage } from "../utils/productMedia";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 
 import { API_URL } from "../apiBase";
 const MAX_SELLING_PRICE = 200000;
@@ -825,6 +826,10 @@ export default function SellerProducts() {
   const editPanelRef = useRef(null);
   const editNameInputRef = useRef(null);
   const navigate = useNavigate();
+  const clearAndRedirect = useCallback(() => {
+    clearAuthSession();
+    navigate("/login");
+  }, [navigate]);
 
   const refreshCategoryTree = useCallback(async (force = false) => {
     const nextTree = await loadCategoryTree({ force });
@@ -851,18 +856,18 @@ export default function SellerProducts() {
   }, [editingId]);
 
   const loadProducts = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
     setError("");
     try {
-      const res = await fetch(`${API_URL}/api/products/seller/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
+      const { response: res, data } = await apiFetchJson(`${API_URL}/api/products/seller/me`);
+      if (res.status === 401) {
+        clearAndRedirect();
+        return;
+      }
       if (!res.ok) {
         setError(data.message || "Unable to load your products.");
         return;
@@ -871,7 +876,7 @@ export default function SellerProducts() {
     } catch {
       setError("Unable to load your products.");
     }
-  }, [navigate]);
+  }, [clearAndRedirect]);
 
   useEffect(() => {
     loadProducts();
@@ -902,9 +907,8 @@ export default function SellerProducts() {
   }, [products, query, lowStockOnly]);
 
   const patchProduct = async (productId, updates, successMessage) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return null;
     }
 
@@ -912,15 +916,17 @@ export default function SellerProducts() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/products/${productId}`, {
+      const { response: res, data } = await apiFetchJson(`${API_URL}/api/products/${productId}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(updates),
       });
-      const data = await res.json();
+      if (res.status === 401) {
+        clearAndRedirect();
+        return null;
+      }
       if (!res.ok) {
         setError(data.message || "Unable to update product.");
         return null;
@@ -970,23 +976,24 @@ export default function SellerProducts() {
       return;
     }
 
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
     setCreating(true);
     try {
-      const res = await fetch(`${API_URL}/api/products`, {
+      const { response: res, data } = await apiFetchJson(`${API_URL}/api/products`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      if (res.status === 401) {
+        clearAndRedirect();
+        return;
+      }
       if (!res.ok) {
         setError(data.message || "Unable to create product.");
         return;
@@ -1305,9 +1312,8 @@ export default function SellerProducts() {
     );
     if (!confirmed) return;
 
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -1315,11 +1321,14 @@ export default function SellerProducts() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/products/${product._id}`, {
+      const { response: res, data } = await apiFetchJson(`${API_URL}/api/products/${product._id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {},
       });
-      const data = await res.json();
+      if (res.status === 401) {
+        clearAndRedirect();
+        return;
+      }
       if (!res.ok) {
         setError(data.message || "Unable to delete product.");
         return;
@@ -1397,9 +1406,8 @@ export default function SellerProducts() {
   };
 
   const runBulkImport = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
     if (!bulkImportText.trim()) {
@@ -1412,17 +1420,19 @@ export default function SellerProducts() {
     setNotice("");
     setBulkImportReport(null);
     try {
-      const res = await fetch(`${API_URL}/api/products/bulk-import`, {
+      const { response: res, data } = await apiFetchJson(`${API_URL}/api/products/bulk-import`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           csvText: bulkImportText,
         }),
       });
-      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        clearAndRedirect();
+        return;
+      }
       if (!res.ok) {
         setError(data?.message || "Unable to import CSV products.");
         return;

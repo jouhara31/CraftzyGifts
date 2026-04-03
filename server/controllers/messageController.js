@@ -13,6 +13,7 @@ const {
   createSellerNotification,
 } = require("../utils/sellerNotifications");
 const { persistInlineAsset } = require("../utils/assetStore");
+const { handleControllerError } = require("../utils/apiError");
 
 const SELLER_SELECT =
   "name storeName profileImage sellerStatus instagramUrl supportEmail createdAt";
@@ -97,8 +98,16 @@ const normalizeSupportText = (value = "", maxLength = MAX_SUPPORT_TICKET_MESSAGE
   String(value || "").trim().replace(/\s+/g, " ").slice(0, maxLength);
 
 const normalizeSupportAttachment = async (value = "") => {
-  const text = String(value || "").trim().slice(0, 900000);
+  const text = String(value || "").trim().slice(0, 2000);
   if (!text) return "";
+  if (/^data:/i.test(text)) {
+    const error = new Error("Please upload support screenshots as files instead of inline base64 data.");
+    error.status = 400;
+    throw error;
+  }
+  if (/^https?:\/\//i.test(text) || text.startsWith("/")) {
+    return text;
+  }
   return persistInlineAsset({
     value: text,
     folder: "support",
@@ -299,7 +308,7 @@ exports.getConversation = async (req, res) => {
       conversation: formatConversation(resolved.conversation, req.user?.role),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -366,7 +375,7 @@ exports.listConversations = async (req, res) => {
 
     return res.json({ items });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -388,7 +397,7 @@ exports.getMessages = async (req, res) => {
       items: (Array.isArray(items) ? items : []).map((entry) => formatMessage(entry)),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -466,7 +475,7 @@ exports.sendMessage = async (req, res) => {
       message: formatMessage(message),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -491,7 +500,7 @@ exports.listSupportTickets = async (req, res) => {
       ),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -562,7 +571,7 @@ exports.createSupportTicket = async (req, res) => {
       ),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -585,7 +594,7 @@ exports.getSupportTicketMessages = async (req, res) => {
       ),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -655,7 +664,7 @@ exports.replyToSupportTicket = async (req, res) => {
       ),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -687,6 +696,7 @@ exports.updateSupportTicketStatus = async (req, res) => {
       ticket: formatSupportTicket(refreshed),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
+

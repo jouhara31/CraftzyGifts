@@ -1,41 +1,30 @@
-export const decodeTokenPayload = (token) => {
-  try {
-    const payload = String(token || "").split(".")?.[1];
-    if (!payload) return {};
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-    return JSON.parse(atob(padded));
-  } catch {
-    return {};
-  }
-};
+import { hasActiveSession, readStoredUser } from "./authSession";
 
 const normalizeRole = (value) => String(value || "").trim().toLowerCase();
 const normalizeSellerStatus = (value) => String(value || "").trim().toLowerCase();
 
-export const readSessionClaims = (token) => {
-  const payload = decodeTokenPayload(token);
-  const exp = Number(payload?.exp || 0);
-  const isExpired = Number.isFinite(exp) && exp > 0 ? exp * 1000 <= Date.now() : false;
+export const decodeTokenPayload = () => ({});
+
+export const readSessionClaims = () => {
+  const user = readStoredUser();
   return {
-    role: normalizeRole(payload?.role),
-    sellerStatus: normalizeSellerStatus(payload?.sellerStatus),
-    isExpired,
+    role: normalizeRole(user?.role),
+    sellerStatus: normalizeSellerStatus(user?.sellerStatus),
+    isExpired: !hasActiveSession(),
   };
 };
 
-export const readStoredSessionClaims = () =>
-  readSessionClaims(typeof localStorage !== "undefined" ? localStorage.getItem("token") : "");
+export const readStoredSessionClaims = () => readSessionClaims();
 
-export const isTokenExpired = (token) => readSessionClaims(token).isExpired;
+export const isTokenExpired = () => readSessionClaims().isExpired;
 
-export const readActiveUserRole = (token) => {
-  const claims = readSessionClaims(token);
+export const readActiveUserRole = () => {
+  const claims = readSessionClaims();
   return claims.isExpired ? "" : claims.role;
 };
 
-export const readActiveSellerStatus = (token) => {
-  const claims = readSessionClaims(token);
+export const readActiveSellerStatus = () => {
+  const claims = readSessionClaims();
   return claims.isExpired ? "" : claims.sellerStatus;
 };
 
@@ -65,8 +54,11 @@ export const fallbackPathForRole = (role, sellerStatus = "") => {
   return "/";
 };
 
-export const resolveAuthenticatedHome = (token) => {
-  const claims = readSessionClaims(token);
+export const resolveAuthenticatedHomeForUser = (user = null) =>
+  fallbackPathForRole(normalizeRole(user?.role), normalizeSellerStatus(user?.sellerStatus));
+
+export const resolveAuthenticatedHome = () => {
+  const claims = readSessionClaims();
   if (claims.isExpired) return "/login";
   return fallbackPathForRole(claims.role, claims.sellerStatus);
 };

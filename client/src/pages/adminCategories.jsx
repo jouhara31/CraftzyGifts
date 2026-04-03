@@ -4,20 +4,10 @@ import AdminSidebarLayout from "../components/AdminSidebarLayout";
 import { clearCategoryTreeCache, DEFAULT_CATEGORY_TREE } from "../utils/categoryMaster";
 
 import { API_URL } from "../apiBase";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 const EMPTY_DRAFT = {
   category: "",
   subcategories: "",
-};
-
-const readApiPayload = async (response) => {
-  const text = await response.text();
-  if (!text) return {};
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { message: text };
-  }
 };
 
 const normalizeText = (value = "") => String(value || "").trim();
@@ -107,6 +97,10 @@ export default function AdminCategories() {
   const navigate = useNavigate();
   const groupsRef = useRef([]);
   const restoreConfirmRef = useRef(null);
+  const clearAndRedirect = useCallback(() => {
+    clearAuthSession();
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   useEffect(() => {
     groupsRef.current = groups;
@@ -140,37 +134,37 @@ export default function AdminCategories() {
 
   const loadCategories = useCallback(
     async ({ silent = false, preserveOnEmpty = false, preserveOnShrink = false } = {}) => {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        navigate("/login");
+      if (!hasActiveSession()) {
+        clearAndRedirect();
         return;
       }
 
-    if (!silent) {
-      setLoading(true);
-    }
-    setError("");
-    try {
-      const response = await fetch(`${API_URL}/api/admin/categories`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await readApiPayload(response);
-      if (!response.ok) {
-        setError(data.message || "Unable to load categories.");
-        return null;
-      }
-      syncCategoryState(data, { preserveOnEmpty, preserveOnShrink });
-      return data;
-    } catch {
-      setError("Unable to load categories.");
-      return null;
-    } finally {
       if (!silent) {
-        setLoading(false);
+        setLoading(true);
       }
-    }
+      setError("");
+      try {
+        const { response, data } = await apiFetchJson(`${API_URL}/api/admin/categories`);
+        if (response.status === 401) {
+          clearAndRedirect();
+          return null;
+        }
+        if (!response.ok) {
+          setError(data.message || "Unable to load categories.");
+          return null;
+        }
+        syncCategoryState(data, { preserveOnEmpty, preserveOnShrink });
+        return data;
+      } catch {
+        setError("Unable to load categories.");
+        return null;
+      } finally {
+        if (!silent) {
+          setLoading(false);
+        }
+      }
     },
-    [navigate, syncCategoryState]
+    [clearAndRedirect, syncCategoryState]
   );
 
   useEffect(() => {
@@ -213,9 +207,8 @@ export default function AdminCategories() {
   };
 
   const createCategory = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -229,18 +222,20 @@ export default function AdminCategories() {
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/api/admin/categories`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/categories`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           category,
           subcategories: parseSubcategoryText(createDraft.subcategories),
         }),
       });
-      const data = await readApiPayload(response);
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
       if (!response.ok) {
         setError(data.message || "Unable to create category.");
         return;
@@ -276,9 +271,8 @@ export default function AdminCategories() {
       clearTimeout(restoreConfirmRef.current);
       restoreConfirmRef.current = null;
     }
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -289,18 +283,20 @@ export default function AdminCategories() {
     const failed = [];
     for (const group of missingDefaults) {
       try {
-        const response = await fetch(`${API_URL}/api/admin/categories`, {
+        const { response, data } = await apiFetchJson(`${API_URL}/api/admin/categories`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
             category: normalizeText(group.category),
             subcategories: Array.isArray(group.subcategories) ? group.subcategories : [],
           }),
         });
-        const data = await readApiPayload(response);
+        if (response.status === 401) {
+          clearAndRedirect();
+          return;
+        }
         if (!response.ok) {
           failed.push(group.category || "Unknown");
           continue;
@@ -361,9 +357,8 @@ export default function AdminCategories() {
   };
 
   const saveCategory = async (categoryId, subcategoriesOverride) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -400,17 +395,19 @@ export default function AdminCategories() {
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/api/admin/categories/${categoryId}`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/categories/${categoryId}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           subcategories: requestedSubcategories,
         }),
       });
-      const data = await readApiPayload(response);
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
       if (!response.ok) {
         setError(data.message || "Unable to save category.");
         await loadCategories({ silent: true });
@@ -481,9 +478,8 @@ export default function AdminCategories() {
   };
 
   const deleteCategory = async (categoryId, categoryName) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -495,11 +491,13 @@ export default function AdminCategories() {
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/api/admin/categories/${categoryId}`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/categories/${categoryId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await readApiPayload(response);
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
       if (!response.ok) {
         setError(data.message || "Unable to delete category.");
         return;

@@ -15,6 +15,7 @@ import {
 } from "../utils/orderInvoice";
 
 import { API_URL } from "../apiBase";
+import { apiFetch, apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 const LEGACY_OPTION_LABELS = {
   giftBoxes: "Gift box",
   chocolates: "Chocolates",
@@ -179,20 +180,24 @@ export default function SellerOrders() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const statusFilter = asText(searchParams.get("status"));
+  const clearAndRedirect = useCallback(() => {
+    clearAuthSession();
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   const loadOrders = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/orders/seller`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/orders/seller`);
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setError(data.message || "Unable to load seller orders.");
         return;
       }
@@ -201,7 +206,7 @@ export default function SellerOrders() {
     } catch {
       setError("Unable to load seller orders.");
     }
-  }, [navigate]);
+  }, [clearAndRedirect]);
 
   useEffect(() => {
     loadOrders();
@@ -215,9 +220,8 @@ export default function SellerOrders() {
   }, [orders, statusFilter]);
 
   const updateStatus = async (orderId, status) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -225,16 +229,18 @@ export default function SellerOrders() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/orders/${orderId}/status`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/orders/${orderId}/status`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ status }),
       });
-      const data = await res.json();
-      if (!res.ok) {
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setError(data.message || "Unable to update order status.");
         return;
       }
@@ -248,9 +254,8 @@ export default function SellerOrders() {
   };
 
   const reviewReturn = async (orderId, decision) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -258,16 +263,18 @@ export default function SellerOrders() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/orders/${orderId}/return-review`, {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/orders/${orderId}/return-review`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ decision }),
       });
-      const data = await res.json();
-      if (!res.ok) {
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setError(data.message || "Unable to review return request.");
         return;
       }
@@ -306,9 +313,8 @@ export default function SellerOrders() {
   };
 
   const handleInvoiceDownload = async (orderId) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -317,14 +323,12 @@ export default function SellerOrders() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/orders/${orderId}/invoice`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch(`${API_URL}/api/orders/${orderId}/invoice`);
       if (res.status === 401) {
         if (invoiceWindow && !invoiceWindow.closed) {
           invoiceWindow.close();
         }
-        navigate("/login");
+        clearAndRedirect();
         return;
       }
       if (!res.ok) {
@@ -353,9 +357,8 @@ export default function SellerOrders() {
   };
 
   const handleShippingLabelDownload = async (orderId) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
@@ -367,14 +370,12 @@ export default function SellerOrders() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch(`${API_URL}/api/orders/${orderId}/shipping-label`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch(`${API_URL}/api/orders/${orderId}/shipping-label`);
       if (res.status === 401) {
         if (labelWindow && !labelWindow.closed) {
           labelWindow.close();
         }
-        navigate("/login");
+        clearAndRedirect();
         return;
       }
       if (!res.ok) {

@@ -1,36 +1,14 @@
+import { optimizeImageFiles } from "../utils/imageUpload";
+
 const isImageReference = (value) => {
   const text = String(value || "").trim();
   if (!text) return false;
   return (
     text.startsWith("data:image/") ||
+    text.startsWith("/") ||
     text.startsWith("http://") ||
     text.startsWith("https://")
   );
-};
-
-const readFilesAsDataUrls = async (files = []) => {
-  const selected = Array.from(files || []).slice(0, 3);
-  if (selected.length === 0) return [];
-
-  const urls = await Promise.all(
-    selected.map(
-      (file) =>
-        new Promise((resolve) => {
-          if (!file || !String(file.type || "").startsWith("image/")) {
-            resolve("");
-            return;
-          }
-
-          const reader = new FileReader();
-          reader.onload = () =>
-            resolve(typeof reader.result === "string" ? reader.result : "");
-          reader.onerror = () => resolve("");
-          reader.readAsDataURL(file);
-        })
-    )
-  );
-
-  return urls.filter(Boolean).slice(0, 3);
 };
 
 export default function CustomizationPanel({ value, onChange }) {
@@ -92,11 +70,24 @@ export default function CustomizationPanel({ value, onChange }) {
             accept="image/*"
             multiple
             onChange={async (event) => {
-              const references = await readFilesAsDataUrls(event.target.files || []);
-              updateValue({
-                referenceImageUrls: references,
-                referenceImageUrl: references[0] || "",
-              });
+              try {
+                const references = await optimizeImageFiles(
+                  Array.from(event.target.files || []).slice(0, 3),
+                  {
+                    maxWidth: 1400,
+                    maxHeight: 1400,
+                    quality: 0.82,
+                    uploadFolder: "customization",
+                    uploadPrefix: "reference",
+                  }
+                );
+                updateValue({
+                  referenceImageUrls: references,
+                  referenceImageUrl: references[0] || "",
+                });
+              } finally {
+                event.target.value = "";
+              }
             }}
           />
         </div>

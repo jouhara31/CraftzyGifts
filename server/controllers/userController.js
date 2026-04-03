@@ -12,6 +12,8 @@ const { publishNotificationUpdate, subscribeNotificationStream } = require("../u
 const { hashRefreshToken, revokeAllRefreshTokens } = require("../utils/authSessions");
 const { MIN_PASSWORD_LENGTH } = require("../utils/authValidation");
 const { normalizeInstagramUrl } = require("../utils/socialLinks");
+const { REFRESH_COOKIE_NAME, readCookie } = require("../utils/sessionCookies");
+const { handleControllerError } = require("../utils/apiError");
 
 const CONTACT_NAME_MAX = 80;
 const CONTACT_EMAIL_MAX = 160;
@@ -369,6 +371,9 @@ const buildApiKey = (type = "development") => {
   };
 };
 
+const readCurrentRefreshToken = (req) =>
+  String(readCookie(req, REFRESH_COOKIE_NAME) || req.headers["x-refresh-token"] || "").trim();
+
 const normalizeWebhookUrl = (value) => {
   const url = String(value || "").trim();
   if (!url) return "";
@@ -430,7 +435,7 @@ exports.getMe = async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(toProfilePayload(user));
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -686,7 +691,7 @@ exports.updateMe = async (req, res) => {
     await user.save();
     res.json(toProfilePayload(user));
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -701,7 +706,7 @@ exports.listMyApiKeys = async (req, res) => {
       );
     return res.json({ items });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -738,7 +743,7 @@ exports.createMyApiKey = async (req, res) => {
       item: formatApiKeyPayload(savedEntry),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -760,7 +765,7 @@ exports.revokeMyApiKey = async (req, res) => {
 
     return res.json({ item: formatApiKeyPayload(keyDoc) });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -775,7 +780,7 @@ exports.listMyWebhooks = async (req, res) => {
       );
     return res.json({ items });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -807,7 +812,7 @@ exports.createMyWebhook = async (req, res) => {
       secret,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -829,7 +834,7 @@ exports.deleteMyWebhook = async (req, res) => {
 
     return res.json({ message: "Webhook deleted." });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -865,7 +870,7 @@ exports.changeMyPassword = async (req, res) => {
     await user.save();
     return res.json({ message: "Password updated successfully." });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -874,7 +879,7 @@ exports.listMySessions = async (req, res) => {
     const user = await User.findById(req.user.id).select("refreshTokens");
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const currentRefreshToken = String(req.headers["x-refresh-token"] || "").trim();
+    const currentRefreshToken = readCurrentRefreshToken(req);
     const currentTokenHash = currentRefreshToken ? hashRefreshToken(currentRefreshToken) : "";
     const now = Date.now();
     const items = (Array.isArray(user.refreshTokens) ? user.refreshTokens : [])
@@ -892,7 +897,7 @@ exports.listMySessions = async (req, res) => {
 
     return res.json({ items });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -906,7 +911,7 @@ exports.revokeMySession = async (req, res) => {
     const user = await User.findById(req.user.id).select("refreshTokens");
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const currentRefreshToken = String(req.headers["x-refresh-token"] || "").trim();
+    const currentRefreshToken = readCurrentRefreshToken(req);
     const currentTokenHash = currentRefreshToken ? hashRefreshToken(currentRefreshToken) : "";
     const sessions = Array.isArray(user.refreshTokens) ? user.refreshTokens : [];
     const nextSessions = sessions.filter(
@@ -926,7 +931,7 @@ exports.revokeMySession = async (req, res) => {
       items: nextSessions.map((entry) => formatSessionPayload(entry, currentTokenHash)),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -939,7 +944,7 @@ exports.deleteMe = async (req, res) => {
     await User.deleteOne({ _id: req.user.id });
     res.json({ message: "Account deleted successfully" });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -1014,7 +1019,7 @@ exports.submitSellerContactRequest = async (req, res) => {
       message: "Message sent to the store team.",
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -1070,7 +1075,7 @@ exports.listMyContactRequests = async (req, res) => {
       })),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -1084,15 +1089,20 @@ exports.listMyNotifications = async (req, res) => {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    const limit = parsePositiveInt(req.query?.limit, NOTIFICATION_FETCH_LIMIT, 40);
+    const limit = parsePositiveInt(req.query?.limit, NOTIFICATION_FETCH_LIMIT, 100);
+    const fetchAll = parseBoolean(req.query?.all, false);
     const unreadOnly = parseBoolean(req.query?.unreadOnly, false);
     const filter = {
       seller: userId,
       ...(unreadOnly ? { isRead: false } : {}),
     };
+    const query = Notification.find(filter).sort({ createdAt: -1 });
+    if (!fetchAll) {
+      query.limit(limit);
+    }
 
     const [items, unreadCount] = await Promise.all([
-      Notification.find(filter).sort({ createdAt: -1 }).limit(limit).lean(),
+      query.lean(),
       Notification.countDocuments({ seller: userId, isRead: false }),
     ]);
 
@@ -1103,11 +1113,13 @@ exports.listMyNotifications = async (req, res) => {
       ),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
 exports.streamMyNotifications = async (req, res) => {
+  let unsubscribe = () => {};
+  let heartbeatId = null;
   try {
     const userId = String(req.user?.id || "").trim();
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
@@ -1116,6 +1128,11 @@ exports.streamMyNotifications = async (req, res) => {
     if (!["customer", "seller", "admin"].includes(req.user?.role)) {
       return res.status(403).json({ message: "Forbidden" });
     }
+
+    const unreadCount = await Notification.countDocuments({
+      seller: userId,
+      isRead: false,
+    });
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -1128,20 +1145,15 @@ exports.streamMyNotifications = async (req, res) => {
       res.write(`event: ${event}\n`);
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
     };
-
-    const unreadCount = await Notification.countDocuments({
-      seller: userId,
-      isRead: false,
-    });
     writeEvent("notification", {
       reason: "connected",
       unreadCount,
     });
 
-    const unsubscribe = subscribeNotificationStream(userId, (payload) => {
+    unsubscribe = subscribeNotificationStream(userId, (payload) => {
       writeEvent("notification", payload);
     });
-    const heartbeatId = setInterval(() => {
+    heartbeatId = setInterval(() => {
       writeEvent("ping", { sentAt: new Date().toISOString() });
     }, 25000);
 
@@ -1153,7 +1165,13 @@ exports.streamMyNotifications = async (req, res) => {
 
     return undefined;
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    if (heartbeatId) clearInterval(heartbeatId);
+    unsubscribe();
+    if (res.headersSent) {
+      res.end();
+      return undefined;
+    }
+    return handleControllerError(res, error);
   }
 };
 
@@ -1199,6 +1217,7 @@ exports.markMyNotificationsRead = async (req, res) => {
 
     return res.json({ unreadCount });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
+

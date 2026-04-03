@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { optimizeImageFile } from "../utils/imageUpload";
 
 import { API_URL } from "../apiBase";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 
 const createId = (prefix) =>
   `${prefix}_${Math.random().toString(36).slice(2, 9)}_${Date.now()
@@ -306,6 +307,9 @@ export default function SellerListedItems() {
   const [mainItemMode, setMainItemMode] = useState("select");
   const studioEditorRef = useRef(null);
   const itemTypeMeta = useMemo(() => getItemTypeMeta(form.itemType), [form.itemType]);
+  const clearSessionState = useCallback(() => {
+    clearAuthSession();
+  }, []);
 
   const customizableProducts = useMemo(
     () => (Array.isArray(products) ? products : []).filter((product) => Boolean(product?.isCustomizable)),
@@ -313,8 +317,8 @@ export default function SellerListedItems() {
   );
 
   const loadProducts = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (!hasActiveSession()) {
+      clearSessionState();
       setError("Please login as seller.");
       setLoading(false);
       return;
@@ -323,11 +327,14 @@ export default function SellerListedItems() {
     setLoading(true);
     setError("");
     try {
-      const productRes = await fetch(`${API_URL}/api/products/seller/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const productData = await productRes.json();
+      const { response: productRes, data: productData } = await apiFetchJson(
+        `${API_URL}/api/products/seller/me`
+      );
+      if (productRes.status === 401) {
+        clearSessionState();
+        setError("Session expired. Please login again.");
+        return;
+      }
       if (!productRes.ok) {
         setError(productData.message || "Unable to load custom hamper items.");
         return;
@@ -363,7 +370,7 @@ export default function SellerListedItems() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [clearSessionState]);
 
   useEffect(() => {
     loadProducts();
@@ -592,8 +599,8 @@ export default function SellerListedItems() {
       return false;
     }
 
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (!hasActiveSession()) {
+      clearSessionState();
       setError("Please login as seller.");
       return false;
     }
@@ -603,17 +610,23 @@ export default function SellerListedItems() {
     setNotice("");
     try {
       const payloadCatalog = toCatalogPayload(nextBaseCategories, items);
-      const res = await fetch(`${API_URL}/api/products/seller/me/customization-catalog`, {
+      const { response: res, data } = await apiFetchJson(
+        `${API_URL}/api/products/seller/me/customization-catalog`,
+        {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           customizationCatalog: payloadCatalog,
         }),
-      });
-      const data = await res.json();
+      }
+      );
+      if (res.status === 401) {
+        clearSessionState();
+        setError("Session expired. Please login again.");
+        return false;
+      }
 
       if (!res.ok) {
         setError(data.message || "Unable to save custom hamper items.");

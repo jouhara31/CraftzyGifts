@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
 
 import { API_URL } from "../apiBase";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 
 export default function AdminInventory() {
   const [products, setProducts] = useState([]);
@@ -10,25 +11,32 @@ export default function AdminInventory() {
   const [threshold, setThreshold] = useState(5);
   const [error, setError] = useState("");
   const navigate = useNavigate();
+  const clearAndRedirect = useCallback(() => {
+    clearAuthSession();
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   const loadInventory = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
     setError("");
     try {
-      const headers = { Authorization: `Bearer ${token}` };
-      const [productRes, settingsRes] = await Promise.all([
-        fetch(`${API_URL}/api/admin/products`, { headers }),
-        fetch(`${API_URL}/api/admin/settings`, { headers }),
+      const [productResult, settingsResult] = await Promise.all([
+        apiFetchJson(`${API_URL}/api/admin/products`),
+        apiFetchJson(`${API_URL}/api/admin/settings`),
       ]);
-      const [productData, settingsData] = await Promise.all([
-        productRes.json(),
-        settingsRes.json(),
-      ]);
+      const productRes = productResult.response;
+      const settingsRes = settingsResult.response;
+      const productData = productResult.data;
+      const settingsData = settingsResult.data;
+
+      if ([productRes, settingsRes].some((response) => response.status === 401)) {
+        clearAndRedirect();
+        return;
+      }
       if (!productRes.ok) {
         setError(productData.message || "Unable to load inventory.");
         return;
@@ -43,7 +51,7 @@ export default function AdminInventory() {
     } catch {
       setError("Unable to load inventory.");
     }
-  }, [navigate]);
+  }, [clearAndRedirect]);
 
   useEffect(() => {
     loadInventory();

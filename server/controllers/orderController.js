@@ -25,6 +25,7 @@ const {
   verifyRazorpayPaymentSignature,
   verifyRazorpayWebhookSignature,
 } = require("../utils/razorpayGateway");
+const { handleControllerError } = require("../utils/apiError");
 
 const ONLINE_PAYMENT_MODES = new Set(["upi", "card"]);
 const ONLINE_PAYMENT_GATEWAY = "razorpay";
@@ -109,8 +110,8 @@ const syncShipmentDetailsForOrderStatus = (order, nextOrderStatus) => {
 const isAcceptedImageSource = (value) => {
   const text = String(value || "").trim();
   if (!text) return false;
-  if (text.length > 900000) return false;
-  return /^https?:\/\//i.test(text) || /^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(text);
+  if (text.length > 2000) return false;
+  return /^https?:\/\//i.test(text) || text.startsWith("/");
 };
 
 const parseReviewImageUrls = (value, fallback = []) => {
@@ -123,6 +124,13 @@ const parseReviewImageUrls = (value, fallback = []) => {
   }
   return Array.isArray(fallback) ? fallback : [];
 };
+
+const hasInvalidReviewImageSource = (value) =>
+  Array.isArray(value) &&
+  value.some((entry) => {
+    const text = String(entry || "").trim();
+    return Boolean(text) && !isAcceptedImageSource(text);
+  });
 
 const hasCustomization = (customization) => {
   if (!customization) return false;
@@ -1086,10 +1094,12 @@ const buildSellerPlacedOrderNotification = (order = {}) => {
 
 const populateOrderForCustomer = async (order) => {
   if (!order) return order;
-  await order.populate([
-    { path: "product" },
-    { path: "customer", select: "name email" },
-  ]);
+  if (typeof order.populate === "function") {
+    await order.populate([
+      { path: "product" },
+      { path: "customer", select: "name email" },
+    ]);
+  }
   return order;
 };
 
@@ -1828,9 +1838,6 @@ const markOrdersFailed = async ({ orders, eventName, paymentId, reason }) => {
     appendWebhookEvent(order, eventName, paymentId);
     order.paymentStatus = "failed";
     order.paymentFailureReason = reason || "Payment failed";
-    if (order.status === "pending_payment") {
-      order.status = "cancelled";
-    }
     await order.save();
     await notifyCustomerForOrder(order, {
       type: "payment_failed",
@@ -2257,11 +2264,7 @@ exports.createOrder = async (req, res) => {
     await populateOrderForCustomer(order);
     return res.status(201).json(order);
   } catch (error) {
-    const status = error.status || 500;
-    return res.status(status).json({
-      message: error.message || "Unable to create order",
-      ...(error.details ? { details: error.details } : {}),
-    });
+    return handleControllerError(res, error, "Unable to create order.");
   }
 };
 
@@ -2376,11 +2379,7 @@ exports.createCheckoutSession = async (req, res) => {
       throw error;
     }
   } catch (error) {
-    const status = error.status || 500;
-    return res.status(status).json({
-      message: error.message || "Unable to start checkout",
-      ...(error.details ? { details: error.details } : {}),
-    });
+    return handleControllerError(res, error, "Unable to start checkout.");
   }
 };
 
@@ -2393,7 +2392,7 @@ exports.getPaymentConfig = async (_req, res) => {
       supportedModes: config.configured ? ["cod", "upi", "card"] : ["cod"],
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2405,7 +2404,7 @@ exports.getMyOrders = async (req, res) => {
       .sort({ createdAt: -1 });
     res.json(orders.map((order) => serializeOrderForResponse(order)));
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2460,7 +2459,7 @@ exports.getMyOrderInvoice = async (req, res) => {
 
     return res.status(200).send(pdfBuffer);
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2502,7 +2501,7 @@ exports.getMyOrderShippingLabel = async (req, res) => {
 
     return res.status(200).send(pdfBuffer);
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2527,7 +2526,7 @@ exports.getSellerOrders = async (req, res) => {
 
     res.json(orders.map((order) => serializeOrderForResponse(order)));
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2536,7 +2535,7 @@ exports.getSellerFinanceSummary = async (req, res) => {
     const payload = await buildSellerFinancePayload(req.user.id);
     return res.json(payload);
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2555,7 +2554,7 @@ exports.createSellerPayoutRequest = async (req, res) => {
       settings: outcome.settings,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2567,7 +2566,7 @@ exports.getAdminPayoutBatches = async (req, res) => {
     });
     return res.json(payload);
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2583,7 +2582,7 @@ exports.updateAdminPayoutStatus = async (req, res) => {
       batch: outcome.batch,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2674,7 +2673,7 @@ exports.updateOrderShipment = async (req, res) => {
       order: serializeOrderForResponse(order),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2725,7 +2724,7 @@ exports.updateSellerReviewModeration = async (req, res) => {
       order: serializeOrderForResponse(order),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -2750,28 +2749,45 @@ exports.payOrder = async (req, res) => {
       return res.status(400).json({ message: "This order can no longer be paid." });
     }
 
-    let gatewayOrderId = String(order.paymentGatewayOrderId || "").trim();
+    const paymentGroupId = String(order.paymentGroupId || "").trim();
+    let payableOrders = [order];
+    if (paymentGroupId) {
+      const groupedOrders = await Order.find({
+        customer: req.user.id,
+        paymentGroupId,
+      }).sort({ createdAt: 1 });
+      const eligibleGroupOrders = groupedOrders.filter(
+        (entry) =>
+          entry &&
+          ONLINE_PAYMENT_MODES.has(entry.paymentMode) &&
+          entry.status === "pending_payment" &&
+          entry.paymentStatus !== "paid"
+      );
+      if (eligibleGroupOrders.length > 0) {
+        payableOrders = eligibleGroupOrders;
+      }
+    }
+
+    let gatewayOrderId = String(payableOrders[0]?.paymentGatewayOrderId || "").trim();
+    const safePaymentGroupId = paymentGroupId || createPaymentGroupId();
     if (!gatewayOrderId) {
-      order.paymentGroupId = order.paymentGroupId || createPaymentGroupId();
-      const { gatewayOrder } = await createGatewayOrderForOrders([order], order.paymentGroupId);
+      const { gatewayOrder } = await createGatewayOrderForOrders(payableOrders, safePaymentGroupId);
       gatewayOrderId = gatewayOrder.id;
     }
+
+    const totalAmount = payableOrders.reduce((sum, entry) => sum + Number(entry?.total || 0), 0);
 
     return res.json({
       message: "Payment checkout created.",
       checkout: buildCheckoutPayload({
         gatewayOrderId,
-        amount: order.total,
-        paymentGroupId: String(order.paymentGroupId || "").trim(),
-        orders: [order],
+        amount: totalAmount,
+        paymentGroupId: safePaymentGroupId,
+        orders: payableOrders,
       }),
     });
   } catch (error) {
-    const status = error.status || 500;
-    return res.status(status).json({
-      message: error.message || "Unable to start payment",
-      ...(error.details ? { details: error.details } : {}),
-    });
+    return handleControllerError(res, error, "Unable to start payment.");
   }
 };
 
@@ -2802,20 +2818,19 @@ exports.verifyOrderPayment = async (req, res) => {
       return res.status(400).json({ message: "Payment order mismatch. Please retry checkout." });
     }
 
-    await populateOrderForCustomer(order);
-    const alreadyPaid = order.paymentStatus === "paid";
-    return res.status(alreadyPaid ? 200 : 202).json({
-      message: alreadyPaid
-        ? "Payment already confirmed by the gateway."
-        : "Payment received. Waiting for secure gateway confirmation.",
-      order,
+    const [updatedOrder] = await markOrdersPaid({
+      orders: [order],
+      eventName: "payment.verified.client",
+      paymentId: String(razorpayPaymentId || razorpayOrderId || "").trim(),
+      razorpayOrderId: String(razorpayOrderId || "").trim(),
+      razorpaySignature: String(razorpaySignature || "").trim(),
+    });
+    return res.status(200).json({
+      message: "Payment verified successfully.",
+      order: updatedOrder,
     });
   } catch (error) {
-    const status = error.status || 500;
-    return res.status(status).json({
-      message: error.message || "Unable to verify payment",
-      ...(error.details ? { details: error.details } : {}),
-    });
+    return handleControllerError(res, error, "Unable to verify payment.");
   }
 };
 
@@ -2856,21 +2871,101 @@ exports.verifyCheckoutSessionPayment = async (req, res) => {
       return res.status(400).json({ message: "Payment order mismatch. Please retry checkout." });
     }
 
-    const updatedOrders = await populateOrdersForCustomer(orders);
-    const alreadyPaid = updatedOrders.every((order) => order.paymentStatus === "paid");
+    const updatedOrders = await markOrdersPaid({
+      orders,
+      eventName: "payment.verified.client",
+      paymentId: String(razorpayPaymentId || razorpayOrderId || "").trim(),
+      razorpayOrderId: safeRazorpayOrderId,
+      razorpaySignature: String(razorpaySignature || "").trim(),
+    });
 
-    return res.status(alreadyPaid ? 200 : 202).json({
-      message: alreadyPaid
-        ? "Payment already confirmed by the gateway."
-        : "Payment received. Waiting for secure gateway confirmation.",
+    return res.status(200).json({
+      message: "Payment verified successfully.",
       orders: updatedOrders,
     });
   } catch (error) {
-    const status = error.status || 500;
-    return res.status(status).json({
-      message: error.message || "Unable to verify payment",
-      ...(error.details ? { details: error.details } : {}),
+    return handleControllerError(res, error, "Unable to verify payment.");
+  }
+};
+
+exports.reportOrderPaymentFailure = async (req, res) => {
+  try {
+    if (req.user?.role !== "customer") {
+      return res.status(403).json({ message: "Only customer accounts can complete payments." });
+    }
+
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+    if (order.customer.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    if (!ONLINE_PAYMENT_MODES.has(order.paymentMode)) {
+      return res.status(400).json({ message: "This order does not need online payment." });
+    }
+
+    const paymentId = String(
+      req.body?.razorpay_payment_id || req.body?.razorpay_order_id || order.paymentGatewayOrderId || ""
+    ).trim();
+    const reason =
+      String(req.body?.reason || req.body?.message || req.body?.description || "").trim() ||
+      "Payment failed";
+
+    const [updatedOrder] = await markOrdersFailed({
+      orders: [order],
+      eventName: "payment.failed.client",
+      paymentId,
+      reason,
     });
+
+    return res.status(200).json({
+      message: "Payment failure recorded.",
+      order: updatedOrder,
+    });
+  } catch (error) {
+    return handleControllerError(res, error, "Unable to record payment failure.");
+  }
+};
+
+exports.reportCheckoutSessionPaymentFailure = async (req, res) => {
+  try {
+    if (req.user?.role !== "customer") {
+      return res.status(403).json({ message: "Only customer accounts can complete payments." });
+    }
+
+    const paymentGroupId = String(req.body?.paymentGroupId || "").trim();
+    if (!paymentGroupId) {
+      return res.status(400).json({ message: "Missing payment session." });
+    }
+
+    const orders = await Order.find({
+      customer: req.user.id,
+      paymentGroupId,
+    }).sort({ createdAt: 1 });
+
+    if (orders.length === 0) {
+      return res.status(404).json({ message: "Checkout session not found." });
+    }
+
+    const paymentId = String(
+      req.body?.razorpay_payment_id || req.body?.razorpay_order_id || orders[0]?.paymentGatewayOrderId || ""
+    ).trim();
+    const reason =
+      String(req.body?.reason || req.body?.message || req.body?.description || "").trim() ||
+      "Payment failed";
+
+    const updatedOrders = await markOrdersFailed({
+      orders,
+      eventName: "payment.failed.client",
+      paymentId,
+      reason,
+    });
+
+    return res.status(200).json({
+      message: "Payment failure recorded.",
+      orders: updatedOrders,
+    });
+  } catch (error) {
+    return handleControllerError(res, error, "Unable to record payment failure.");
   }
 };
 
@@ -2880,8 +2975,7 @@ exports.paymentWebhook = async (req, res) => {
     const outcome = await processPaymentWebhook(req.body, signature, req.rawBody || "");
     return res.json({ ok: true, ignored: Boolean(outcome?.ignored) });
   } catch (error) {
-    const status = error.status || 500;
-    return res.status(status).json({ message: error.message || "Webhook processing failed" });
+    return handleControllerError(res, error, "Webhook processing failed.");
   }
 };
 
@@ -2958,7 +3052,7 @@ exports.requestReturn = async (req, res) => {
     }
     res.json(order);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -3010,7 +3104,7 @@ exports.cancelMyOrder = async (req, res) => {
       order: serializeOrderForResponse(order),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -3036,6 +3130,11 @@ exports.submitOrderReview = async (req, res) => {
     const rating = Number.parseInt(req.body?.rating, 10);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       return res.status(400).json({ message: "Rating must be between 1 and 5." });
+    }
+    if (hasInvalidReviewImageSource(req.body?.images)) {
+      return res.status(400).json({
+        message: "Review images must be uploaded files or HTTPS image URLs.",
+      });
     }
 
     const comment = String(req.body?.comment || "")
@@ -3067,7 +3166,7 @@ exports.submitOrderReview = async (req, res) => {
     });
     return res.json({ message: "Feedback sent successfully.", order });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -3109,7 +3208,7 @@ exports.reviewReturn = async (req, res) => {
     }
     return res.json(order);
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
 
@@ -3175,6 +3274,7 @@ exports.updateOrderStatus = async (req, res) => {
     await populateOrderForCustomer(order);
     res.json(order);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return handleControllerError(res, error);
   }
 };
+

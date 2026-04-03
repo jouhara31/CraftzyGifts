@@ -62,7 +62,56 @@ const AdminAnalytics = lazyPage(() => import("./pages/adminAnalytics"));
 const AdminSettings = lazyPage(() => import("./pages/adminSettings"));
 const AdminAccount = lazyPage(() => import("./pages/adminAccount"));
 const AdminMessages = lazyPage(() => import("./pages/adminMessages"));
+const AdminNotifications = lazyPage(() => import("./pages/adminNotifications"));
 const NotFound = lazyPage(() => import("./pages/NotFound"));
+
+const uniquePreloadTargets = (targets = []) =>
+  Array.from(new Set((Array.isArray(targets) ? targets : []).filter(Boolean)));
+
+const getPreloadTargets = (pathname, role) => {
+  const normalizedPath = String(pathname || "").trim();
+  const baseTargets = [Products];
+  const roleTargets =
+    role === "seller"
+      ? [SellerDashboard, SellerOrders]
+      : role === "admin"
+        ? [AdminDashboard, AdminOrders, AdminNotifications]
+        : [Orders, Wishlist];
+
+  if (normalizedPath === "/") {
+    return uniquePreloadTargets([...baseTargets, ProductDetail, Login, Register]);
+  }
+  if (normalizedPath.startsWith("/products")) {
+    return uniquePreloadTargets([...baseTargets, ProductDetail, Wishlist, Cart]);
+  }
+  if (normalizedPath.startsWith("/store/")) {
+    return uniquePreloadTargets([SellerStore, Products, ProductDetail, Customization]);
+  }
+  if (normalizedPath.startsWith("/customize")) {
+    return uniquePreloadTargets([Customization, Checkout, Cart, Orders]);
+  }
+  if (normalizedPath === "/cart" || normalizedPath === "/checkout") {
+    return uniquePreloadTargets([Cart, Checkout, PaymentStatus, Orders]);
+  }
+  if (normalizedPath === "/orders" || normalizedPath.startsWith("/payment-status")) {
+    return uniquePreloadTargets([Orders, PaymentStatus, Products, Profile]);
+  }
+  if (normalizedPath.startsWith("/seller/")) {
+    return uniquePreloadTargets([SellerDashboard, SellerOrders, SellerProducts]);
+  }
+  if (normalizedPath.startsWith("/admin/")) {
+    return uniquePreloadTargets([AdminDashboard, AdminOrders, AdminProducts, AdminNotifications]);
+  }
+  if (
+    normalizedPath === "/login" ||
+    normalizedPath === "/register" ||
+    normalizedPath === "/forgot-password"
+  ) {
+    return uniquePreloadTargets([Home, Register, Login, ForgotPassword]);
+  }
+
+  return uniquePreloadTargets([...baseTargets, ...roleTargets]);
+};
 
 function App() {
   const { pathname } = useLocation();
@@ -73,55 +122,7 @@ function App() {
 
   useEffect(() => {
     const sessionClaims = readStoredSessionClaims();
-    const publicPages = [
-      Home,
-      Products,
-      ProductDetail,
-      SellerStore,
-      Customization,
-      ForgotPassword,
-      ResetPassword,
-      VerifyEmail,
-      Cart,
-      Checkout,
-      Orders,
-      Wishlist,
-      Profile,
-      EditProfile,
-      ManageAddresses,
-    ];
-    const sellerPages = [
-      SellerDashboard,
-      SellerProducts,
-      SellerListedItems,
-      SellerOrders,
-      SellerShipping,
-      SellerPayments,
-      SellerCustomers,
-      SellerReports,
-      SellerReviews,
-      SellerMarketing,
-      SellerSettings,
-      SellerMessages,
-    ];
-    const adminPages = [
-      AdminDashboard,
-      AdminSellers,
-      AdminProducts,
-      AdminCategories,
-      AdminOrders,
-      AdminReports,
-      AdminCustomers,
-      AdminInventory,
-      AdminAnalytics,
-      AdminSettings,
-      AdminAccount,
-      AdminMessages,
-    ];
-
-    const pagesToPreload = [...publicPages];
-    if (sessionClaims.role === "seller") pagesToPreload.push(...sellerPages);
-    if (sessionClaims.role === "admin") pagesToPreload.push(...adminPages);
+    const pagesToPreload = getPreloadTargets(pathname, sessionClaims.role);
 
     const schedule =
       typeof window !== "undefined" && "requestIdleCallback" in window
@@ -140,7 +141,7 @@ function App() {
     });
 
     return () => cancel(handle);
-  }, []);
+  }, [pathname]);
 
   const hideFooter =
     pathname === "/login" ||
@@ -225,6 +226,14 @@ function App() {
             element={
               <AdminRoute>
                 <AdminMessages />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/notifications"
+            element={
+              <AdminRoute>
+                <AdminNotifications />
               </AdminRoute>
             }
           />

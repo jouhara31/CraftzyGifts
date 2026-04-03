@@ -5,9 +5,14 @@ const resolveBrowserFallbackBase = () => {
     return "http://localhost:5000";
   }
 
+  const protocol = String(window.location?.protocol || "http:").trim() || "http:";
   const hostname = String(window.location?.hostname || "").trim().toLowerCase();
-  if (!hostname || hostname === "localhost" || hostname === "127.0.0.1") {
-    return "http://localhost:5000";
+  if (!hostname) {
+    return `${protocol}//localhost:5000`;
+  }
+
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return `${protocol}//${hostname}:5000`;
   }
 
   return String(window.location?.origin || "").trim() || "http://localhost:5000";

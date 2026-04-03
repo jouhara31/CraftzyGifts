@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
 
 import { API_URL } from "../apiBase";
+import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 
 const buildCustomersFromOrders = (orders = []) => {
@@ -44,21 +45,25 @@ export default function AdminCustomers() {
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const navigate = useNavigate();
+  const clearAndRedirect = useCallback(() => {
+    clearAuthSession();
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   const loadCustomers = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
+    if (!hasActiveSession()) {
+      clearAndRedirect();
       return;
     }
 
     setError("");
     try {
-      const res = await fetch(`${API_URL}/api/admin/orders`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/orders`);
+      if (response.status === 401) {
+        clearAndRedirect();
+        return;
+      }
+      if (!response.ok) {
         setError(data.message || "Unable to load customers.");
         return;
       }
@@ -67,7 +72,7 @@ export default function AdminCustomers() {
     } catch {
       setError("Unable to load customers.");
     }
-  }, [navigate]);
+  }, [clearAndRedirect]);
 
   useEffect(() => {
     loadCustomers();
