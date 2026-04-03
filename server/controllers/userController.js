@@ -143,6 +143,15 @@ const normalizeSellerSecuritySettings = (value, current = {}) => {
 
 const normalizeSellerShippingSettings = (value, current = {}) => {
   if (!value || typeof value !== "object") return current || {};
+  const nextDeliveryManagedBy = ["seller", "delivery_partner"].includes(
+    String(value.deliveryManagedBy || "")
+      .trim()
+      .toLowerCase()
+  )
+    ? String(value.deliveryManagedBy || "")
+        .trim()
+        .toLowerCase()
+    : current?.deliveryManagedBy || "seller";
   const nextMin = parseWholeNumberInRange(value.processingDaysMin, current?.processingDaysMin ?? 1, 30);
   const nextMax = parseWholeNumberInRange(
     value.processingDaysMax,
@@ -161,14 +170,18 @@ const normalizeSellerShippingSettings = (value, current = {}) => {
       current?.freeShippingThreshold ?? 0,
       1000000
     ),
+    deliveryManagedBy: nextDeliveryManagedBy,
     defaultShippingMethod:
       typeof value.defaultShippingMethod === "string"
         ? value.defaultShippingMethod.trim().slice(0, 80) || "standard"
         : current?.defaultShippingMethod || "standard",
     courierPreference:
       typeof value.courierPreference === "string"
-        ? value.courierPreference.trim().slice(0, 80)
-        : current?.courierPreference || "self",
+        ? value.courierPreference.trim().slice(0, 80) ||
+          (nextDeliveryManagedBy === "seller" ? "self" : "delivery-boy")
+        : nextDeliveryManagedBy === "seller"
+          ? "self"
+          : current?.courierPreference || "delivery-boy",
     processingDaysMin: Math.min(nextMin, nextMax),
     processingDaysMax: Math.max(nextMin, nextMax),
     deliveryRegions: normalizeTextList(

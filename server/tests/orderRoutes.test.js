@@ -10,7 +10,10 @@ jest.mock("../models/User", () => ({}));
 
 jest.mock("../middleware/auth", () => ({
   auth: (req, _res, next) => {
-    req.user = { id: "customer_1", role: "customer" };
+    req.user = {
+      id: req.headers["x-test-user-id"] || "customer_1",
+      role: req.headers["x-test-role"] || "customer",
+    };
     next();
   },
   requireRole:
@@ -73,6 +76,10 @@ const buildApp = () => {
 };
 
 describe("order review routes", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   test("rejects inline base64 review images", async () => {
     const app = buildApp();
     const fakeOrder = {
@@ -101,5 +108,59 @@ describe("order review routes", () => {
       "Review images must be uploaded files or HTTPS image URLs."
     );
     expect(fakeOrder.save).not.toHaveBeenCalled();
+  });
+
+  test("seller shipment updates can switch delivery handling and close COD on delivery", async () => {
+    const app = buildApp();
+    const save = jest.fn().mockResolvedValue(undefined);
+    const fakeOrder = {
+      _id: "order_2",
+      seller: {
+        toString: () => "seller_1",
+      },
+      status: "shipped",
+      paymentMode: "cod",
+      paymentStatus: "pending",
+      shipment: {
+        deliveryManagedBy: "seller",
+        codCollectedBy: "",
+        courierName: "",
+        trackingId: "",
+        awbNumber: "",
+        status: "shipped",
+      },
+      save,
+      populate: jest.fn().mockReturnThis(),
+    };
+
+    Order.findById.mockReturnValue(fakeOrder);
+
+    const response = await request(app)
+      .patch("/api/orders/order_2/shipment")
+      .set("x-test-role", "seller")
+      .set("x-test-user-id", "seller_1")
+      .send({
+        deliveryManagedBy: "delivery_partner",
+        courierName: "Local Rider",
+        trackingId: "TRACK-22",
+        status: "delivered",
+      });
+
+    expect(response.status).toBe(200);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(response.body.order).toEqual(
+      expect.objectContaining({
+        status: "delivered",
+        paymentStatus: "paid",
+        paymentReference: expect.stringMatching(/^rider_cod_/),
+        shipment: expect.objectContaining({
+          deliveryManagedBy: "delivery_partner",
+          codCollectedBy: "delivery_partner",
+          courierName: "Local Rider",
+          trackingId: "TRACK-22",
+          status: "delivered",
+        }),
+      })
+    );
   });
 });

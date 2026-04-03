@@ -143,6 +143,16 @@ const orderSchema = new mongoose.Schema(
       pincode: { type: String },
     },
     shipment: {
+      deliveryManagedBy: {
+        type: String,
+        enum: ["seller", "delivery_partner"],
+        default: "seller",
+      },
+      codCollectedBy: {
+        type: String,
+        enum: ["seller", "delivery_partner", ""],
+        default: "",
+      },
       courierName: { type: String, default: "" },
       trackingId: { type: String, default: "" },
       awbNumber: { type: String, default: "" },

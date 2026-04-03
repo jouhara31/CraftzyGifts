@@ -10,8 +10,13 @@ const asNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
+const DELIVERY_MANAGER_LABELS = {
+  seller: "Seller team",
+  delivery_partner: "Delivery boy / courier",
+};
 const COURIER_LABELS = {
   self: "Self managed",
+  "delivery-boy": "Delivery boy",
   delhivery: "Delhivery",
   ekart: "Ekart",
   bluedart: "Blue Dart",
@@ -32,6 +37,10 @@ const SHIPMENT_STATUS_LABELS = {
 };
 const buildInlineAddress = (address = {}) =>
   [address.line1, address.city, address.state, address.pincode].map(asText).filter(Boolean).join(", ");
+const normalizeDeliveryManagedBy = (value, fallback = "seller") => {
+  const normalized = asText(value).toLowerCase();
+  return normalized === "delivery_partner" || normalized === "seller" ? normalized : fallback;
+};
 const normalizeList = (value = "", maxItems = 12) =>
   Array.from(
     new Set(
@@ -54,6 +63,7 @@ const createShipmentDrafts = (orders = []) =>
     const orderId = asText(order?._id);
     if (!orderId) return acc;
     acc[orderId] = {
+      deliveryManagedBy: normalizeDeliveryManagedBy(order?.shipment?.deliveryManagedBy, "seller"),
       courierName: asText(order?.shipment?.courierName),
       trackingId: asText(order?.shipment?.trackingId),
       awbNumber: asText(order?.shipment?.awbNumber),
@@ -81,6 +91,7 @@ export default function SellerShipping() {
     defaultDeliveryCharge: "0",
     freeShippingThreshold: "0",
     defaultShippingMethod: "standard",
+    deliveryManagedBy: "seller",
     courierPreference: "self",
     processingDaysMin: "1",
     processingDaysMax: "3",
@@ -102,6 +113,13 @@ export default function SellerShipping() {
   }, [navigate]);
 
   const applyProfileSnapshot = useCallback((data = {}) => {
+    const deliveryManagedBy = normalizeDeliveryManagedBy(
+      data?.sellerShippingSettings?.deliveryManagedBy,
+      asText(data?.sellerShippingSettings?.courierPreference) &&
+        asText(data?.sellerShippingSettings?.courierPreference) !== "self"
+        ? "delivery_partner"
+        : "seller"
+    );
     setProfile(data);
     setPickupAddress({
       line1: asText(data?.pickupAddress?.line1),
@@ -116,7 +134,11 @@ export default function SellerShipping() {
       freeShippingThreshold: String(data?.sellerShippingSettings?.freeShippingThreshold ?? 0),
       defaultShippingMethod:
         asText(data?.sellerShippingSettings?.defaultShippingMethod) || "standard",
-      courierPreference: asText(data?.sellerShippingSettings?.courierPreference) || "self",
+      deliveryManagedBy,
+      courierPreference:
+        deliveryManagedBy === "seller"
+          ? "self"
+          : asText(data?.sellerShippingSettings?.courierPreference) || "delivery-boy",
       processingDaysMin: String(data?.sellerShippingSettings?.processingDaysMin ?? 1),
       processingDaysMax: String(data?.sellerShippingSettings?.processingDaysMax ?? 3),
       deliveryRegionsText: Array.isArray(data?.sellerShippingSettings?.deliveryRegions)
@@ -186,15 +208,20 @@ export default function SellerShipping() {
     const freeThreshold = Math.max(0, asNumber(shippingSettings.freeShippingThreshold, 0));
     const deliveryCharge = Math.max(0, asNumber(shippingSettings.defaultDeliveryCharge, 0));
     const deliveryRegions = normalizeList(shippingSettings.deliveryRegionsText, 12);
+    const deliveryManagedBy = normalizeDeliveryManagedBy(shippingSettings.deliveryManagedBy, "seller");
     return {
       methodLabel:
         SHIPPING_METHOD_LABELS[asText(shippingSettings.defaultShippingMethod)] ||
         asText(shippingSettings.defaultShippingMethod) ||
         "Standard",
+      deliveryManagerLabel:
+        DELIVERY_MANAGER_LABELS[deliveryManagedBy] || DELIVERY_MANAGER_LABELS.seller,
       courierLabel:
-        COURIER_LABELS[asText(shippingSettings.courierPreference)] ||
-        asText(shippingSettings.courierPreference) ||
-        "Self managed",
+        deliveryManagedBy === "seller"
+          ? "Seller direct delivery"
+          : COURIER_LABELS[asText(shippingSettings.courierPreference)] ||
+            asText(shippingSettings.courierPreference) ||
+            "Delivery boy",
       deliveryCharge,
       freeThreshold,
       processingWindow:
@@ -237,7 +264,14 @@ export default function SellerShipping() {
             defaultDeliveryCharge: asNumber(shippingSettings.defaultDeliveryCharge, 0),
             freeShippingThreshold: asNumber(shippingSettings.freeShippingThreshold, 0),
             defaultShippingMethod: asText(shippingSettings.defaultShippingMethod) || "standard",
-            courierPreference: asText(shippingSettings.courierPreference) || "self",
+            deliveryManagedBy: normalizeDeliveryManagedBy(
+              shippingSettings.deliveryManagedBy,
+              "seller"
+            ),
+            courierPreference:
+              normalizeDeliveryManagedBy(shippingSettings.deliveryManagedBy, "seller") === "seller"
+                ? "self"
+                : asText(shippingSettings.courierPreference) || "delivery-boy",
             processingDaysMin: Math.max(0, Math.trunc(asNumber(shippingSettings.processingDaysMin, 1))),
             processingDaysMax: Math.max(0, Math.trunc(asNumber(shippingSettings.processingDaysMax, 3))),
             deliveryRegions: normalizeList(shippingSettings.deliveryRegionsText, 12),
@@ -269,6 +303,7 @@ export default function SellerShipping() {
       ...prev,
       [orderId]: {
         ...(prev[orderId] || {
+          deliveryManagedBy: "seller",
           courierName: "",
           trackingId: "",
           awbNumber: "",
@@ -298,6 +333,7 @@ export default function SellerShipping() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          deliveryManagedBy: normalizeDeliveryManagedBy(draft.deliveryManagedBy, "seller"),
           courierName: asText(draft.courierName),
           trackingId: asText(draft.trackingId),
           awbNumber: asText(draft.awbNumber),
@@ -322,6 +358,10 @@ export default function SellerShipping() {
         setShipmentDrafts((prev) => ({
           ...prev,
           [orderId]: {
+            deliveryManagedBy: normalizeDeliveryManagedBy(
+              updatedOrder?.shipment?.deliveryManagedBy,
+              "seller"
+            ),
             courierName: asText(updatedOrder?.shipment?.courierName),
             trackingId: asText(updatedOrder?.shipment?.trackingId),
             awbNumber: asText(updatedOrder?.shipment?.awbNumber),
@@ -406,9 +446,14 @@ export default function SellerShipping() {
                     <p>Default service promise shown across fulfillment ops.</p>
                   </article>
                   <article className="shipping-settings-metric">
-                    <span>Courier mode</span>
+                    <span>Delivery owner</span>
+                    <strong>{shippingOverview.deliveryManagerLabel}</strong>
+                    <p>Who usually completes the final doorstep handoff.</p>
+                  </article>
+                  <article className="shipping-settings-metric">
+                    <span>Partner preference</span>
                     <strong>{shippingOverview.courierLabel}</strong>
-                    <p>Primary dispatch preference for new shipments.</p>
+                    <p>Default label used when a delivery boy or courier handles the order.</p>
                   </article>
                   <article className="shipping-settings-metric">
                     <span>Base shipping</span>
@@ -502,24 +547,56 @@ export default function SellerShipping() {
                       </label>
                     </div>
 
-                    <label className="field">
-                      <span>Courier preference</span>
-                      <select
-                        value={shippingSettings.courierPreference}
-                        onChange={(event) =>
-                          setShippingSettings((prev) => ({
-                            ...prev,
-                            courierPreference: event.target.value,
-                          }))
-                        }
-                      >
-                        <option value="self">Self managed</option>
-                        <option value="delhivery">Delhivery</option>
-                        <option value="ekart">Ekart</option>
-                        <option value="bluedart">Blue Dart</option>
-                        <option value="india-post">India Post</option>
-                      </select>
-                    </label>
+                    <div className="field-row">
+                      <label className="field">
+                        <span>Delivery handled by</span>
+                        <select
+                          value={shippingSettings.deliveryManagedBy}
+                          onChange={(event) =>
+                            setShippingSettings((prev) => ({
+                              ...prev,
+                              deliveryManagedBy: normalizeDeliveryManagedBy(
+                                event.target.value,
+                                "seller"
+                              ),
+                              courierPreference:
+                                normalizeDeliveryManagedBy(event.target.value, "seller") === "seller"
+                                  ? "self"
+                                  : prev.courierPreference === "self"
+                                    ? "delivery-boy"
+                                    : prev.courierPreference,
+                            }))
+                          }
+                        >
+                          <option value="seller">Seller team</option>
+                          <option value="delivery_partner">Delivery boy / courier</option>
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Preferred partner</span>
+                        <select
+                          value={
+                            shippingSettings.deliveryManagedBy === "seller"
+                              ? "self"
+                              : shippingSettings.courierPreference
+                          }
+                          disabled={shippingSettings.deliveryManagedBy === "seller"}
+                          onChange={(event) =>
+                            setShippingSettings((prev) => ({
+                              ...prev,
+                              courierPreference: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="self">Self managed</option>
+                          <option value="delivery-boy">Delivery boy</option>
+                          <option value="delhivery">Delhivery</option>
+                          <option value="ekart">Ekart</option>
+                          <option value="bluedart">Blue Dart</option>
+                          <option value="india-post">India Post</option>
+                        </select>
+                      </label>
+                    </div>
 
                     <label className="field">
                       <span>Delivery regions</span>
@@ -735,7 +812,7 @@ export default function SellerShipping() {
             <div className="seller-panel-head">
               <div>
                 <h3>Shipment queue</h3>
-                <p>Update courier, tracking, and AWB details for live seller orders.</p>
+                <p>Update delivery owner, tracking, and AWB details for live seller orders.</p>
               </div>
               <span className="chip">{shipmentQueue.length} active shipments</span>
             </div>
@@ -744,6 +821,7 @@ export default function SellerShipping() {
               {shipmentQueue.map((order) => {
                 const orderId = asText(order?._id);
                 const draft = shipmentDrafts[orderId] || {
+                  deliveryManagedBy: "seller",
                   courierName: "",
                   trackingId: "",
                   awbNumber: "",
@@ -767,7 +845,28 @@ export default function SellerShipping() {
                     <p className="field-hint">
                       {buildInlineAddress(order?.shippingAddress) || "Shipping address not available"}
                     </p>
+                    <p className="field-hint">
+                      {asText(order?.paymentMode).toLowerCase() === "cod"
+                        ? `COD will be collected by ${
+                            DELIVERY_MANAGER_LABELS[
+                              normalizeDeliveryManagedBy(draft.deliveryManagedBy, "seller")
+                            ] || "seller team"
+                          } when this order is delivered.`
+                        : "Online payment already settles before final delivery."}
+                    </p>
                     <div className="field-row">
+                      <label className="field">
+                        <span>Delivery handled by</span>
+                        <select
+                          value={draft.deliveryManagedBy}
+                          onChange={(event) =>
+                            handleShipmentDraftChange(orderId, "deliveryManagedBy", event.target.value)
+                          }
+                        >
+                          <option value="seller">Seller team</option>
+                          <option value="delivery_partner">Delivery boy / courier</option>
+                        </select>
+                      </label>
                       <label className="field">
                         <span>Shipment status</span>
                         <select
@@ -796,14 +895,22 @@ export default function SellerShipping() {
                     </div>
                     <div className="field-row">
                       <label className="field">
-                        <span>Courier</span>
+                        <span>
+                          {normalizeDeliveryManagedBy(draft.deliveryManagedBy, "seller") === "seller"
+                            ? "Seller runner / note"
+                            : "Courier / rider"}
+                        </span>
                         <input
                           type="text"
                           value={draft.courierName}
                           onChange={(event) =>
                             handleShipmentDraftChange(orderId, "courierName", event.target.value)
                           }
-                          placeholder="Courier partner"
+                          placeholder={
+                            normalizeDeliveryManagedBy(draft.deliveryManagedBy, "seller") === "seller"
+                              ? "Seller staff, local runner, or own vehicle"
+                              : "Courier partner or rider name"
+                          }
                         />
                       </label>
                       <label className="field">

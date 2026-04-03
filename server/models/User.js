@@ -107,6 +107,7 @@ const userSchema = new mongoose.Schema(
       defaultDeliveryCharge: { type: Number, default: 0, min: 0 },
       freeShippingThreshold: { type: Number, default: 0, min: 0 },
       defaultShippingMethod: { type: String, default: "standard" },
+      deliveryManagedBy: { type: String, default: "seller" },
       courierPreference: { type: String, default: "self" },
       processingDaysMin: { type: Number, default: 1, min: 0, max: 30 },
       processingDaysMax: { type: Number, default: 3, min: 0, max: 60 },

@@ -48,6 +48,16 @@ const buildAddressLabel = (address = {}) =>
     .map(asText)
     .filter(Boolean)
     .join(", ");
+const shipmentDeliveryManagerLabel = (shipment = {}) => {
+  const managedBy = asText(shipment?.deliveryManagedBy).toLowerCase();
+  return managedBy === "delivery_partner" ? "Delivery boy / courier" : "Seller team";
+};
+const shipmentCodCollectorLabel = (shipment = {}) => {
+  const collectedBy = asText(shipment?.codCollectedBy).toLowerCase();
+  if (collectedBy === "delivery_partner") return "Delivery boy / courier";
+  if (collectedBy === "seller") return "Seller team";
+  return "Pending";
+};
 const shipmentStageLabel = (shipment = {}) =>
   asText(shipment?.status || "")
     .replace(/_/g, " ")
@@ -790,11 +800,17 @@ export default function SellerOrders() {
                     <section className="order-customization-block">
                       <p className="mini-sub">Tracking & shipment</p>
                       <p className="order-customization-copy">
-                        Stage: {shipmentStageLabel(order?.shipment)} | Courier:{" "}
+                        Stage: {shipmentStageLabel(order?.shipment)} | Handled by:{" "}
+                        {shipmentDeliveryManagerLabel(order?.shipment)} | Courier:{" "}
                         {asText(order?.shipment?.courierName) || "Not assigned"} | Tracking:{" "}
                         {asText(order?.shipment?.trackingId) || "Pending"} | AWB:{" "}
                         {asText(order?.shipment?.awbNumber) || "Pending"}
                       </p>
+                      {asText(order?.paymentMode).toLowerCase() === "cod" ? (
+                        <p className="order-customization-copy">
+                          COD collection: {shipmentCodCollectorLabel(order?.shipment)}
+                        </p>
+                      ) : null}
                       {asText(order?.shipment?.packagingNotes) ? (
                         <p className="order-customization-copy">
                           Packaging notes: {asText(order.shipment.packagingNotes)}

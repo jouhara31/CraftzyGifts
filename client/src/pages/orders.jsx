@@ -26,7 +26,13 @@ import { buildPaymentStatusPath } from "../utils/paymentStatusRoute";
 import { API_URL } from "../apiBase";
 import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 const ONLINE_PAYMENT_MODES = new Set(["upi", "card"]);
-const ACTIVE_ORDER_STATUSES = new Set(["placed", "processing", "shipped", "return_requested"]);
+const ACTIVE_ORDER_STATUSES = new Set([
+  "placed",
+  "processing",
+  "shipped",
+  "out_for_delivery",
+  "return_requested",
+]);
 const COMPLETED_ORDER_STATUSES = new Set(["delivered", "refunded"]);
 const LEGACY_OPTION_LABELS = {
   giftBoxes: "Gift box",
@@ -40,6 +46,7 @@ const ORDER_STATUS_LABELS = {
   placed: "Order placed",
   processing: "In preparation",
   shipped: "Shipped",
+  out_for_delivery: "Out for delivery",
   delivered: "Delivered",
   return_requested: "Return requested",
   return_rejected: "Return rejected",
@@ -51,6 +58,7 @@ const ORDER_STATUS_TONES = {
   placed: "info",
   processing: "info",
   shipped: "success",
+  out_for_delivery: "success",
   delivered: "success",
   return_requested: "warning",
   return_rejected: "locked",
@@ -68,16 +76,23 @@ const PAYMENT_STATUS_LABELS = {
   failed: "Failed",
   refunded: "Refunded",
 };
-const ORDER_PROGRESS_STEPS = ["Placed", "Processing", "Shipped", "Delivered"];
+const ORDER_PROGRESS_STEPS = [
+  "Placed",
+  "Processing",
+  "Shipped",
+  "Out for delivery",
+  "Delivered",
+];
 const ORDER_PROGRESS_INDEX = {
   pending_payment: -1,
   placed: 0,
   processing: 1,
   shipped: 2,
-  delivered: 3,
-  return_requested: 3,
-  return_rejected: 3,
-  refunded: 3,
+  out_for_delivery: 3,
+  delivered: 4,
+  return_requested: 4,
+  return_rejected: 4,
+  refunded: 4,
   cancelled: 0,
 };
 const REVIEW_MAX_LENGTH = 280;
@@ -194,6 +209,11 @@ const formatDeliveryWindow = (product = {}) => {
   return "Made to order";
 };
 
+const shipmentDeliveryManagerLabel = (shipment = {}) =>
+  asText(shipment?.deliveryManagedBy).toLowerCase() === "delivery_partner"
+    ? "Delivery boy / courier"
+    : "Seller team";
+
 const formatAddressLines = (address = {}) => {
   const cityState = [asText(address.city), asText(address.state)].filter(Boolean).join(", ");
   return [
@@ -259,6 +279,8 @@ const buildOrderNote = (order = {}) => {
       return "Your gift is being prepared.";
     case "shipped":
       return "Your order is on the way.";
+    case "out_for_delivery":
+      return "Your order is out for delivery.";
     case "delivered":
       return "Delivered to your address.";
     case "return_requested":
@@ -1111,7 +1133,9 @@ export default function Orders() {
             {
               label: "Delivery",
               value: deliveryWindow,
-              sub: buildOrderNote(order),
+              sub: [buildOrderNote(order), `Handled by ${shipmentDeliveryManagerLabel(order?.shipment)}`]
+                .filter(Boolean)
+                .join(" • "),
             },
           ];
           const isGenericHamper = Boolean(

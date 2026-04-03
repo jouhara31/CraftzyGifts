@@ -32,6 +32,7 @@ const ACTIVE_ORDER_STATUSES = new Set([
   "placed",
   "processing",
   "shipped",
+  "out_for_delivery",
   "return_requested",
 ]);
 const CUSTOMER_ACCOUNT_DEFAULT_TAB = "profile";
@@ -41,6 +42,7 @@ const CUSTOMER_ORDER_STATUS_LABELS = {
   placed: "Order placed",
   processing: "Processing",
   shipped: "Shipped",
+  out_for_delivery: "Out for delivery",
   delivered: "Delivered",
   return_requested: "Return requested",
   return_rejected: "Return rejected",

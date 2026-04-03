@@ -64,11 +64,23 @@ const SHIPMENT_STATUSES = new Set([
   "out_for_delivery",
   "delivered",
 ]);
+const SHIPMENT_DELIVERY_MANAGERS = new Set(["seller", "delivery_partner"]);
 
 const parseShipmentStatus = (value, fallback = "pending") => {
   const normalized = String(value || "").trim().toLowerCase();
   return SHIPMENT_STATUSES.has(normalized) ? normalized : fallback;
 };
+
+const parseShipmentDeliveryManagedBy = (value, fallback = "seller") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return SHIPMENT_DELIVERY_MANAGERS.has(normalized) ? normalized : fallback;
+};
+
+const resolveSellerShipmentDeliveryManagedBy = (sellerProfile = {}) =>
+  parseShipmentDeliveryManagedBy(sellerProfile?.sellerShippingSettings?.deliveryManagedBy, "seller");
+
+const getShipmentCodCollector = (shipment = {}) =>
+  parseShipmentDeliveryManagedBy(shipment?.deliveryManagedBy, "seller");
 
 const parseShipmentDate = (value, fallback = null) => {
   if (value === undefined || value === null || value === "") return fallback;
@@ -87,6 +99,10 @@ const syncShipmentDetailsForOrderStatus = (order, nextOrderStatus) => {
       ? order.shipment.toObject()
       : order?.shipment || {}
   );
+  nextShipment.deliveryManagedBy = parseShipmentDeliveryManagedBy(
+    nextShipment.deliveryManagedBy,
+    "seller"
+  );
   const now = new Date();
   if (nextOrderStatus === "processing") {
     nextShipment.status = parseShipmentStatus(nextShipment.status, "packed");
@@ -103,6 +119,13 @@ const syncShipmentDetailsForOrderStatus = (order, nextOrderStatus) => {
   }
   if (["processing", "shipped", "delivered"].includes(nextOrderStatus)) {
     nextShipment.statusUpdatedAt = now;
+  }
+  if (
+    nextOrderStatus === "delivered" &&
+    String(order?.paymentMode || "").trim().toLowerCase() === "cod" &&
+    !String(nextShipment.codCollectedBy || "").trim()
+  ) {
+    nextShipment.codCollectedBy = getShipmentCodCollector(nextShipment);
   }
   return nextShipment;
 };
@@ -1494,7 +1517,7 @@ const buildOrderDraft = async ({
   }
 
   const sellerProfile = await User.findById(product.seller).select(
-    "name storeName email supportEmail phone legalBusinessName gstNumber returnWindowDays billingAddress"
+    "name storeName email supportEmail phone legalBusinessName gstNumber returnWindowDays billingAddress sellerShippingSettings"
   );
   if (!sellerProfile) {
     const error = new Error("Seller profile is unavailable for this product.");
@@ -1586,6 +1609,7 @@ const buildOrderDraft = async ({
     : standardMakingCharge;
   const total = isGenericHamper ? makingCharge : standardTotal;
   const onlineMode = ONLINE_PAYMENT_MODES.has(mode);
+  const deliveryManagedBy = resolveSellerShipmentDeliveryManagedBy(sellerProfile);
   const preferenceCustomization = {
     ...(requestedWishCardText ? { wishCardText: requestedWishCardText } : {}),
     ...(normalizedPreferenceNote ? { specialNote: normalizedPreferenceNote } : {}),
@@ -1639,6 +1663,10 @@ const buildOrderDraft = async ({
         ? normalizedCustomization
         : undefined,
     shippingAddress,
+    shipment: {
+      deliveryManagedBy,
+      codCollectedBy: "",
+    },
     paymentMode: mode,
     metadata: {
       paymentGateway: onlineMode ? ONLINE_PAYMENT_GATEWAY : "cod",
@@ -2604,9 +2632,19 @@ exports.updateOrderShipment = async (req, res) => {
         ? order.shipment.toObject()
         : order.shipment || {}
     );
+    nextShipment.deliveryManagedBy = parseShipmentDeliveryManagedBy(
+      nextShipment.deliveryManagedBy,
+      "seller"
+    );
     const payload = req.body || {};
     const now = new Date();
 
+    if (typeof payload.deliveryManagedBy === "string") {
+      nextShipment.deliveryManagedBy = parseShipmentDeliveryManagedBy(
+        payload.deliveryManagedBy,
+        nextShipment.deliveryManagedBy || "seller"
+      );
+    }
     if (typeof payload.courierName === "string") {
       nextShipment.courierName = payload.courierName.trim().slice(0, 80);
     }
@@ -2660,7 +2698,10 @@ exports.updateOrderShipment = async (req, res) => {
         if (order.paymentMode === "cod" && order.paymentStatus === "pending") {
           order.paymentStatus = "paid";
           order.paidAt = order.paidAt || now;
-          order.paymentReference = order.paymentReference || `cod_${Date.now()}`;
+          nextShipment.codCollectedBy = getShipmentCodCollector(nextShipment);
+          const codReferencePrefix =
+            nextShipment.codCollectedBy === "delivery_partner" ? "rider_cod" : "seller_cod";
+          order.paymentReference = order.paymentReference || `${codReferencePrefix}_${Date.now()}`;
         }
       }
     }
