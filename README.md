@@ -1,86 +1,173 @@
-CraftzyGifts - Project Documentation
+# CraftzyGifts
 
-**Overview**
-CraftzyGifts is a web-based multi-vendor marketplace for handmade gifts and custom hampers. Customers can purchase ready-made products or build personalized hampers, while sellers manage listings and orders. Admins oversee approvals, categories, and platform health.
+CraftzyGifts is a multi-vendor gift marketplace built with React, Vite, Node.js, Express, and MongoDB. Customers can browse products, place COD or online orders, and track purchases. Sellers can manage stores, products, shipping, and payouts. Admins can manage platform settings, sellers, products, orders, analytics, and account security.
 
-**Objectives**
-- Enable customers to buy ready-made gifts or build fully customized hampers.
-- Provide home-based crafters with an easy platform to sell handmade products.
-- Support making and decoration charges for custom hampers.
-- Allow reference image uploads for customization guidance.
-- Provide admin controls for sellers, products, and orders.
-- Deliver a responsive, user-friendly web experience.
+## Highlights
 
-**User Roles And Capabilities**
-- Customer: Browse products, customize hampers, add to cart, checkout, and view orders.
-- Seller: Manage products, mark items for customization, and update order status.
-- Admin: Approve sellers, manage categories, monitor products and orders, and review analytics.
+- Customer storefront with search, filters, wishlist, cart, checkout, and order tracking
+- Seller workspace for products, orders, shipping, store setup, payouts, and reports
+- Admin console for seller approvals, products, categories, customers, inventory, analytics, and settings
+- COD and Razorpay-based online payment flow
+- Role-based authentication with session handling
+- Platform branding and maintenance mode support
+- Invoice and shipping label generation
 
-**Key Features**
-- Multi-vendor marketplace with seller storefronts.
-- Custom hamper builder with add-ons and making charges.
-- Image uploads for customization references.
-- Order tracking for customers and sellers.
-- Admin dashboards for sellers, products, orders, and analytics.
-- Wishlist, profile management, and address book.
+## Tech Stack
 
-**Tech Stack**
-- Frontend: React, Vite, CSS, React Router
-- Backend: Node.js, Express
+- Frontend: React 19, Vite, React Router
+- Backend: Node.js, Express 5
 - Database: MongoDB with Mongoose
-- Auth: JWT
+- Charts: Recharts
+- Testing: Jest, Supertest, Vitest support
 
-**Architecture**
-- `client/` hosts the React single-page app.
-- `server/` hosts the Express API and MongoDB models.
-- REST APIs are served from `http://localhost:5000/api` by default.
+## Project Structure
 
-**Core Collections**
-- `User`: Customers, sellers, and admins with role-based access.
-- `Product`: Listings, customization options, and pricing.
-- `Order`: Purchases, status updates, and delivery details.
-- `CategoryMaster`, `CustomizationMaster`, `PlatformSettings`, `Notification`, `ContactRequest`.
+```text
+client/   React frontend
+server/   Express API, models, controllers, tests
+```
 
-**Project Structure**
-- `client/src/pages/` page-level views for customer, seller, and admin flows.
-- `client/src/components/` shared UI components and layout.
-- `client/src/services/api.js` API client configuration.
-- `server/models/` Mongoose schemas.
-- `server/controllers/` request handlers and business logic.
-- `server/routes/` Express route definitions.
-- `server/utils/` platform settings and helper logic.
-- `server/seed.js` and `server/scripts/runSeed.js` sample data seeding.
+## Local Setup
 
-**Environment Variables**
-- `MONGO_URL` default is `mongodb://127.0.0.1:27017/craftzygifts`
-- `JWT_SECRET` is required
-- `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` enable online payments
-- `REQUEST_BODY_LIMIT` default is `100mb`
-- `SEED_SELLER_PASSWORD` default is `seller123`
+### 1. Clone the repository
 
-**Setup And Run (Local)**
-1. Install server dependencies: `cd server` then `npm install`
-2. Install client dependencies: `cd client` then `npm install`
-3. Ensure MongoDB is running or set `MONGO_URL`
-4. Add payment keys to `server/.env` if you want Razorpay/UPI/Card checkout
-5. Start the API server: `cd server` then `node server.js`
-6. Start the web app: `cd client` then `npm run dev`
+```bash
+git clone https://github.com/jouhara31/CraftzyGifts.git
+cd CraftzyGifts
+```
 
-**Seeding**
-- The server seeds sample sellers and products on startup.
-- To seed manually: `cd server` then `npm run seed`
+### 2. Install dependencies
 
-**Scripts**
-- Server: `npm run seed`, `npm run test`
-- Client: `npm run dev`, `npm run build`, `npm run preview`, `npm run lint`, `npm run test`
+```bash
+cd server
+npm install
 
-**Testing**
-- Client tests are available with `cd client` then `npm run test`.
-- Server tests are available with `cd server` then `npm test`.
-- For Razorpay checkout, use test mode keys and webhook secrets during development.
+cd ../client
+npm install
+```
 
-**Future Enhancements**
-- Mobile apps, international shipping, and multi-language support.
-- AI-based recommendations and AR previews for customized hampers.
-- Subscription services and advanced seller analytics.
-- Social integrations and authenticity tracking.
+### 3. Configure environment variables
+
+Create `server/.env` from `server/.env.example`.
+
+Required minimum:
+
+```env
+MONGO_URL=mongodb://127.0.0.1:27017/craftzygifts
+PORT=5000
+JWT_SECRET=replace-with-a-long-random-string
+CORS_ORIGIN=http://localhost:5173
+APP_BASE_URL=http://localhost:5173
+```
+
+Optional payment setup:
+
+```env
+RAZORPAY_KEY_ID=your-test-key
+RAZORPAY_KEY_SECRET=your-test-secret
+RAZORPAY_WEBHOOK_SECRET=your-webhook-secret
+```
+
+Optional email setup:
+
+```env
+EMAIL_DELIVERY_MODE=outbox
+EMAIL_WEBHOOK_URL=
+EMAIL_WEBHOOK_TOKEN=
+```
+
+## Run The Project
+
+### Start backend
+
+```bash
+cd server
+node server.js
+```
+
+### Start frontend
+
+```bash
+cd client
+npm run dev
+```
+
+Frontend runs on `http://localhost:5173` by default.  
+Backend runs on `http://localhost:5000` by default.
+
+## Available Scripts
+
+### Client
+
+```bash
+npm run dev
+npm run build
+npm run preview
+npm run lint
+npm run test
+```
+
+### Server
+
+```bash
+npm run test
+npm run seed
+```
+
+## Testing
+
+Verified project checks:
+
+```bash
+cd client && npm run lint
+cd client && npm run build
+cd server && npm test
+```
+
+## Payment Notes
+
+- COD flow is supported
+- Razorpay test mode can be used for online payments before deployment
+- Seller payout tracking is available in the app
+- Real automatic seller payout transfer is not enabled; payout marking is handled manually from the admin workflow
+
+## Email Notes
+
+- Current default email mode is `outbox`
+- Forgot password, verification, and OTP flows are functional in development
+- Real production email delivery can be connected later through webhook mode
+
+## User Roles
+
+### Customer
+
+- Register and login
+- Browse products and stores
+- Add to cart and wishlist
+- Checkout and track orders
+- Manage profile and addresses
+
+### Seller
+
+- Manage store details
+- Create and update products
+- Process orders and shipping
+- View settlements and payout data
+- Manage account security
+
+### Admin
+
+- Approve sellers
+- Manage products, categories, customers, and inventory
+- Handle orders and platform settings
+- Review analytics, reports, payouts, and security activity
+
+## Submission Notes
+
+- `.env` files should not be committed
+- Use `server/.env.example` as the reference configuration
+- Push source code only, not generated build files or runtime temp files
+
+## Repository
+
+GitHub: [https://github.com/jouhara31/CraftzyGifts](https://github.com/jouhara31/CraftzyGifts)
