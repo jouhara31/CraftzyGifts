@@ -2,7 +2,7 @@
 
 CraftzyGifts is a multi-vendor gift marketplace built with React, Vite, Node.js, Express, and MongoDB.
 
-Customers can browse products, place orders, and track purchases. Sellers can manage stores, products, shipping, and payouts. Admins can manage sellers, products, orders, categories, settings, and reports.
+Customers can browse products, place orders, and track purchases. Sellers can manage stores, products. Admins can manage sellers, products, orders, categories, settings, and reports.
 
 ## Tech Stack
 
@@ -18,7 +18,7 @@ Customers can browse products, place orders, and track purchases. Sellers can ma
 - Seller dashboard
 - Admin panel
 - Cart and checkout
-- COD and online payment flow
+- payment 
 - Order tracking
 
 ## Run Locally
