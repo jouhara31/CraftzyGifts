@@ -23,15 +23,16 @@ const formatStatus = (value = "") =>
 export default function SellerPayments() {
   useHashScroll();
   const navigate = useNavigate();
-  const [profile, setProfile] = useState(null);
   const [finance, setFinance] = useState({
     settings: {},
+    payoutProfile: {},
     summary: {},
     settlements: [],
     payoutBatches: [],
   });
   const [loading, setLoading] = useState(true);
   const [requestingPayout, setRequestingPayout] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const clearAndRedirect = useCallback(() => {
@@ -48,16 +49,11 @@ export default function SellerPayments() {
     setLoading(true);
     setError("");
     try {
-      const [financeResult, profileResult] = await Promise.all([
-        apiFetchJson(`${API_URL}/api/orders/seller/finance`),
-        apiFetchJson(`${API_URL}/api/users/me`),
-      ]);
+      const financeResult = await apiFetchJson(`${API_URL}/api/orders/seller/finance`);
       const financeRes = financeResult.response;
-      const profileRes = profileResult.response;
       const financeData = financeResult.data;
-      const profileData = profileResult.data;
 
-      if ([financeRes, profileRes].some((response) => response.status === 401)) {
+      if (financeRes.status === 401) {
         clearAndRedirect();
         return;
       }
@@ -66,18 +62,14 @@ export default function SellerPayments() {
         setError(financeData?.message || "Unable to load seller finance data.");
         return;
       }
-      if (!profileRes.ok) {
-        setError(profileData?.message || "Unable to load seller finance profile.");
-        return;
-      }
 
       setFinance({
         settings: financeData?.settings || {},
+        payoutProfile: financeData?.payoutProfile || {},
         summary: financeData?.summary || {},
         settlements: Array.isArray(financeData?.settlements) ? financeData.settlements : [],
         payoutBatches: Array.isArray(financeData?.payoutBatches) ? financeData.payoutBatches : [],
       });
-      setProfile(profileData);
     } catch {
       setError("Unable to load seller finance data.");
     } finally {
@@ -87,6 +79,15 @@ export default function SellerPayments() {
 
   useEffect(() => {
     loadPayments();
+  }, [loadPayments]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadPayments();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadPayments]);
 
   const recentSettlements = useMemo(
@@ -121,6 +122,28 @@ export default function SellerPayments() {
 
   const settlementCycleLabel =
     String(finance?.settings?.payoutSchedule || "").trim() || "weekly";
+  const nextPayoutDateLabel = finance?.settings?.nextPayoutAt
+    ? new Date(finance.settings.nextPayoutAt).toLocaleDateString("en-IN")
+    : "";
+  const payoutProfile = finance?.payoutProfile || {};
+  const payoutProfileStatus =
+    payoutProfile.mode === "bank_upi"
+      ? "Bank + UPI"
+      : payoutProfile.mode === "bank"
+        ? "Bank ready"
+        : payoutProfile.mode === "upi"
+          ? "UPI ready"
+          : "Add payout details";
+  const payoutMethodLabel =
+    payoutProfile.mode === "bank_upi"
+      ? "Bank + UPI"
+      : payoutProfile.mode === "bank"
+        ? "Bank transfer"
+        : payoutProfile.mode === "upi"
+          ? "UPI"
+          : "Not added";
+  const canRequestPayout =
+    Boolean(payoutProfile.ready) && Number(finance?.summary?.availableBalance || 0) > 0;
 
   const downloadSettlements = () => {
     setError("");
@@ -221,12 +244,18 @@ export default function SellerPayments() {
             className="btn primary"
             type="button"
             onClick={requestPayout}
-            disabled={requestingPayout || Number(finance?.summary?.availableBalance || 0) <= 0}
+            disabled={requestingPayout || !canRequestPayout}
           >
             {requestingPayout ? "Requesting..." : "Request payout"}
           </button>
-          <button className="btn ghost" type="button" onClick={loadPayments}>
-            Refresh
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
       </div>
@@ -372,30 +401,35 @@ export default function SellerPayments() {
         <div className="seller-panel seller-anchor-section" id="payments-finance">
           <div className="card-head">
             <h3 className="card-title">Finance profile</h3>
-            <span className="chip">
-              {profile?.sellerBankDetails?.accountHolderName ? "Bank ready" : "Needs bank details"}
-            </span>
+            <span className="chip">{payoutProfileStatus}</span>
           </div>
           <div className="stat-grid">
             <div className="stat-card">
               <p className="stat-label">Account holder</p>
-              <p className="stat-value">
-                {profile?.sellerBankDetails?.accountHolderName || "Not added"}
-              </p>
+              <p className="stat-value">{payoutProfile.accountHolderName || "Not added"}</p>
               <p className="stat-delta">Saved in seller settings</p>
             </div>
             <div className="stat-card">
-              <p className="stat-label">Bank / UPI</p>
-              <p className="stat-value">
-                {profile?.sellerBankDetails?.bankName || profile?.sellerBankDetails?.upiId || "Not added"}
-              </p>
+              <p className="stat-label">Payout method</p>
+              <p className="stat-value">{payoutMethodLabel}</p>
               <p className="stat-delta">Used for seller payout follow-ups</p>
+            </div>
+            <div className="stat-card">
+              <p className="stat-label">Bank / UPI</p>
+              <p className="stat-value">{payoutProfile.label || "Not added"}</p>
+              <p className="stat-delta">
+                {payoutProfile.accountMasked || payoutProfile.ifscCode || payoutProfile.upiId || "No payout target"}
+              </p>
             </div>
             <div className="stat-card">
               <p className="stat-label">Settlement cycle</p>
               <p className="stat-value">{formatStatus(settlementCycleLabel)}</p>
               <p className="stat-delta">
-                Delay: {Number(finance?.settings?.settlementDelayDays || 0)} days after delivery
+                {nextPayoutDateLabel
+                  ? `Next cycle ${nextPayoutDateLabel} · Delay ${Number(
+                      finance?.settings?.settlementDelayDays || 0
+                    )} days`
+                  : `Delay ${Number(finance?.settings?.settlementDelayDays || 0)} days after delivery`}
               </p>
             </div>
             <div className="stat-card">

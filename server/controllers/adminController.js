@@ -15,6 +15,7 @@ const {
   normalizePlatformSettings,
   toPlatformSettingsPayload,
 } = require("../utils/platformSettings");
+const { clearMaintenanceCache } = require("../middleware/maintenance");
 const { handleControllerError } = require("../utils/apiError");
 
 const SELLER_STATUS_SET = new Set(["pending", "approved", "rejected"]);
@@ -583,6 +584,7 @@ exports.updateAdminPlatformSettings = async (req, res) => {
     settings.maintenanceMode = next.maintenanceMode;
 
     await settings.save();
+    clearMaintenanceCache();
     res.json(toPlatformSettingsPayload(settings));
   } catch (error) {
     return handleControllerError(res, error);

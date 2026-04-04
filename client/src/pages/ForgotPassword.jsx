@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import Header from "../components/Header";
+import { usePlatform } from "../hooks/usePlatform";
 
 import { API_URL } from "../apiBase";
 
 export default function ForgotPassword() {
+  const { platformName } = usePlatform();
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [status, setStatus] = useState(null);
@@ -74,7 +76,7 @@ export default function ForgotPassword() {
             <p className="auth-kicker">Forgot Password</p>
             <h1 className="auth-title">Reset your password</h1>
             <p className="auth-sub">
-              Use the same email address you registered with CraftzyGifts.
+              Use the same email address you registered with {platformName}.
             </p>
 
             {status?.message ? (

@@ -15,12 +15,22 @@ const COLORS = {
 
 const asText = (value = "") => String(value ?? "").trim();
 
-const formatCurrency = (value = 0) => {
+const getCurrencySymbol = (currencyCode = "INR") => {
+  const normalized = asText(currencyCode).toUpperCase() || "INR";
+  if (normalized === "INR") return "₹";
+  if (normalized === "USD") return "$";
+  if (normalized === "EUR") return "€";
+  if (normalized === "GBP") return "£";
+  if (normalized === "AED") return "AED ";
+  return `${normalized} `;
+};
+
+const formatCurrency = (value = 0, currencyCode = "INR") => {
   const rounded = Math.round(Number(value || 0) * 100) / 100;
-  return `Rs. ${rounded.toLocaleString("en-IN", {
+  return `${getCurrencySymbol(currencyCode)}${rounded.toLocaleString("en-IN", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
-  })}`;
+  })}`.trim();
 };
 
 const buildInlineAddress = (address = {}, { includeName = true, includePhone = true } = {}) =>
@@ -66,7 +76,9 @@ const buildQrText = (label = {}) =>
     asText(label?.shipment?.trackingId)
       ? `Tracking: ${asText(label.shipment.trackingId)}`
       : "",
-    label?.collectAmount > 0 ? `COD: ${formatCurrency(label.collectAmount)}` : "Prepaid",
+    label?.collectAmount > 0
+      ? `COD: ${formatCurrency(label.collectAmount, label?.currencyCode)}`
+      : "Prepaid",
   ]
     .filter(Boolean)
     .join(" | ");
@@ -117,13 +129,15 @@ const drawKeyValue = (doc, { x, y, width, label, value, labelWidth = 62, fontSiz
 };
 
 const generateShippingLabelPdfBuffer = async (label = {}) => {
+  const platformName = asText(label?.platformName || "CraftzyGifts") || "CraftzyGifts";
+  const currencyCode = asText(label?.currencyCode || "INR") || "INR";
   const doc = new PDFDocument({
     size: [LABEL_WIDTH, LABEL_HEIGHT],
     margin: LABEL_MARGIN,
     compress: true,
     info: {
       Title: asText(label?.fileName || "shipping-label.pdf"),
-      Author: "CraftzyGifts",
+      Author: platformName,
       Subject: "Shipping Label",
     },
   });
@@ -153,7 +167,8 @@ const generateShippingLabelPdfBuffer = async (label = {}) => {
     .join(", ");
   const itemSummary = truncateText(buildItemSummary(label), 140) || "Order items";
   const collectAmount = Math.max(0, Number(label?.collectAmount || 0));
-  const paymentChip = collectAmount > 0 ? `COD Collect ${formatCurrency(collectAmount)}` : "PREPAID";
+  const paymentChip =
+    collectAmount > 0 ? `COD Collect ${formatCurrency(collectAmount, currencyCode)}` : "PREPAID";
   const courierName = asText(label?.shipment?.courierName) || "Craftzy Dispatch";
   const trackingId = asText(label?.shipment?.trackingId) || "Pending assignment";
   const awbNumber = asText(label?.shipment?.awbNumber) || asText(label?.order?.shortCode) || "Pending";
@@ -268,7 +283,7 @@ const generateShippingLabelPdfBuffer = async (label = {}) => {
   });
   cursorY = doc.y + 2;
   doc.fillColor(COLORS.ink).font("Helvetica-Bold").fontSize(8.4).text(
-    asText(label?.seller?.legalBusinessName || label?.seller?.name || "CraftzyGifts Store"),
+    asText(label?.seller?.legalBusinessName || label?.seller?.name || `${platformName} Store`),
     doc.page.margins.left,
     cursorY,
     { width: contentWidth }

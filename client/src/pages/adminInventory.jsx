@@ -10,6 +10,7 @@ export default function AdminInventory() {
   const [query, setQuery] = useState("");
   const [threshold, setThreshold] = useState(5);
   const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
   const clearAndRedirect = useCallback(() => {
     clearAuthSession();
@@ -55,6 +56,15 @@ export default function AdminInventory() {
 
   useEffect(() => {
     loadInventory();
+  }, [loadInventory]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadInventory();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadInventory]);
 
   const visibleProducts = useMemo(() => {
@@ -111,8 +121,14 @@ export default function AdminInventory() {
               onChange={(event) => setThreshold(event.target.value)}
             />
           </div>
-          <button className="admin-text-action" type="button" onClick={loadInventory}>
-            Refresh
+          <button
+            className="admin-text-action"
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </>
       }

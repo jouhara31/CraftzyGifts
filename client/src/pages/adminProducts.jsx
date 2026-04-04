@@ -48,6 +48,7 @@ export default function AdminProducts() {
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const [actingId, setActingId] = useState("");
   const [categoryDraft, setCategoryDraft] = useState({});
   const [statusFilter, setStatusFilter] = useState("all");
@@ -100,6 +101,15 @@ export default function AdminProducts() {
 
   useEffect(() => {
     loadProducts();
+  }, [loadProducts]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadProducts();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadProducts]);
 
   const updateProduct = async (productId, updates, successMessage) => {
@@ -365,9 +375,10 @@ export default function AdminProducts() {
     <AdminSidebarLayout
       title="Products"
       description="Product catalog management."
+      pageClassName="admin-page-products"
       actions={
-        <>
-          <div className="search">
+        <div className="admin-products-head-actions">
+          <div className="search admin-products-head-search">
             <input
               className="search-input"
               type="search"
@@ -376,13 +387,21 @@ export default function AdminProducts() {
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
-          <button className="admin-text-action" type="button" onClick={loadProducts}>
-            Refresh
-          </button>
-          <button className="admin-text-action" type="button" onClick={exportCsv}>
-            Export CSV
-          </button>
-        </>
+          <div className="admin-products-head-links">
+            <button
+              className="admin-text-action"
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              aria-busy={refreshing}
+            >
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
+            <button className="admin-text-action" type="button" onClick={exportCsv}>
+              Export CSV
+            </button>
+          </div>
+        </div>
       }
     >
 
@@ -459,7 +478,7 @@ export default function AdminProducts() {
           </div>
         </div>
         <div className="admin-products-filters admin-products-filters-secondary">
-          <div className="field">
+          <div className="field admin-products-sort-field">
             <label htmlFor="adminSort">Sort</label>
             <select
               id="adminSort"
@@ -475,20 +494,23 @@ export default function AdminProducts() {
               <option value="stock_high">Stock high to low</option>
             </select>
           </div>
-          <div className="field admin-products-meta">
-            <label className="admin-select-all">
-              <input
-                type="checkbox"
-                checked={allVisibleSelected}
-                onChange={toggleSelectAll}
-                aria-label="Select all visible products"
-              />
-              <span>Select all</span>
-            </label>
-            <span className="admin-products-count">
-              Showing {visibleProducts.length} of {products.length}
-            </span>
-          </div>
+        </div>
+      </div>
+
+      <div className="admin-products-selection-row">
+        <div className="admin-products-meta">
+          <label className="admin-select-all-card">
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              onChange={toggleSelectAll}
+              aria-label="Select all visible products"
+            />
+            <span>Select all</span>
+          </label>
+          <span className="admin-products-count">
+            Showing {visibleProducts.length} of {products.length}
+          </span>
         </div>
       </div>
 

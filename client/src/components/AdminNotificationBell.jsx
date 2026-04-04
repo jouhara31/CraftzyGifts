@@ -168,7 +168,7 @@ export default function AdminNotificationBell() {
         return null;
       }
     },
-    []
+    [clearAndRedirect]
   );
 
   const openItem = useCallback(

@@ -92,6 +92,7 @@ export default function AdminCategories() {
   const [restoringDefaults, setRestoringDefaults] = useState(false);
   const [confirmRestore, setConfirmRestore] = useState(false);
   const [updatedAt, setUpdatedAt] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const navigate = useNavigate();
@@ -169,6 +170,15 @@ export default function AdminCategories() {
 
   useEffect(() => {
     loadCategories({ preserveOnEmpty: true });
+  }, [loadCategories]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadCategories({ silent: true });
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadCategories]);
 
   const visibleGroups = useMemo(() => {
@@ -519,9 +529,11 @@ export default function AdminCategories() {
         <button
           className="admin-text-action admin-category-refresh-mobile"
           type="button"
-          onClick={loadCategories}
+          onClick={handleRefresh}
+          disabled={refreshing}
+          aria-busy={refreshing}
         >
-          Refresh
+          {refreshing ? "Refreshing..." : "Refresh"}
         </button>
       }
       actions={
@@ -538,9 +550,11 @@ export default function AdminCategories() {
           <button
             className="admin-text-action admin-category-refresh-desktop"
             type="button"
-            onClick={loadCategories}
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
           >
-            Refresh
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
       }

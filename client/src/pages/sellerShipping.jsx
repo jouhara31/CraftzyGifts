@@ -104,6 +104,7 @@ export default function SellerShipping() {
   const [loading, setLoading] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
   const [savingShipmentId, setSavingShipmentId] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -192,6 +193,15 @@ export default function SellerShipping() {
 
   useEffect(() => {
     loadPage();
+  }, [loadPage]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadPage();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadPage]);
 
   const shipmentQueue = useMemo(
@@ -387,8 +397,14 @@ export default function SellerShipping() {
           <p>Control pickup settings, delivery charges, courier preferences, and tracking data.</p>
         </div>
         <div className="seller-toolbar">
-          <button className="btn ghost" type="button" onClick={loadPage}>
-            Refresh
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
       </div>

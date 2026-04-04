@@ -1,4 +1,5 @@
 const Order = require("../models/Order");
+const User = require("../models/User");
 const SellerSettlement = require("../models/SellerSettlement");
 const SellerPayoutBatch = require("../models/SellerPayoutBatch");
 const { ensurePlatformSettings } = require("./platformSettings");
@@ -19,10 +20,89 @@ const asDate = (value) => {
   return Number.isNaN(candidate.getTime()) ? null : candidate;
 };
 
+// Manual payouts stay open-ended; daily/weekly schedules expose the next release window.
+const computeNextPayoutAt = (schedule = "", value = Date.now()) => {
+  const anchor = asDate(value) || new Date();
+  const next = new Date(anchor);
+  next.setHours(0, 0, 0, 0);
+
+  if (schedule === "manual") return null;
+  if (schedule === "daily") {
+    next.setDate(next.getDate() + 1);
+    return next;
+  }
+
+  const day = next.getDay();
+  const daysUntilMonday = day === 1 ? 7 : (8 - day) % 7 || 7;
+  next.setDate(next.getDate() + daysUntilMonday);
+  return next;
+};
+
+const buildFinanceSettingsPayload = (settings = {}) => {
+  const payoutSchedule = String(settings?.payoutSchedule || "weekly").trim() || "weekly";
+  return {
+    sellerCommissionPercent: clampPercent(settings?.sellerCommissionPercent || 0),
+    settlementDelayDays: Math.max(0, Number.parseInt(settings?.settlementDelayDays, 10) || 0),
+    payoutSchedule,
+    nextPayoutAt: computeNextPayoutAt(payoutSchedule),
+  };
+};
+
 const getOrderCode = (orderId = "") => {
   const text = String(orderId || "").trim();
   if (!text) return "";
   return text.slice(-8).toUpperCase();
+};
+
+const maskAccountNumber = (value = "") => {
+  const digits = String(value || "").replace(/\D+/g, "");
+  if (!digits) return "";
+  if (digits.length <= 4) return digits;
+  return `•••• ${digits.slice(-4)}`;
+};
+
+const getSellerPayoutProfile = (sellerOrBankDetails = {}) => {
+  const bank =
+    sellerOrBankDetails && typeof sellerOrBankDetails === "object" && sellerOrBankDetails.sellerBankDetails
+      ? sellerOrBankDetails.sellerBankDetails
+      : sellerOrBankDetails || {};
+
+  const accountHolderName = String(bank?.accountHolderName || "").trim();
+  const bankName = String(bank?.bankName || "").trim();
+  const accountNumber = String(bank?.accountNumber || "")
+    .replace(/\s+/g, "")
+    .trim();
+  const ifscCode = String(bank?.ifscCode || "")
+    .trim()
+    .toUpperCase();
+  const upiId = String(bank?.upiId || "").trim();
+  const bankReady = Boolean(accountHolderName && bankName && accountNumber && ifscCode);
+  const upiReady = Boolean(upiId);
+
+  let mode = "missing";
+  if (bankReady && upiReady) mode = "bank_upi";
+  else if (bankReady) mode = "bank";
+  else if (upiReady) mode = "upi";
+
+  return {
+    ready: bankReady || upiReady,
+    bankReady,
+    upiReady,
+    mode,
+    accountHolderName,
+    bankName,
+    accountMasked: maskAccountNumber(accountNumber),
+    ifscCode,
+    upiId,
+    label:
+      mode === "bank_upi"
+        ? `${bankName} / ${upiId}`
+        : mode === "bank"
+          ? bankName
+          : mode === "upi"
+            ? upiId
+            : "",
+  };
 };
 
 const buildPayoutReference = () => {
@@ -36,6 +116,7 @@ const buildPayoutReference = () => {
   return `PYO-${stamp}-${suffix}`;
 };
 
+// A settlement turns ready only after payment is confirmed and the hold window has elapsed.
 const computeSettlementSnapshot = (order, settings, currentSettlement = null) => {
   const grossAmount = roundCurrency(order?.total || 0);
   const commissionPercent = clampPercent(settings?.sellerCommissionPercent || 0);
@@ -124,6 +205,7 @@ const syncSellerSettlements = async (sellerId) => {
 
   const operations = [];
   for (const order of Array.isArray(orders) ? orders : []) {
+    // Rebuild each order snapshot so commission, refund, and payout states stay aligned.
     const currentSettlement = existingMap.get(String(order?._id || "").trim()) || null;
     const nextSnapshot = computeSettlementSnapshot(order, settings, currentSettlement);
     operations.push({
@@ -224,16 +306,9 @@ const formatPayoutBatch = (entry = {}) => ({
   note: String(entry?.note || "").trim(),
 });
 
-const maskAccountNumber = (value = "") => {
-  const digits = String(value || "").replace(/\D+/g, "");
-  if (!digits) return "";
-  if (digits.length <= 4) return digits;
-  return `•••• ${digits.slice(-4)}`;
-};
-
 const formatAdminPayoutBatch = (entry = {}) => {
   const seller = entry?.seller || {};
-  const bank = seller?.sellerBankDetails || {};
+  const payoutProfile = getSellerPayoutProfile(seller);
 
   return {
     ...formatPayoutBatch(entry),
@@ -244,19 +319,17 @@ const formatAdminPayoutBatch = (entry = {}) => {
       email: String(seller?.email || "").trim(),
       sellerStatus: String(seller?.sellerStatus || "").trim(),
     },
-    bank: {
-      accountHolderName: String(bank?.accountHolderName || "").trim(),
-      bankName: String(bank?.bankName || "").trim(),
-      accountMasked: maskAccountNumber(bank?.accountNumber || ""),
-      ifscCode: String(bank?.ifscCode || "").trim(),
-      upiId: String(bank?.upiId || "").trim(),
-    },
+    bank: payoutProfile,
   };
 };
 
 const buildSellerFinancePayload = async (sellerId) => {
-  const { settings, settlements, payoutBatches } = await syncSellerSettlements(sellerId);
+  const [seller, { settings, settlements, payoutBatches }] = await Promise.all([
+    User.findById(sellerId).select("sellerBankDetails").lean(),
+    syncSellerSettlements(sellerId),
+  ]);
   const items = (Array.isArray(settlements) ? settlements : []).map((entry) => formatSettlement(entry));
+  const payoutProfile = getSellerPayoutProfile(seller || {});
 
   const summary = items.reduce(
     (accumulator, entry) => {
@@ -284,11 +357,8 @@ const buildSellerFinancePayload = async (sellerId) => {
   );
 
   return {
-    settings: {
-      sellerCommissionPercent: clampPercent(settings?.sellerCommissionPercent || 0),
-      settlementDelayDays: Math.max(0, Number.parseInt(settings?.settlementDelayDays, 10) || 0),
-      payoutSchedule: String(settings?.payoutSchedule || "weekly").trim() || "weekly",
-    },
+    settings: buildFinanceSettingsPayload(settings),
+    payoutProfile,
     summary: {
       gross: roundCurrency(summary.gross),
       commission: roundCurrency(summary.commission),
@@ -312,7 +382,19 @@ const buildSellerFinancePayload = async (sellerId) => {
 };
 
 const requestSellerPayout = async (sellerId, { note = "" } = {}) => {
-  const { settings, settlements } = await syncSellerSettlements(sellerId);
+  const [seller, { settings, settlements }] = await Promise.all([
+    User.findById(sellerId).select("sellerBankDetails").lean(),
+    syncSellerSettlements(sellerId),
+  ]);
+  const payoutProfile = getSellerPayoutProfile(seller || {});
+
+  if (!payoutProfile.ready) {
+    return {
+      error: "Add bank account or UPI ID before requesting payout.",
+      status: 400,
+    };
+  }
+
   const readySettlements = (Array.isArray(settlements) ? settlements : []).filter(
     (entry) => String(entry?.status || "").trim() === "ready"
   );
@@ -355,11 +437,7 @@ const requestSellerPayout = async (sellerId, { note = "" } = {}) => {
 
   return {
     batch: formatPayoutBatch(batch),
-    settings: {
-      sellerCommissionPercent: clampPercent(settings?.sellerCommissionPercent || 0),
-      settlementDelayDays: Math.max(0, Number.parseInt(settings?.settlementDelayDays, 10) || 0),
-      payoutSchedule: String(settings?.payoutSchedule || "weekly").trim() || "weekly",
-    },
+    settings: buildFinanceSettingsPayload(settings),
   };
 };
 
@@ -372,6 +450,14 @@ const updatePayoutBatchStatus = async (batchId, nextStatus) => {
   const normalizedStatus = String(nextStatus || "").trim().toLowerCase();
   if (!["requested", "processing", "paid", "rejected"].includes(normalizedStatus)) {
     return { error: "Payout status is invalid.", status: 400 };
+  }
+
+  if (normalizedStatus === "paid") {
+    const seller = await User.findById(batch.seller).select("sellerBankDetails").lean();
+    const payoutProfile = getSellerPayoutProfile(seller || {});
+    if (!payoutProfile.ready) {
+      return { error: "Seller bank or UPI details are missing.", status: 400 };
+    }
   }
 
   batch.status = normalizedStatus;
@@ -505,6 +591,7 @@ const listAdminPayoutBatches = async ({ status = "", limit = 18 } = {}) => {
 
 module.exports = {
   buildSellerFinancePayload,
+  getSellerPayoutProfile,
   requestSellerPayout,
   updatePayoutBatchStatus,
   listAdminPayoutBatches,

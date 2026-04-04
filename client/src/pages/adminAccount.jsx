@@ -10,6 +10,7 @@ const EMPTY_PROFILE = {
   id: "",
   name: "",
   email: "",
+  emailVerified: false,
   role: "admin",
   phone: "",
   supportEmail: "",
@@ -26,7 +27,69 @@ const EMPTY_PROFILE = {
   },
   profileImage: "",
   sellerStatus: "",
+  adminSecuritySettings: {
+    loginOtpEnabled: false,
+    loginAlerts: true,
+    sessionTimeoutEnabled: false,
+  },
+  adminNotificationSettings: {
+    emailNotifications: true,
+    orderAlerts: true,
+    stockAlerts: true,
+    customerMessages: true,
+    weeklyReports: true,
+    marketingUpdates: false,
+    securityAlerts: true,
+    paymentAlerts: true,
+  },
 };
+
+const DEFAULT_SECURITY_PREFS = {
+  twoFactor: false,
+  loginAlerts: true,
+  sessionTimeout: false,
+};
+
+const DEFAULT_NOTIFICATION_PREFS = {
+  emailNotifications: true,
+  orderAlerts: true,
+  stockAlerts: true,
+  customerMessages: true,
+  weeklyReports: true,
+  marketingUpdates: false,
+  securityAlerts: true,
+  paymentAlerts: true,
+};
+
+const COUNTRY_OPTIONS = [
+  "Australia",
+  "Canada",
+  "India",
+  "Singapore",
+  "United Arab Emirates",
+  "United Kingdom",
+  "United States",
+];
+
+const LANGUAGE_OPTIONS = [
+  "Arabic",
+  "English",
+  "French",
+  "German",
+  "Hindi",
+  "Malayalam",
+  "Tamil",
+];
+
+const TIMEZONE_OPTIONS = [
+  "UTC+00:00 (UTC)",
+  "UTC+01:00 (Europe/London)",
+  "UTC+04:00 (Asia/Dubai)",
+  "UTC+05:30 (Asia/Kolkata)",
+  "UTC+08:00 (Asia/Singapore)",
+  "UTC-05:00 (America/New_York)",
+  "UTC-08:00 (America/Los_Angeles)",
+];
 
 const formatAddressLabel = (address = {}) =>
   [address.line1, address.city, address.state, address.pincode]
@@ -55,16 +118,76 @@ const formatMaskedKey = (prefix, last4) => {
   return `${mask}${safeLast4}`;
 };
 
-const readApiPayload = async (response) => {
-  const text = await response.text();
-  if (!text) return {};
+const formatRelativeTime = (value) => {
+  if (!value) return "Not available";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not available";
 
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { message: text };
+  const diffMs = date.getTime() - Date.now();
+  const diffMinutes = Math.round(diffMs / 60000);
+  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+
+  if (Math.abs(diffMinutes) < 60) {
+    return rtf.format(diffMinutes, "minute");
   }
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (Math.abs(diffHours) < 24) {
+    return rtf.format(diffHours, "hour");
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+  if (Math.abs(diffDays) < 30) {
+    return rtf.format(diffDays, "day");
+  }
+
+  const diffMonths = Math.round(diffDays / 30);
+  if (Math.abs(diffMonths) < 12) {
+    return rtf.format(diffMonths, "month");
+  }
+
+  const diffYears = Math.round(diffDays / 365);
+  return rtf.format(diffYears, "year");
 };
+
+const formatMoney = (value) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
+
+const buildSelectOptions = (currentValue, baseOptions) => {
+  const normalizedCurrent = String(currentValue || "").trim();
+  const items = Array.isArray(baseOptions) ? baseOptions : [];
+  if (!normalizedCurrent) {
+    return items;
+  }
+  if (items.includes(normalizedCurrent)) {
+    return items;
+  }
+  return [normalizedCurrent, ...items];
+};
+
+const readAdminSecurityPrefs = (user = {}) => ({
+  ...DEFAULT_SECURITY_PREFS,
+  twoFactor: Boolean(user?.adminSecuritySettings?.loginOtpEnabled),
+  loginAlerts: user?.adminSecuritySettings?.loginAlerts ?? DEFAULT_SECURITY_PREFS.loginAlerts,
+  sessionTimeout:
+    user?.adminSecuritySettings?.sessionTimeoutEnabled ??
+    DEFAULT_SECURITY_PREFS.sessionTimeout,
+});
+
+const readAdminNotificationPrefs = (user = {}) => ({
+  ...DEFAULT_NOTIFICATION_PREFS,
+  ...(user?.adminNotificationSettings || {}),
+});
+
+const buildAdminSecurityPayload = (prefs = {}) => ({
+  loginOtpEnabled: Boolean(prefs.twoFactor),
+  loginAlerts: Boolean(prefs.loginAlerts),
+  sessionTimeoutEnabled: Boolean(prefs.sessionTimeout),
+});
 
 const persistUserToStorage = (user) => {
   if (!user || typeof user !== "object") return;
@@ -73,6 +196,7 @@ const persistUserToStorage = (user) => {
     id: user.id || "",
     name: user.name || "",
     email: user.email || "",
+    emailVerified: Boolean(user.emailVerified),
     role: user.role || "admin",
     sellerStatus: user.sellerStatus || "",
     storeName: user.storeName || "",
@@ -84,6 +208,9 @@ const persistUserToStorage = (user) => {
     about: user.about || "",
     profileImage: user.profileImage || "",
     storeCoverImage: user.storeCoverImage || "",
+    adminSecuritySettings: user.adminSecuritySettings || { ...EMPTY_PROFILE.adminSecuritySettings },
+    adminNotificationSettings:
+      user.adminNotificationSettings || { ...EMPTY_PROFILE.adminNotificationSettings },
   };
   const profileImage = String(nextUser.profileImage || "");
 
@@ -117,6 +244,7 @@ function AdminProfileOverviewTab({
   activityItems,
   aboutText,
   onExport,
+  exporting,
 }) {
   return (
     <>
@@ -171,8 +299,13 @@ function AdminProfileOverviewTab({
               </div>
             ))}
           </div>
-          <button className="btn primary admin-profile-export-btn" type="button" onClick={onExport}>
-            Export Account Data
+          <button
+            className="btn primary admin-profile-export-btn"
+            type="button"
+            onClick={onExport}
+            disabled={exporting}
+          >
+            {exporting ? "Exporting..." : "Export Account Data"}
           </button>
         </section>
       </div>
@@ -180,23 +313,27 @@ function AdminProfileOverviewTab({
       <section className="admin-profile-card admin-profile-activity">
         <div className="admin-profile-card-head">
           <div>
-            <h3>Recent Activity</h3>
-            <p>Your recent actions and system updates.</p>
+            <h3>Recent Sessions</h3>
+            <p>Latest sign-ins on this admin account.</p>
           </div>
         </div>
         <div className="admin-profile-activity-list">
-          {activityItems.map((item) => (
-            <div key={item.label} className="admin-profile-activity-item">
-              <div className="admin-profile-activity-main">
-                <span className="admin-profile-activity-dot" />
-                <div>
-                  <strong>{item.label}</strong>
-                  <span>{item.time}</span>
+          {activityItems.length ? (
+            activityItems.map((item) => (
+              <div key={`${item.label}-${item.time}`} className="admin-profile-activity-item">
+                <div className="admin-profile-activity-main">
+                  <span className="admin-profile-activity-dot" />
+                  <div>
+                    <strong>{item.label}</strong>
+                    <span>{item.time}</span>
+                  </div>
                 </div>
+                <span className="admin-profile-activity-tag">{item.tag}</span>
               </div>
-              <span className="admin-profile-activity-tag">{item.tag}</span>
-            </div>
-          ))}
+            ))
+          ) : (
+            <p className="field-hint">No recent activity yet.</p>
+          )}
         </div>
       </section>
     </>
@@ -218,6 +355,10 @@ function AdminProfileDetailsTab({
   saving,
   loading,
 }) {
+  const countryOptions = buildSelectOptions(countryValue, COUNTRY_OPTIONS);
+  const timezoneOptions = buildSelectOptions(timezoneValue, TIMEZONE_OPTIONS);
+  const languageOptions = buildSelectOptions(languageValue, LANGUAGE_OPTIONS);
+
   return (
     <div className="admin-profile-details-grid">
       <section className="admin-profile-card admin-profile-details-card">
@@ -330,33 +471,48 @@ function AdminProfileDetailsTab({
           </div>
           <div className="field">
             <label htmlFor="adminCountry">Country</label>
-            <input
+            <select
               id="adminCountry"
-              type="text"
               value={countryValue}
               onChange={onProfileChange("country")}
               disabled={!isEditing}
-            />
+            >
+              {countryOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="field">
             <label htmlFor="adminTimezone">Timezone</label>
-            <input
+            <select
               id="adminTimezone"
-              type="text"
               value={timezoneValue}
               onChange={onProfileChange("timezone")}
               disabled={!isEditing}
-            />
+            >
+              {timezoneOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="field">
             <label htmlFor="adminLanguage">Language</label>
-            <input
+            <select
               id="adminLanguage"
-              type="text"
               value={languageValue}
               onChange={onProfileChange("language")}
               disabled={!isEditing}
-            />
+            >
+              {languageOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="field">
             <label htmlFor="adminBio">Bio</label>
@@ -384,7 +540,15 @@ function AdminProfileSecurityTab({
   securityOptions,
   securityPrefs,
   onToggleSecurityPref,
-  onNotice,
+  preferenceSavingId,
+  sessionsVisible,
+  sessionsLoading,
+  sessions,
+  sessionActionId,
+  revokingAllSessions,
+  onToggleSessionHistory,
+  onRevokeSession,
+  onRevokeAllSessions,
 }) {
   return (
     <div className="admin-profile-security-grid">
@@ -528,6 +692,7 @@ function AdminProfileSecurityTab({
                 className={`admin-switch ${securityPrefs[item.id] ? "on" : ""}`.trim()}
                 type="button"
                 aria-pressed={securityPrefs[item.id]}
+                disabled={preferenceSavingId === item.id}
                 onClick={() => onToggleSecurityPref(item.id)}
               >
                 <span />
@@ -539,25 +704,61 @@ function AdminProfileSecurityTab({
           <button
             className="btn ghost admin-security-action"
             type="button"
-            onClick={() => onNotice("Login history is coming soon.")}
+            onClick={onToggleSessionHistory}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 12h5l2.4-4.5L14.5 17l2-5H20" />
             </svg>
-            View Login History
+            {sessionsVisible ? "Hide Login History" : "View Login History"}
           </button>
           <button
             className="btn ghost admin-security-action danger"
             type="button"
-            onClick={() => onNotice("All sessions revoked.")}
+            onClick={onRevokeAllSessions}
+            disabled={revokingAllSessions}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="9" />
               <path d="M9 9l6 6M15 9l-6 6" />
             </svg>
-            Revoke All Sessions
+            {revokingAllSessions ? "Revoking..." : "Revoke All Sessions"}
           </button>
         </div>
+        {sessionsVisible && (
+          <div className="admin-session-panel">
+            {sessionsLoading ? <p className="field-hint">Loading sessions...</p> : null}
+            {!sessionsLoading && sessions.length === 0 ? (
+              <p className="field-hint">No active sessions.</p>
+            ) : null}
+            <div className="admin-session-list">
+              {sessions.map((session) => (
+                <article key={session.id} className="admin-session-item">
+                  <div>
+                    <strong>{session.current ? "This device" : "Signed-in device"}</strong>
+                    <p className="field-hint">
+                      {session.userAgent || "Unknown browser"}
+                      {session.ipAddress ? ` · ${session.ipAddress}` : ""}
+                    </p>
+                    <p className="field-hint">
+                      Last used:{" "}
+                      {session.lastUsedAt
+                        ? new Date(session.lastUsedAt).toLocaleString("en-IN")
+                        : "Not available"}
+                    </p>
+                  </div>
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={() => onRevokeSession(session.id)}
+                    disabled={sessionActionId === session.id}
+                  >
+                    {sessionActionId === session.id ? "Revoking..." : "Revoke"}
+                  </button>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
@@ -567,6 +768,7 @@ function AdminProfileNotificationsTab({
   notificationOptions,
   notificationPrefs,
   onToggleNotificationPref,
+  preferenceSavingId,
 }) {
   return (
     <section className="admin-profile-card admin-profile-notifications-card">
@@ -587,6 +789,7 @@ function AdminProfileNotificationsTab({
               className={`admin-switch ${notificationPrefs[item.id] ? "on" : ""}`.trim()}
               type="button"
               aria-pressed={notificationPrefs[item.id]}
+              disabled={preferenceSavingId === item.id}
               onClick={() => onToggleNotificationPref(item.id)}
             >
               <span />
@@ -1011,25 +1214,14 @@ function ProfileImageModal({
 
 export default function AdminAccount() {
   const [profile, setProfile] = useState(EMPTY_PROFILE);
+  const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
   const [addressDraft, setAddressDraft] = useState("");
-  const [securityPrefs, setSecurityPrefs] = useState({
-    twoFactor: true,
-    loginAlerts: true,
-    sessionTimeout: false,
-  });
-  const [notificationPrefs, setNotificationPrefs] = useState({
-    emailNotifications: true,
-    orderAlerts: true,
-    stockAlerts: true,
-    customerMessages: true,
-    weeklyReports: true,
-    marketingUpdates: false,
-    securityAlerts: true,
-    paymentAlerts: true,
-  });
+  const [securityPrefs, setSecurityPrefs] = useState(DEFAULT_SECURITY_PREFS);
+  const [notificationPrefs, setNotificationPrefs] = useState(DEFAULT_NOTIFICATION_PREFS);
+  const [preferenceSavingId, setPreferenceSavingId] = useState("");
   const [saving, setSaving] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [imageSaving, setImageSaving] = useState(false);
@@ -1054,12 +1246,19 @@ export default function AdminAccount() {
   const [apiKeyFormOpen, setApiKeyFormOpen] = useState(false);
   const [apiKeyForm, setApiKeyForm] = useState({ name: "", type: "development" });
   const [apiKeySaving, setApiKeySaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [apiKeySecrets, setApiKeySecrets] = useState({});
   const [apiKeyReveal, setApiKeyReveal] = useState({});
   const [webhookFormOpen, setWebhookFormOpen] = useState(false);
   const [webhookForm, setWebhookForm] = useState({ url: "", events: "" });
   const [webhookSaving, setWebhookSaving] = useState(false);
   const [webhookSecret, setWebhookSecret] = useState("");
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsVisible, setSessionsVisible] = useState(false);
+  const [sessionActionId, setSessionActionId] = useState("");
+  const [revokingAllSessions, setRevokingAllSessions] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const profileImageInputRef = useRef(null);
@@ -1086,6 +1285,15 @@ export default function AdminAccount() {
     return true;
   }, [handleUnauthorized]);
 
+  const applyProfilePayload = useCallback((data) => {
+    const nextProfile = { ...EMPTY_PROFILE, ...(data || {}) };
+    setProfile(nextProfile);
+    setSecurityPrefs(readAdminSecurityPrefs(nextProfile));
+    setNotificationPrefs(readAdminNotificationPrefs(nextProfile));
+    persistUserToStorage(nextProfile);
+    return nextProfile;
+  }, []);
+
   const loadProfile = useCallback(async () => {
     if (!requireSession()) return;
 
@@ -1101,13 +1309,53 @@ export default function AdminAccount() {
         setError(data.message || "Unable to load profile.");
         return;
       }
-      setProfile({ ...EMPTY_PROFILE, ...data });
-      persistUserToStorage(data);
+      applyProfilePayload(data);
       setIsEditing(false);
     } catch {
       setError("Unable to load profile.");
     } finally {
       setLoading(false);
+    }
+  }, [applyProfilePayload, handleUnauthorized, requireSession]);
+
+  const loadOverview = useCallback(async () => {
+    if (!requireSession()) return;
+
+    try {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/admin/overview`);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      if (!response.ok) {
+        setError(data.message || "Unable to load overview.");
+        return;
+      }
+      setOverview(data || null);
+    } catch {
+      setError("Unable to load overview.");
+    }
+  }, [handleUnauthorized, requireSession]);
+
+  const loadSessions = useCallback(async () => {
+    if (!requireSession()) return;
+
+    setSessionsLoading(true);
+    try {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/sessions`);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      if (!response.ok) {
+        setError(data.message || "Unable to load sessions.");
+        return;
+      }
+      setSessions(Array.isArray(data.items) ? data.items : []);
+    } catch {
+      setError("Unable to load sessions.");
+    } finally {
+      setSessionsLoading(false);
     }
   }, [handleUnauthorized, requireSession]);
 
@@ -1154,9 +1402,23 @@ export default function AdminAccount() {
   }, [loadProfile]);
 
   useEffect(() => {
+    loadOverview();
+    loadSessions();
+  }, [loadOverview, loadSessions]);
+
+  useEffect(() => {
     if (activeTab !== "api") return;
     loadApiIntegrations();
   }, [activeTab, loadApiIntegrations]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([loadProfile(), loadOverview(), loadSessions(), loadApiIntegrations()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadApiIntegrations, loadOverview, loadProfile, loadSessions]);
 
   const onProfileChange = (field) => (event) => {
     setProfile((prev) => ({ ...prev, [field]: event.target.value }));
@@ -1205,8 +1467,7 @@ export default function AdminAccount() {
         setError(data.message || "Unable to save profile.");
         return false;
       }
-      setProfile({ ...EMPTY_PROFILE, ...data });
-      persistUserToStorage(data);
+      applyProfilePayload(data);
       setNotice("Account profile saved.");
       return true;
     } catch {
@@ -1342,11 +1603,12 @@ export default function AdminAccount() {
     setAddressDraft(addressDraftValue);
   }, [addressDraftValue, isEditing]);
 
+  const overviewCards = overview?.cards || {};
   const metricCards = [
     {
       label: "Total Products",
-      value: "1,247",
-      delta: "+12% from last month",
+      value: String(overviewCards.totalProducts ?? 0),
+      delta: `${overviewCards.activeProducts ?? 0} active`,
       tone: "tone-blue",
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1358,8 +1620,8 @@ export default function AdminAccount() {
     },
     {
       label: "Active Orders",
-      value: "89",
-      delta: "23 pending review",
+      value: String(overviewCards.activeOrders ?? 0),
+      delta: `${overviewCards.totalOrders ?? 0} total`,
       tone: "tone-violet",
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1372,8 +1634,8 @@ export default function AdminAccount() {
     },
     {
       label: "Total Customers",
-      value: "3,542",
-      delta: "+18% this month",
+      value: String(overview?.totalCustomers ?? 0),
+      delta: `${overviewCards.approvedSellers ?? 0} approved sellers`,
       tone: "tone-green",
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1385,9 +1647,9 @@ export default function AdminAccount() {
       ),
     },
     {
-      label: "Revenue (MTD)",
-      value: "$45,780",
-      delta: "+23% from last month",
+      label: "Paid Revenue",
+      value: formatMoney(overviewCards.paidRevenue ?? 0),
+      delta: `${formatMoney(overviewCards.refundedAmount ?? 0)} refunded`,
       tone: "tone-orange",
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1440,9 +1702,9 @@ export default function AdminAccount() {
   ];
   const statusItems = [
     {
-      label: "Email on file",
-      value: profile.email ? "Confirmed" : "Missing",
-      tone: profile.email ? "status-success" : "status-warning",
+      label: "Email",
+      value: profile.emailVerified ? "Verified" : profile.email ? "Not verified" : "Missing",
+      tone: profile.emailVerified ? "status-success" : "status-warning",
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M5 12.5 9.2 16.5 19 7.5" />
@@ -1451,8 +1713,8 @@ export default function AdminAccount() {
     },
     {
       label: "2FA",
-      value: "Not configured",
-      tone: "status-neutral",
+      value: securityPrefs.twoFactor ? "Enabled" : "Off",
+      tone: securityPrefs.twoFactor ? "status-success" : "status-neutral",
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M7.5 11V8.5a4.5 4.5 0 0 1 9 0V11" />
@@ -1461,8 +1723,8 @@ export default function AdminAccount() {
       ),
     },
     {
-      label: "Account Active",
-      value: createdAtLabel !== "Not available" ? `Since ${createdAtLabel}` : createdAtLabel,
+      label: "Sessions",
+      value: `${sessions.length} active`,
       tone: "status-info",
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1471,33 +1733,13 @@ export default function AdminAccount() {
       ),
     },
   ];
-  const activityItems = [
-    {
-      label: "Updated product inventory - Handmade Ceramic Vase",
-      time: "2 hours ago",
-      tag: "product",
-    },
-    {
-      label: "Approved new customer registration - John Doe",
-      time: "5 hours ago",
-      tag: "customer",
-    },
-    {
-      label: "Processed refund for Order #ORD-2847",
-      time: "1 day ago",
-      tag: "order",
-    },
-    {
-      label: "Changed notification settings",
-      time: "2 days ago",
-      tag: "settings",
-    },
-    {
-      label: "Updated profile information",
-      time: "3 days ago",
-      tag: "profile",
-    },
-  ];
+  const activityItems = sessions.slice(0, 5).map((session) => ({
+    label: session.current
+      ? "Current admin session"
+      : session.userAgent || "Signed-in device",
+    time: formatRelativeTime(session.lastUsedAt || session.createdAt),
+    tag: session.current ? "current" : "session",
+  }));
   const tabs = [
     {
       id: "overview",
@@ -1679,8 +1921,7 @@ export default function AdminAccount() {
         setError(data.message || "Unable to update profile image.");
         return;
       }
-      setProfile({ ...EMPTY_PROFILE, ...data });
-      persistUserToStorage(data);
+      applyProfilePayload(data);
       setNotice("Profile picture updated.");
       closeProfileImageModal();
     } catch {
@@ -1734,12 +1975,207 @@ export default function AdminAccount() {
     resetAlerts();
   };
 
-  const toggleSecurityPref = (field) => {
-    setSecurityPrefs((prev) => ({ ...prev, [field]: !prev[field] }));
+  const saveAdminPreferences = useCallback(
+    async (payload, failureMessage) => {
+      if (!requireSession()) return null;
+
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      if (response.status === 401) {
+        handleUnauthorized();
+        return null;
+      }
+      if (!response.ok) {
+        throw new Error(data.message || failureMessage);
+      }
+      applyProfilePayload(data);
+      return data;
+    },
+    [applyProfilePayload, handleUnauthorized, requireSession]
+  );
+
+  const toggleSecurityPref = async (field) => {
+    const previousPrefs = securityPrefs;
+    const nextPrefs = { ...previousPrefs, [field]: !previousPrefs[field] };
+    setSecurityPrefs(nextPrefs);
+    setPreferenceSavingId(field);
+    resetAlerts();
+    try {
+      await saveAdminPreferences(
+        {
+          adminSecuritySettings: buildAdminSecurityPayload(nextPrefs),
+        },
+        "Unable to update security settings."
+      );
+      setNotice("Security settings updated.");
+    } catch (saveError) {
+      setSecurityPrefs(previousPrefs);
+      setError(saveError?.message || "Unable to update security settings.");
+    } finally {
+      setPreferenceSavingId("");
+    }
   };
 
-  const toggleNotificationPref = (field) => {
-    setNotificationPrefs((prev) => ({ ...prev, [field]: !prev[field] }));
+  const toggleNotificationPref = async (field) => {
+    const previousPrefs = notificationPrefs;
+    const nextPrefs = { ...previousPrefs, [field]: !previousPrefs[field] };
+    setNotificationPrefs(nextPrefs);
+    setPreferenceSavingId(field);
+    resetAlerts();
+    try {
+      await saveAdminPreferences(
+        {
+          adminNotificationSettings: nextPrefs,
+        },
+        "Unable to update notification settings."
+      );
+      setNotice("Notification settings updated.");
+    } catch (saveError) {
+      setNotificationPrefs(previousPrefs);
+      setError(saveError?.message || "Unable to update notification settings.");
+    } finally {
+      setPreferenceSavingId("");
+    }
+  };
+
+  const toggleSessionHistory = () => {
+    setSessionsVisible((prev) => !prev);
+    resetAlerts();
+  };
+
+  const revokeSession = async (sessionId) => {
+    if (!requireSession() || !sessionId) return;
+
+    setSessionActionId(sessionId);
+    resetAlerts();
+    try {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/sessions/${sessionId}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      if (!response.ok) {
+        setError(data.message || "Unable to revoke this session.");
+        return;
+      }
+      setSessions(Array.isArray(data.items) ? data.items : []);
+      if (data.revokedCurrent) {
+        clearAuthSession();
+        navigate("/login", {
+          replace: true,
+          state: { notice: "Current session was revoked." },
+        });
+        return;
+      }
+      setNotice(data.message || "Session revoked.");
+    } catch {
+      setError("Unable to revoke this session.");
+    } finally {
+      setSessionActionId("");
+    }
+  };
+
+  const revokeAllSessions = async () => {
+    if (!requireSession()) return;
+
+    const confirmed = window.confirm("Revoke every active session for this admin account?");
+    if (!confirmed) return;
+
+    setRevokingAllSessions(true);
+    resetAlerts();
+    try {
+      const { response, data } = await apiFetchJson(`${API_URL}/api/users/me/sessions`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      if (!response.ok) {
+        setError(data.message || "Unable to revoke sessions.");
+        return;
+      }
+      setSessions([]);
+      clearAuthSession();
+      navigate("/login", {
+        replace: true,
+        state: { notice: data.message || "All sessions revoked." },
+      });
+    } catch {
+      setError("Unable to revoke sessions.");
+    } finally {
+      setRevokingAllSessions(false);
+    }
+  };
+
+  const exportAccountData = async () => {
+    if (!requireSession()) return;
+
+    setExporting(true);
+    resetAlerts();
+    try {
+      const [sessionsResult, apiKeysResult, webhooksResult, overviewResult] = await Promise.all([
+        apiFetchJson(`${API_URL}/api/users/me/sessions`),
+        apiFetchJson(`${API_URL}/api/users/me/api-keys`),
+        apiFetchJson(`${API_URL}/api/users/me/webhooks`),
+        apiFetchJson(`${API_URL}/api/admin/overview`),
+      ]);
+      const responses = [
+        sessionsResult.response,
+        apiKeysResult.response,
+        webhooksResult.response,
+        overviewResult.response,
+      ];
+      if (responses.some((response) => response.status === 401)) {
+        handleUnauthorized();
+        return;
+      }
+      if (responses.some((response) => !response.ok)) {
+        const failed =
+          [sessionsResult, apiKeysResult, webhooksResult, overviewResult].find(
+            (result) => !result.response.ok
+          ) || sessionsResult;
+        throw new Error(failed.data?.message || "Unable to export account data.");
+      }
+
+      const payload = {
+        profile,
+        overview: overviewResult.data || {},
+        sessions: Array.isArray(sessionsResult.data?.items) ? sessionsResult.data.items : [],
+        apiKeys: Array.isArray(apiKeysResult.data?.items) ? apiKeysResult.data.items : [],
+        webhooks: Array.isArray(webhooksResult.data?.items) ? webhooksResult.data.items : [],
+        exportedAt: new Date().toISOString(),
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `craftzygifts-admin-account-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      setNotice("Account data exported.");
+    } catch (exportError) {
+      setError(exportError?.message || "Unable to export account data.");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const scrollTabs = (direction) => {
@@ -2004,8 +2440,14 @@ export default function AdminAccount() {
       title="Admin Profile"
       description="Manage your admin account details, security, and preferences."
       actions={
-        <button className="admin-text-action" type="button" onClick={loadProfile}>
-          Refresh
+        <button
+          className="admin-text-action"
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          aria-busy={refreshing}
+        >
+          {refreshing ? "Refreshing..." : "Refresh"}
         </button>
       }
     >
@@ -2168,7 +2610,8 @@ export default function AdminAccount() {
           statusItems={statusItems}
           activityItems={activityItems}
           aboutText={aboutText}
-          onExport={() => setNotice("Export feature is coming soon.")}
+          onExport={exportAccountData}
+          exporting={exporting}
         />
       )}
 
@@ -2201,7 +2644,15 @@ export default function AdminAccount() {
           securityOptions={securityOptions}
           securityPrefs={securityPrefs}
           onToggleSecurityPref={toggleSecurityPref}
-          onNotice={setNotice}
+          preferenceSavingId={preferenceSavingId}
+          sessionsVisible={sessionsVisible}
+          sessionsLoading={sessionsLoading}
+          sessions={sessions}
+          sessionActionId={sessionActionId}
+          revokingAllSessions={revokingAllSessions}
+          onToggleSessionHistory={toggleSessionHistory}
+          onRevokeSession={revokeSession}
+          onRevokeAllSessions={revokeAllSessions}
         />
       )}
 
@@ -2210,6 +2661,7 @@ export default function AdminAccount() {
           notificationOptions={notificationOptions}
           notificationPrefs={notificationPrefs}
           onToggleNotificationPref={toggleNotificationPref}
+          preferenceSavingId={preferenceSavingId}
         />
       )}
 

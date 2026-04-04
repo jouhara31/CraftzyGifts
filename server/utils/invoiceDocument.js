@@ -15,13 +15,23 @@ const COLORS = {
 
 const asText = (value = "") => String(value ?? "").trim();
 
-const formatCurrency = (value = 0) => {
+const getCurrencySymbol = (currencyCode = "INR") => {
+  const normalized = asText(currencyCode).toUpperCase() || "INR";
+  if (normalized === "INR") return "₹";
+  if (normalized === "USD") return "$";
+  if (normalized === "EUR") return "€";
+  if (normalized === "GBP") return "£";
+  if (normalized === "AED") return "AED ";
+  return `${normalized} `;
+};
+
+const formatCurrency = (value = 0, currencyCode = "INR") => {
   const rounded = Math.round(Number(value || 0) * 100) / 100;
   const hasDecimals = Math.abs(rounded - Math.round(rounded)) > 0.001;
-  return `Rs. ${rounded.toLocaleString("en-IN", {
+  return `${getCurrencySymbol(currencyCode)}${rounded.toLocaleString("en-IN", {
     minimumFractionDigits: hasDecimals ? 2 : 0,
     maximumFractionDigits: 2,
-  })}`;
+  })}`.trim();
 };
 
 const formatDate = (value) => {
@@ -137,12 +147,16 @@ const buildOrderReferenceLines = (invoice = {}) => {
   const notes = Array.isArray(invoice?.notes) ? invoice.notes.map((note) => asText(note)).filter(Boolean) : [];
   const summary = invoice?.summary || {};
   const taxRate = Number(invoice?.item?.taxRate || 0);
+  const currencyCode = asText(invoice?.currencyCode || "INR") || "INR";
   const rows = [
     `Order date: ${formatDate(invoice?.order?.createdAt)}`,
-    `${asText(summary?.subtotalLabel || "Item subtotal")}: ${formatCurrency(summary?.subtotal ?? invoice?.item?.subtotal ?? 0)}`,
+    `${asText(summary?.subtotalLabel || "Item subtotal")}: ${formatCurrency(
+      summary?.subtotal ?? invoice?.item?.subtotal ?? 0,
+      currencyCode
+    )}`,
     `${
       asText(summary?.makingChargeLabel || "Customization / packaging") || "Customization / packaging"
-    }: ${formatCurrency(summary?.makingCharge ?? invoice?.item?.makingCharge ?? 0)}`,
+    }: ${formatCurrency(summary?.makingCharge ?? invoice?.item?.makingCharge ?? 0, currencyCode)}`,
   ];
 
   if (taxRate > 0) {
@@ -162,27 +176,28 @@ const buildOrderReferenceLines = (invoice = {}) => {
 
 const buildAmountSummaryRows = (invoice = {}) => {
   const summary = invoice?.summary || {};
+  const currencyCode = asText(invoice?.currencyCode || "INR") || "INR";
   return [
     {
       label: asText(summary?.subtotalLabel || "Item subtotal") || "Item subtotal",
-      value: formatCurrency(summary?.subtotal ?? invoice?.item?.subtotal ?? 0),
+      value: formatCurrency(summary?.subtotal ?? invoice?.item?.subtotal ?? 0, currencyCode),
       tone: "normal",
     },
     {
       label:
         asText(summary?.makingChargeLabel || "Customization / packaging") ||
         "Customization / packaging",
-      value: formatCurrency(summary?.makingCharge ?? invoice?.item?.makingCharge ?? 0),
+      value: formatCurrency(summary?.makingCharge ?? invoice?.item?.makingCharge ?? 0, currencyCode),
       tone: "normal",
     },
     {
       label: asText(summary?.taxLabel || "Tax included") || "Tax included",
-      value: formatCurrency(summary?.taxAmount ?? invoice?.item?.taxAmount ?? 0),
+      value: formatCurrency(summary?.taxAmount ?? invoice?.item?.taxAmount ?? 0, currencyCode),
       tone: "normal",
     },
     {
       label: asText(summary?.totalLabel || "Grand total") || "Grand total",
-      value: formatCurrency(summary?.total ?? invoice?.item?.total ?? 0),
+      value: formatCurrency(summary?.total ?? invoice?.item?.total ?? 0, currencyCode),
       tone: "grand",
     },
   ];
@@ -407,9 +422,9 @@ const drawCompactLineItemRow = (doc, x, y, widths, item) => {
 
   [
     String(item.quantity),
-    formatCurrency(item.unitPrice),
-    formatCurrency(item.taxAmount),
-    formatCurrency(item.total),
+    formatCurrency(item.unitPrice, item.currencyCode),
+    formatCurrency(item.taxAmount, item.currencyCode),
+    formatCurrency(item.total, item.currencyCode),
   ].forEach((value, index) => {
     doc.fillColor(COLORS.ink).font(index === 3 ? "Helvetica-Bold" : "Helvetica").fontSize(7.8).text(
       value,
@@ -654,10 +669,10 @@ const drawLineItemRow = (doc, x, y, widths, item) => {
   const values = [
     description,
     String(item.quantity),
-    formatCurrency(item.unitPrice),
-    formatCurrency(item.taxableValue),
-    formatCurrency(item.taxAmount),
-    formatCurrency(item.total),
+    formatCurrency(item.unitPrice, item.currencyCode),
+    formatCurrency(item.taxableValue, item.currencyCode),
+    formatCurrency(item.taxAmount, item.currencyCode),
+    formatCurrency(item.total, item.currencyCode),
   ];
 
   values.forEach((value, index) => {
@@ -750,13 +765,15 @@ const generateInvoiceBarcodePng = async (value = "") => {
 };
 
 const generateInvoicePdfBuffer = async (invoice = {}) => {
+  const platformName = asText(invoice?.platformName || "CraftzyGifts") || "CraftzyGifts";
+  const currencyCode = asText(invoice?.currencyCode || "INR") || "INR";
   const doc = new PDFDocument({
     size: "A5",
     margin: PAGE_MARGIN,
     compress: true,
     info: {
-      Title: asText(invoice?.invoiceNumber) || "CraftzyGifts Invoice",
-      Author: "CraftzyGifts",
+      Title: asText(invoice?.invoiceNumber) || `${platformName} Invoice`,
+      Author: platformName,
       Subject: "Order Invoice",
     },
   });
@@ -774,7 +791,7 @@ const generateInvoicePdfBuffer = async (invoice = {}) => {
   const headerTextWidth = contentWidth - metaBoxWidth - COLUMN_GAP;
   const barcodeBuffer = await generateInvoiceBarcodePng(invoice?.invoiceNumber);
   const sellerTitle = asText(
-    invoice?.seller?.legalBusinessName || invoice?.seller?.name || "CraftzyGifts Store"
+    invoice?.seller?.legalBusinessName || invoice?.seller?.name || `${platformName} Store`
   );
   const storefrontName =
     asText(invoice?.seller?.name) && asText(invoice?.seller?.legalBusinessName)
@@ -816,6 +833,9 @@ const generateInvoicePdfBuffer = async (invoice = {}) => {
     contentWidth * 0.20,
   ];
   const lineItems = normalizeInvoiceLineItems(invoice);
+  lineItems.forEach((entry) => {
+    entry.currencyCode = currencyCode;
+  });
   const orderReferenceLines = buildCompactReferenceLines(invoice);
   const amountSummaryRows = buildAmountSummaryRows(invoice);
   const metaRows = buildMetaRows(invoice);
@@ -826,7 +846,7 @@ const generateInvoicePdfBuffer = async (invoice = {}) => {
     width: headerTextWidth,
   });
   cursorY = doc.y + 2;
-  doc.fillColor(COLORS.ink).font("Helvetica-Bold").fontSize(17).text("CraftzyGifts", doc.page.margins.left, cursorY, {
+  doc.fillColor(COLORS.ink).font("Helvetica-Bold").fontSize(17).text(platformName, doc.page.margins.left, cursorY, {
     width: headerTextWidth,
   });
   cursorY = doc.y + 1;

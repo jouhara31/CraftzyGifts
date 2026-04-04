@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
+import { usePlatform } from "../hooks/usePlatform";
 
 import { API_URL } from "../apiBase";
 
 export default function Register() {
+  const { platformName } = usePlatform();
   const [searchParams] = useSearchParams();
   const defaultRole = useMemo(() => {
     const requestedRole = searchParams.get("role");
@@ -74,7 +76,7 @@ export default function Register() {
           <div className="seller-register-layout">
             <aside className="seller-register-side">
               <p className="auth-kicker">Seller Onboarding</p>
-              <h3>Start selling on CraftzyGifts</h3>
+              <h3>Start selling on {platformName}</h3>
               <p>
                 Complete your profile once and begin listing handcrafted collections for
                 customers across occasions.
@@ -90,7 +92,7 @@ export default function Register() {
             </aside>
 
             <form onSubmit={handleSubmit} className="auth-card seller-auth-card">
-              <p className="auth-kicker">Join CraftzyGifts</p>
+              <p className="auth-kicker">Join {platformName}</p>
               <h2 className="auth-title">Become a seller</h2>
               <p className="auth-sub">Create your seller account and start listing products.</p>
 
@@ -239,7 +241,7 @@ export default function Register() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="auth-card">
-            <p className="auth-kicker">Join CraftzyGifts</p>
+            <p className="auth-kicker">Join {platformName}</p>
             <h2 className="auth-title">Create your account</h2>
             <p className="auth-sub">
               Create your customer account for shopping, cart, wishlist, and checkout.

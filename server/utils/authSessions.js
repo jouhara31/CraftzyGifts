@@ -24,7 +24,10 @@ const buildPublicUserPayload = (user) => ({
   name: user?.name,
   email: user?.email,
   emailVerified: Boolean(user?.emailVerification?.verifiedAt),
-  twoFactorEnabled: Boolean(user?.sellerSecuritySettings?.loginOtpEnabled),
+  twoFactorEnabled:
+    user?.role === "admin"
+      ? Boolean(user?.adminSecuritySettings?.loginOtpEnabled)
+      : Boolean(user?.sellerSecuritySettings?.loginOtpEnabled),
   role: user?.role,
   sellerStatus: user?.sellerStatus,
   storeName: user?.storeName,
@@ -33,6 +36,8 @@ const buildPublicUserPayload = (user) => ({
   instagramUrl: user?.instagramUrl,
   profileImage: user?.profileImage,
   storeCoverImage: user?.storeCoverImage,
+  adminSecuritySettings: user?.adminSecuritySettings || {},
+  adminNotificationSettings: user?.adminNotificationSettings || {},
 });
 
 const signAccessToken = (user) =>

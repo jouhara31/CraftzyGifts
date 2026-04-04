@@ -23,6 +23,7 @@ export default function SellerReports() {
   const [orders, setOrders] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -71,6 +72,15 @@ export default function SellerReports() {
 
   useEffect(() => {
     loadReports();
+  }, [loadReports]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadReports();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadReports]);
 
   const report = useMemo(() => {
@@ -203,8 +213,14 @@ export default function SellerReports() {
           <button className="btn ghost" type="button" onClick={downloadReport}>
             Download report
           </button>
-          <button className="btn ghost" type="button" onClick={loadReports}>
-            Refresh
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
       </div>

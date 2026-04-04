@@ -44,6 +44,7 @@ export default function AdminCustomers() {
   const [customers, setCustomers] = useState([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
   const clearAndRedirect = useCallback(() => {
     clearAuthSession();
@@ -76,6 +77,15 @@ export default function AdminCustomers() {
 
   useEffect(() => {
     loadCustomers();
+  }, [loadCustomers]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadCustomers();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadCustomers]);
 
   const visibleCustomers = useMemo(() => {
@@ -120,8 +130,14 @@ export default function AdminCustomers() {
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
-          <button className="admin-text-action" type="button" onClick={loadCustomers}>
-            Refresh
+          <button
+            className="admin-text-action"
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </>
       }

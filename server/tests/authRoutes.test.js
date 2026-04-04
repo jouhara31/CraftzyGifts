@@ -25,6 +25,10 @@ jest.mock("../utils/emailService", () => ({
   sendTransactionalEmail: jest.fn(),
 }));
 
+jest.mock("../utils/sellerNotifications", () => ({
+  createAdminNotification: jest.fn(),
+}));
+
 jest.mock("../utils/authSessions", () => ({
   buildPublicUserPayload: jest.fn((user) => ({
     id: String(user?._id || user?.id || ""),
@@ -53,6 +57,7 @@ const bcrypt = require("bcryptjs");
 const { issueAuthSession } = require("../utils/authSessions");
 const { ensurePlatformSettings } = require("../utils/platformSettings");
 const { sendTransactionalEmail } = require("../utils/emailService");
+const { createAdminNotification } = require("../utils/sellerNotifications");
 const authRoutes = require("../routes/authRoutes");
 
 const buildApp = () => {
@@ -66,6 +71,11 @@ describe("auth routes", () => {
   beforeEach(() => {
     process.env.JWT_SECRET = "test-secret";
     jest.clearAllMocks();
+    ensurePlatformSettings.mockResolvedValue({
+      platformName: "CraftzyGifts",
+      autoApproveSellers: false,
+      maintenanceMode: false,
+    });
   });
 
   test("login sets HttpOnly session cookies and does not expose raw tokens", async () => {
@@ -138,7 +148,7 @@ describe("auth routes", () => {
     });
 
     expect(response.status).toBe(201);
-    expect(ensurePlatformSettings).toHaveBeenCalledTimes(1);
+    expect(ensurePlatformSettings).toHaveBeenCalled();
     expect(User).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "Seller Example",
@@ -187,5 +197,157 @@ describe("auth routes", () => {
         sellerStatus: "approved",
       })
     );
+  });
+
+  test("register is blocked while maintenance mode is enabled", async () => {
+    const app = buildApp();
+    ensurePlatformSettings.mockResolvedValue({
+      platformName: "CraftzyGifts",
+      autoApproveSellers: false,
+      maintenanceMode: true,
+    });
+
+    const response = await request(app).post("/api/auth/register").send({
+      name: "Blocked Seller",
+      email: "blocked@example.com",
+      password: "Password123!",
+      role: "seller",
+      storeName: "Paused Store",
+      phone: "9876543211",
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        maintenanceMode: true,
+        platformName: "CraftzyGifts",
+      })
+    );
+  });
+
+  test("login blocks non-admin users while maintenance mode is enabled", async () => {
+    const app = buildApp();
+    const fakeUser = {
+      _id: "user_2",
+      name: "Customer Example",
+      email: "customer@example.com",
+      role: "customer",
+      sellerStatus: "approved",
+      password: "hashed-password",
+    };
+
+    User.findOne.mockResolvedValue(fakeUser);
+    bcrypt.compare.mockResolvedValue(true);
+    ensurePlatformSettings.mockResolvedValue({
+      platformName: "CraftzyGifts",
+      maintenanceMode: true,
+    });
+
+    const response = await request(app).post("/api/auth/login").send({
+      email: "customer@example.com",
+      password: "Password123!",
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        maintenanceMode: true,
+        platformName: "CraftzyGifts",
+      })
+    );
+    expect(issueAuthSession).not.toHaveBeenCalled();
+  });
+
+  test("login still allows admins during maintenance mode", async () => {
+    const app = buildApp();
+    const fakeUser = {
+      _id: "admin_2",
+      name: "Admin Example",
+      email: "admin@example.com",
+      role: "admin",
+      password: "hashed-password",
+      adminSecuritySettings: {
+        loginOtpEnabled: false,
+        loginAlerts: false,
+      },
+      adminNotificationSettings: {
+        securityAlerts: false,
+      },
+    };
+
+    User.findOne.mockResolvedValue(fakeUser);
+    bcrypt.compare.mockResolvedValue(true);
+    ensurePlatformSettings.mockResolvedValue({
+      platformName: "CraftzyGifts",
+      maintenanceMode: true,
+    });
+    issueAuthSession.mockResolvedValue({
+      user: {
+        id: "admin_2",
+        name: "Admin Example",
+        email: "admin@example.com",
+        role: "admin",
+      },
+      token: "access-token-value",
+      refreshToken: "refresh-token-value",
+      tokenExpiresIn: 3600,
+      accessTokenExpiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
+      refreshTokenExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    });
+
+    const response = await request(app).post("/api/auth/login").send({
+      email: "admin@example.com",
+      password: "Password123!",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.user).toEqual(
+      expect.objectContaining({
+        role: "admin",
+        email: "admin@example.com",
+      })
+    );
+    expect(issueAuthSession).toHaveBeenCalledTimes(1);
+  });
+
+  test("login requires OTP for admins when admin two-factor is enabled", async () => {
+    const app = buildApp();
+    const save = jest.fn().mockResolvedValue(undefined);
+    const fakeUser = {
+      _id: "admin_1",
+      name: "Admin Example",
+      email: "admin@example.com",
+      role: "admin",
+      password: "hashed-password",
+      adminSecuritySettings: {
+        loginOtpEnabled: true,
+        loginAlerts: true,
+      },
+      adminNotificationSettings: {
+        securityAlerts: true,
+      },
+      save,
+    };
+
+    User.findOne.mockResolvedValue(fakeUser);
+    bcrypt.compare.mockResolvedValue(true);
+
+    const response = await request(app).post("/api/auth/login").send({
+      email: "admin@example.com",
+      password: "Password123!",
+    });
+
+    expect(response.status).toBe(202);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        requiresOtp: true,
+        email: "admin@example.com",
+        challengeToken: expect.any(String),
+      })
+    );
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(sendTransactionalEmail).toHaveBeenCalledTimes(1);
+    expect(issueAuthSession).not.toHaveBeenCalled();
+    expect(createAdminNotification).not.toHaveBeenCalled();
   });
 });

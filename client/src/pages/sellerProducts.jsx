@@ -803,6 +803,7 @@ export default function SellerProducts() {
   const [query, setQuery] = useState(() => searchParams.get("q") || "");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const [actingId, setActingId] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(
     () => searchParams.get("new") === "1"
@@ -880,6 +881,15 @@ export default function SellerProducts() {
 
   useEffect(() => {
     loadProducts();
+  }, [loadProducts]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadProducts();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadProducts]);
 
   const visibleProducts = useMemo(() => {
@@ -1483,8 +1493,14 @@ export default function SellerProducts() {
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
-          <button className="btn ghost" type="button" onClick={loadProducts}>
-            Refresh
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
       </div>

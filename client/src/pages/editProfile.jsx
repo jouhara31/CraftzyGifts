@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 
@@ -69,10 +69,10 @@ export default function EditProfile() {
     () => (Array.isArray(savedAddresses) ? savedAddresses.length : 0),
     [savedAddresses]
   );
-  const clearAndRedirect = () => {
+  const clearAndRedirect = useCallback(() => {
     clearAuthSession();
     navigate("/login");
-  };
+  }, [navigate]);
 
   useEffect(() => {
     const load = async () => {
@@ -130,7 +130,7 @@ export default function EditProfile() {
     };
 
     load();
-  }, [navigate]);
+  }, [clearAndRedirect, navigate]);
 
   useEffect(() => {
     if (!location.hash) return;

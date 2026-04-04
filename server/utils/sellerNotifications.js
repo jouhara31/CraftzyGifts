@@ -22,6 +22,33 @@ const normalizeNotification = (entry) => ({
   readAt: entry?.readAt || null,
 });
 
+const resolveAdminNotificationPreferenceKey = (type = "") => {
+  const normalizedType = normalizeText(type).toLowerCase();
+  if (!normalizedType) return "";
+  if (
+    normalizedType.startsWith("seller_admin_message") ||
+    normalizedType.startsWith("seller_support_ticket")
+  ) {
+    return "customerMessages";
+  }
+  if (normalizedType.includes("payment")) {
+    return "paymentAlerts";
+  }
+  if (normalizedType.includes("stock") || normalizedType.includes("inventory")) {
+    return "stockAlerts";
+  }
+  if (normalizedType.includes("order")) {
+    return "orderAlerts";
+  }
+  if (normalizedType.includes("marketing")) {
+    return "marketingUpdates";
+  }
+  if (normalizedType.includes("security") || normalizedType.includes("login")) {
+    return "securityAlerts";
+  }
+  return "";
+};
+
 const createUserNotification = async ({
   userId,
   type,
@@ -148,13 +175,24 @@ const createNotificationsForAdmins = async ({
   entityId = "",
   key = "",
 }) => {
-  const admins = await User.find({ role: "admin" }).select("_id").lean();
+  const admins = await User.find({ role: "admin" })
+    .select("_id adminNotificationSettings")
+    .lean();
   if (!Array.isArray(admins) || admins.length === 0) return [];
+
+  const preferenceKey = resolveAdminNotificationPreferenceKey(type);
 
   return Promise.all(
     admins.map((admin) => {
       const adminId = normalizeText(admin?._id);
       if (!adminId) return null;
+      if (
+        preferenceKey &&
+        admin?.adminNotificationSettings &&
+        admin.adminNotificationSettings[preferenceKey] === false
+      ) {
+        return null;
+      }
       const notificationKey = normalizeText(key)
         ? `${normalizeText(key)}_${adminId}`
         : "";

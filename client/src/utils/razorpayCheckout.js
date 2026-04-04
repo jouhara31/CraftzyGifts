@@ -83,7 +83,7 @@ export const openRazorpayCheckout = async ({
       amount: checkout?.amount,
       currency: checkout?.currency || "INR",
       order_id: checkout?.orderId,
-      name: "CraftzyGifts",
+      name: String(checkout?.platformName || "CraftzyGifts").trim() || "CraftzyGifts",
       description: "Secure order payment",
       prefill: {
         name: String(prefill?.name || "").trim(),

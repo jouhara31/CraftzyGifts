@@ -8,14 +8,6 @@ const createApiError = (message, status = 500, data = null) => {
   return error;
 };
 
-const readJson = async (response) => {
-  try {
-    return await response.json();
-  } catch {
-    return {};
-  }
-};
-
 const request = async (path, { method = "GET", body } = {}) => {
   if (!hasActiveSession()) {
     throw createApiError("Login required.", 401);

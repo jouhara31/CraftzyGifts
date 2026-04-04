@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
 import logoPng from "../assets/logo.png";
 import logoCartPng from "../assets/logo-cart.png";
+import { usePlatform } from "../hooks/usePlatform";
 import { getCart } from "../utils/cart";
 import { getWishlist } from "../utils/wishlist";
 import {
@@ -196,6 +197,7 @@ const HeaderBottomNavIcon = ({ kind }) => {
 };
 
 export default function Header({ variant, onFilterClick, isFilterActive = false }) {
+  const { platformName } = usePlatform();
   const [user, setUser] = useState(readStoredUser);
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountMenuStyle, setAccountMenuStyle] = useState(null);
@@ -237,7 +239,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const isSellerNav = variant === "seller";
   const isCartRoute = location.pathname === "/cart";
   const brandLogo = isCartRoute ? logoCartPng : logoPng;
-  const brandLabel = isCartRoute ? "Your Cart" : "Craftzy Gifts";
+  const brandLabel = isCartRoute ? "Your Cart" : platformName;
   const brandSubtext = isCartRoute ? "Review your items before checkout" : "";
   const categoryTree =
     Array.isArray(customerCategoryTree) && customerCategoryTree.length > 0
@@ -1061,7 +1063,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
           }`}
         >
           <Link className="brand" to="/">
-            <img src={brandLogo} alt="Craftzy Gifts logo" className="brand-logo-head" />
+            <img src={brandLogo} alt={`${platformName} logo`} className="brand-logo-head" />
             <span className="brand-head-copy">
               <span className="brand-head-text">{brandLabel}</span>
               {brandSubtext && <span className="brand-head-sub">{brandSubtext}</span>}

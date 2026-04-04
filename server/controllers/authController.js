@@ -18,6 +18,7 @@ const {
   refreshAuthSession,
   revokeRefreshToken,
 } = require("../utils/authSessions");
+const { createAdminNotification } = require("../utils/sellerNotifications");
 const { verifyAccessToken } = require("../middleware/auth");
 const {
   ACCESS_COOKIE_NAME,
@@ -36,6 +37,7 @@ const LOGIN_OTP_TTL_MS = 10 * 60 * 1000;
 const LOGIN_OTP_TTL_MINUTES = Math.round(LOGIN_OTP_TTL_MS / 60000);
 const MAX_LOGIN_OTP_ATTEMPTS = 5;
 const AUTH_ERROR_MESSAGE = "Unable to complete the authentication request right now.";
+const DEFAULT_PLATFORM_NAME = "CraftzyGifts";
 
 const hashPasswordResetToken = (value = "") =>
   crypto.createHash("sha256").update(String(value || "")).digest("hex");
@@ -44,6 +46,7 @@ const hashEmailVerificationToken = (value = "") =>
 const hashLoginOtpValue = (value = "") =>
   crypto.createHash("sha256").update(String(value || "")).digest("hex");
 
+// Local workspaces expose preview links so reset flows remain usable without live email delivery.
 const buildPasswordResetPreview = (token = "") => {
   if (!token || process.env.NODE_ENV === "production") {
     return {};
@@ -106,10 +109,29 @@ const issueLoginOtpChallenge = (user) => {
   };
 };
 
-const sendVerificationEmail = async (user, verificationToken) =>
+const resolvePlatformIdentity = async () => {
+  const settings = await ensurePlatformSettings().catch(() => null);
+  const platformName =
+    String(settings?.platformName || DEFAULT_PLATFORM_NAME).trim() || DEFAULT_PLATFORM_NAME;
+  const maintenanceMode = Boolean(settings?.maintenanceMode);
+  return {
+    platformName,
+    maintenanceMode,
+  };
+};
+
+const buildMaintenanceMessage = (platformName = DEFAULT_PLATFORM_NAME) =>
+  `${platformName} is temporarily unavailable while maintenance is in progress.`;
+
+const isMaintenanceRestrictedRole = (role = "") =>
+  String(role || "")
+    .trim()
+    .toLowerCase() !== "admin";
+
+const sendVerificationEmail = async (user, verificationToken, platformName = DEFAULT_PLATFORM_NAME) =>
   sendTransactionalEmail({
     to: user?.email,
-    subject: "Verify your CraftzyGifts account",
+    subject: `Verify your ${platformName} account`,
     text: [
       `Hello ${String(user?.name || "there").trim()},`,
       "",
@@ -124,10 +146,10 @@ const sendVerificationEmail = async (user, verificationToken) =>
     },
   });
 
-const sendPasswordResetEmail = async (user, resetToken) =>
+const sendPasswordResetEmail = async (user, resetToken, platformName = DEFAULT_PLATFORM_NAME) =>
   sendTransactionalEmail({
     to: user?.email,
-    subject: "Reset your CraftzyGifts password",
+    subject: `Reset your ${platformName} password`,
     text: [
       `Hello ${String(user?.name || "there").trim()},`,
       "",
@@ -142,10 +164,10 @@ const sendPasswordResetEmail = async (user, resetToken) =>
     },
   });
 
-const sendLoginOtpEmail = async (user, otpCode) =>
+const sendLoginOtpEmail = async (user, otpCode, platformName = DEFAULT_PLATFORM_NAME) =>
   sendTransactionalEmail({
     to: user?.email,
-    subject: "Your CraftzyGifts login code",
+    subject: `Your ${platformName} login code`,
     text: [
       `Hello ${String(user?.name || "there").trim()},`,
       "",
@@ -158,6 +180,45 @@ const sendLoginOtpEmail = async (user, otpCode) =>
       userId: String(user?._id || "").trim(),
     },
   });
+
+const isLoginOtpEnabledForUser = (user) => {
+  if (!user) return false;
+  if (user.role === "admin") {
+    return Boolean(user?.adminSecuritySettings?.loginOtpEnabled);
+  }
+  if (user.role === "seller") {
+    return Boolean(user?.sellerSecuritySettings?.loginOtpEnabled);
+  }
+  return false;
+};
+
+const maybeCreateAdminLoginAlert = async (user, req) => {
+  if (
+    user?.role !== "admin" ||
+    !user?.adminSecuritySettings?.loginAlerts ||
+    user?.adminNotificationSettings?.securityAlerts === false
+  ) {
+    return;
+  }
+
+  const ipAddress = String(
+    req?.headers?.["x-forwarded-for"] || req?.ip || req?.socket?.remoteAddress || ""
+  )
+    .split(",")[0]
+    .trim();
+  const userAgent = String(req?.headers?.["user-agent"] || "").trim();
+  const parts = [userAgent, ipAddress].filter(Boolean);
+
+  await createAdminNotification({
+    adminId: String(user?._id || "").trim(),
+    type: "admin_login",
+    title: "New admin login",
+    message: parts.join(" - ") || "A new admin session was started.",
+    link: "/admin/account",
+    entityType: "session",
+    entityId: String(user?._id || "").trim(),
+  });
+};
 
 const buildSessionPayload = (session = {}) => ({
   user: session.user,
@@ -208,9 +269,18 @@ exports.register = async (req, res) => {
       return res.status(400).json({ message: error });
     }
     const { name, email, password, role, storeName, phone } = value;
+    const { platformName, maintenanceMode } = await resolvePlatformIdentity();
 
     const existingUser = await User.findOne({ email });
     if (existingUser) return res.status(400).json({ message: "User already exists" });
+
+    if (maintenanceMode) {
+      return res.status(503).json({
+        message: buildMaintenanceMessage(platformName),
+        maintenanceMode: true,
+        platformName,
+      });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -233,7 +303,7 @@ exports.register = async (req, res) => {
     });
     const verificationToken = issueEmailVerificationToken(user);
     await user.save();
-    await sendVerificationEmail(user, verificationToken);
+    await sendVerificationEmail(user, verificationToken, platformName);
 
     res.status(201).json({
       message: "User registered successfully. Please verify your email to secure your account.",
@@ -259,10 +329,20 @@ exports.login = async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: "Invalid email or password" });
 
-    if (user.role === "seller" && user?.sellerSecuritySettings?.loginOtpEnabled) {
+    const { platformName, maintenanceMode } = await resolvePlatformIdentity();
+    if (maintenanceMode && isMaintenanceRestrictedRole(user.role)) {
+      clearSessionCookies(res, req);
+      return res.status(503).json({
+        message: buildMaintenanceMessage(platformName),
+        maintenanceMode: true,
+        platformName,
+      });
+    }
+
+    if (isLoginOtpEnabledForUser(user)) {
       const { code, challengeToken } = issueLoginOtpChallenge(user);
       await user.save();
-      await sendLoginOtpEmail(user, code);
+      await sendLoginOtpEmail(user, code, platformName);
       return res.status(202).json({
         requiresOtp: true,
         email: user.email,
@@ -273,6 +353,7 @@ exports.login = async (req, res) => {
     }
 
     const session = await issueAuthSession(user, req);
+    await maybeCreateAdminLoginAlert(user, req);
 
     return sendSessionResponse(res, req, session, "Login successful");
   } catch (error) {
@@ -297,7 +378,7 @@ exports.verifyLoginOtp = async (req, res) => {
     }
 
     const user = await User.findOne({ email });
-    if (!user || user.role !== "seller" || !user?.sellerSecuritySettings?.loginOtpEnabled) {
+    if (!user || !isLoginOtpEnabledForUser(user)) {
       return res.status(400).json({ message: "OTP verification is not available for this account." });
     }
 
@@ -340,6 +421,7 @@ exports.verifyLoginOtp = async (req, res) => {
     await user.save();
 
     const session = await issueAuthSession(user, req);
+    await maybeCreateAdminLoginAlert(user, req);
     return sendSessionResponse(res, req, session, "OTP verified successfully.");
   } catch (error) {
     return handleControllerError(res, error, AUTH_ERROR_MESSAGE);
@@ -350,6 +432,15 @@ exports.session = async (req, res) => {
   try {
     const currentUser = await getAuthenticatedUserFromAccessCookie(req).catch(() => null);
     if (currentUser) {
+      const { platformName, maintenanceMode } = await resolvePlatformIdentity();
+      if (maintenanceMode && isMaintenanceRestrictedRole(currentUser.role)) {
+        clearSessionCookies(res, req);
+        return res.status(503).json({
+          message: buildMaintenanceMessage(platformName),
+          maintenanceMode: true,
+          platformName,
+        });
+      }
       return res.json({
         message: "Session restored successfully.",
         user: buildPublicUserPayload(currentUser),
@@ -366,6 +457,16 @@ exports.session = async (req, res) => {
     if (!user) {
       clearSessionCookies(res, req);
       return res.status(401).json({ message: "Refresh token is invalid or expired." });
+    }
+
+    const { platformName, maintenanceMode } = await resolvePlatformIdentity();
+    if (maintenanceMode && isMaintenanceRestrictedRole(user.role)) {
+      clearSessionCookies(res, req);
+      return res.status(503).json({
+        message: buildMaintenanceMessage(platformName),
+        maintenanceMode: true,
+        platformName,
+      });
     }
 
     const session = await refreshAuthSession(user, refreshToken, req);
@@ -392,6 +493,16 @@ exports.refresh = async (req, res) => {
     if (!user) {
       clearSessionCookies(res, req);
       return res.status(401).json({ message: "Refresh token is invalid or expired." });
+    }
+
+    const { platformName, maintenanceMode } = await resolvePlatformIdentity();
+    if (maintenanceMode && isMaintenanceRestrictedRole(user.role)) {
+      clearSessionCookies(res, req);
+      return res.status(503).json({
+        message: buildMaintenanceMessage(platformName),
+        maintenanceMode: true,
+        platformName,
+      });
     }
 
     const session = await refreshAuthSession(user, refreshToken, req);
@@ -436,6 +547,7 @@ exports.requestPasswordReset = async (req, res) => {
     let preview = {};
 
     if (user) {
+      const { platformName } = await resolvePlatformIdentity();
       const resetToken = crypto.randomBytes(32).toString("hex");
       user.passwordReset = {
         tokenHash: hashPasswordResetToken(resetToken),
@@ -443,7 +555,7 @@ exports.requestPasswordReset = async (req, res) => {
         requestedAt: new Date(),
       };
       await user.save();
-      await sendPasswordResetEmail(user, resetToken);
+      await sendPasswordResetEmail(user, resetToken, platformName);
       preview = buildPasswordResetPreview(resetToken);
     }
 
@@ -518,7 +630,8 @@ exports.requestEmailVerification = async (req, res) => {
 
     const verificationToken = issueEmailVerificationToken(user);
     await user.save();
-    await sendVerificationEmail(user, verificationToken);
+    const { platformName } = await resolvePlatformIdentity();
+    await sendVerificationEmail(user, verificationToken, platformName);
 
     return res.json({
       message: "Verification link prepared successfully.",

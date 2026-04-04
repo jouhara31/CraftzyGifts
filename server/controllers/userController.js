@@ -24,6 +24,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const GST_NUMBER_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const PAN_NUMBER_PATTERN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const IFSC_PATTERN = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+const UPI_ID_PATTERN = /^[A-Z0-9._-]{2,256}@[A-Z]{2,64}$/i;
 const DEFAULT_RETURN_WINDOW_DAYS = 7;
 const MAX_RETURN_WINDOW_DAYS = 30;
 
@@ -138,6 +139,41 @@ const normalizeSellerSecuritySettings = (value, current = {}) => {
       value.loginOtpEnabled,
       current?.loginOtpEnabled ?? false
     ),
+  };
+};
+
+const normalizeAdminSecuritySettings = (value, current = {}) => {
+  if (!value || typeof value !== "object") return current || {};
+  return {
+    loginOtpEnabled: parseBoolean(value.loginOtpEnabled, current?.loginOtpEnabled ?? false),
+    loginAlerts: parseBoolean(value.loginAlerts, current?.loginAlerts ?? true),
+    sessionTimeoutEnabled: parseBoolean(
+      value.sessionTimeoutEnabled,
+      current?.sessionTimeoutEnabled ?? false
+    ),
+  };
+};
+
+const normalizeAdminNotificationSettings = (value, current = {}) => {
+  if (!value || typeof value !== "object") return current || {};
+  return {
+    emailNotifications: parseBoolean(
+      value.emailNotifications,
+      current?.emailNotifications ?? true
+    ),
+    orderAlerts: parseBoolean(value.orderAlerts, current?.orderAlerts ?? true),
+    stockAlerts: parseBoolean(value.stockAlerts, current?.stockAlerts ?? true),
+    customerMessages: parseBoolean(
+      value.customerMessages,
+      current?.customerMessages ?? true
+    ),
+    weeklyReports: parseBoolean(value.weeklyReports, current?.weeklyReports ?? true),
+    marketingUpdates: parseBoolean(
+      value.marketingUpdates,
+      current?.marketingUpdates ?? false
+    ),
+    securityAlerts: parseBoolean(value.securityAlerts, current?.securityAlerts ?? true),
+    paymentAlerts: parseBoolean(value.paymentAlerts, current?.paymentAlerts ?? true),
   };
 };
 
@@ -324,6 +360,8 @@ const toProfilePayload = (user) => ({
   sellerBankDetails: user.sellerBankDetails || {},
   sellerNotificationSettings: user.sellerNotificationSettings || {},
   sellerSecuritySettings: user.sellerSecuritySettings || {},
+  adminSecuritySettings: user.adminSecuritySettings || {},
+  adminNotificationSettings: user.adminNotificationSettings || {},
   sellerShippingSettings: user.sellerShippingSettings || {},
   sellerDocuments: user.sellerDocuments || {},
   sellerMarketing: {
@@ -443,7 +481,7 @@ const ensureApprovedSeller = async (userId) => {
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "name email emailVerification role createdAt phone gender dateOfBirth storeName sellerStatus supportEmail legalBusinessName gstNumber country timezone language about instagramUrl returnWindowDays profileImage storeCoverImage shippingAddress billingAddress billingSameAsShipping savedAddresses pickupAddress sellerBankDetails sellerNotificationSettings sellerSecuritySettings sellerShippingSettings sellerDocuments sellerMarketing"
+      "name email emailVerification role createdAt phone gender dateOfBirth storeName sellerStatus supportEmail legalBusinessName gstNumber country timezone language about instagramUrl returnWindowDays profileImage storeCoverImage shippingAddress billingAddress billingSameAsShipping savedAddresses pickupAddress sellerBankDetails sellerNotificationSettings sellerSecuritySettings adminSecuritySettings adminNotificationSettings sellerShippingSettings sellerDocuments sellerMarketing"
     );
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(toProfilePayload(user));
@@ -480,6 +518,8 @@ exports.updateMe = async (req, res) => {
       sellerBankDetails,
       sellerNotificationSettings,
       sellerSecuritySettings,
+      adminSecuritySettings,
+      adminNotificationSettings,
       sellerShippingSettings,
       sellerDocuments,
       sellerMarketing,
@@ -651,6 +691,15 @@ exports.updateMe = async (req, res) => {
       });
     }
 
+    const hasAdminSettingsPayload =
+      typeof adminSecuritySettings !== "undefined" ||
+      typeof adminNotificationSettings !== "undefined";
+    if (hasAdminSettingsPayload && user.role !== "admin") {
+      return res.status(400).json({
+        message: "These settings are only available for admin accounts.",
+      });
+    }
+
     if (typeof sellerBankDetails !== "undefined") {
       const nextBankDetails = normalizeSellerBankDetails(
         sellerBankDetails,
@@ -658,6 +707,9 @@ exports.updateMe = async (req, res) => {
       );
       if (nextBankDetails.ifscCode && !IFSC_PATTERN.test(nextBankDetails.ifscCode)) {
         return res.status(400).json({ message: "Please enter a valid IFSC code." });
+      }
+      if (nextBankDetails.upiId && !UPI_ID_PATTERN.test(nextBankDetails.upiId)) {
+        return res.status(400).json({ message: "Please enter a valid UPI ID." });
       }
       user.sellerBankDetails = nextBankDetails;
     }
@@ -673,6 +725,20 @@ exports.updateMe = async (req, res) => {
       user.sellerSecuritySettings = normalizeSellerSecuritySettings(
         sellerSecuritySettings,
         user.sellerSecuritySettings || {}
+      );
+    }
+
+    if (typeof adminSecuritySettings !== "undefined") {
+      user.adminSecuritySettings = normalizeAdminSecuritySettings(
+        adminSecuritySettings,
+        user.adminSecuritySettings || {}
+      );
+    }
+
+    if (typeof adminNotificationSettings !== "undefined") {
+      user.adminNotificationSettings = normalizeAdminNotificationSettings(
+        adminNotificationSettings,
+        user.adminNotificationSettings || {}
       );
     }
 
@@ -942,6 +1008,24 @@ exports.revokeMySession = async (req, res) => {
       message: "Session revoked successfully.",
       revokedCurrent: Boolean(currentTokenHash) && currentTokenHash === sessionId,
       items: nextSessions.map((entry) => formatSessionPayload(entry, currentTokenHash)),
+    });
+  } catch (error) {
+    return handleControllerError(res, error);
+  }
+};
+
+exports.revokeAllMySessions = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("refreshTokens");
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    user.refreshTokens = [];
+    await user.save();
+
+    return res.json({
+      message: "All sessions revoked successfully.",
+      revokedCurrent: true,
+      items: [],
     });
   } catch (error) {
     return handleControllerError(res, error);

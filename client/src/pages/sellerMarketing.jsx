@@ -22,6 +22,7 @@ export default function SellerMarketing() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -85,6 +86,15 @@ export default function SellerMarketing() {
 
   useEffect(() => {
     loadPage();
+  }, [loadPage]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadPage();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadPage]);
 
   const featuredProducts = useMemo(() => {
@@ -156,8 +166,14 @@ export default function SellerMarketing() {
           <p>Set banner copy, coupon details, campaign notes, and featured products for your store.</p>
         </div>
         <div className="seller-toolbar">
-          <button className="btn ghost" type="button" onClick={loadPage}>
-            Refresh
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
       </div>

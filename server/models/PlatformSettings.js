@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const platformSettingsSchema = new mongoose.Schema(
   {
     key: { type: String, required: true, unique: true, default: "default" },
-    platformName: { type: String, default: "CraftyGifts" },
+    platformName: { type: String, default: "CraftzyGifts" },
     currencyCode: { type: String, default: "INR" },
     lowStockThreshold: { type: Number, default: 5, min: 0 },
     sellerCommissionPercent: { type: Number, default: 8, min: 0, max: 100 },

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import logoPng from "../assets/logo.png";
-import { logoutSession } from "../utils/authSession";
+import { usePlatform } from "../hooks/usePlatform";
+import { logoutSession, readStoredUser } from "../utils/authSession";
 import AdminNotificationBell from "./AdminNotificationBell";
 
 const ADMIN_NAV_ITEMS = [
@@ -157,6 +158,7 @@ export default function AdminSidebarLayout({
   pageClassName = "",
   children,
 }) {
+  const { platformName } = usePlatform();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -165,6 +167,7 @@ export default function AdminSidebarLayout({
   const sidebarRef = useRef(null);
   const closeButtonRef = useRef(null);
   const lastFocusRef = useRef(null);
+  const idleTimerRef = useRef(null);
   const pageClasses = ["page seller-page admin-page", pageClassName]
     .filter(Boolean)
     .join(" ");
@@ -226,6 +229,79 @@ export default function AdminSidebarLayout({
       document.body.classList.remove("admin-drawer-open");
     };
   }, [isMobileNav, sidebarOpen]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const activityEvents = ["mousedown", "keydown", "touchstart", "scroll"];
+    let listenersAttached = false;
+    let timeoutEnabled = false;
+    let loggingOut = false;
+
+    const clearIdleTimer = () => {
+      if (idleTimerRef.current) {
+        window.clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+    };
+
+    const removeActivityListeners = () => {
+      if (!listenersAttached) return;
+      activityEvents.forEach((eventName) => {
+        window.removeEventListener(eventName, resetIdleTimer, true);
+      });
+      listenersAttached = false;
+    };
+
+    async function handleIdleLogout() {
+      if (!timeoutEnabled || loggingOut) return;
+      loggingOut = true;
+      clearIdleTimer();
+      await logoutSession();
+      navigate("/login", {
+        replace: true,
+        state: { notice: "Session ended after 30 minutes of inactivity." },
+      });
+    }
+
+    function resetIdleTimer() {
+      if (!timeoutEnabled) return;
+      clearIdleTimer();
+      idleTimerRef.current = window.setTimeout(handleIdleLogout, 30 * 60 * 1000);
+    }
+
+    const addActivityListeners = () => {
+      if (listenersAttached) return;
+      activityEvents.forEach((eventName) => {
+        window.addEventListener(eventName, resetIdleTimer, true);
+      });
+      listenersAttached = true;
+    };
+
+    const syncIdlePreference = () => {
+      const user = readStoredUser();
+      timeoutEnabled =
+        user?.role === "admin" && Boolean(user?.adminSecuritySettings?.sessionTimeoutEnabled);
+      clearIdleTimer();
+      if (!timeoutEnabled) {
+        removeActivityListeners();
+        return;
+      }
+      addActivityListeners();
+      resetIdleTimer();
+    };
+
+    syncIdlePreference();
+    window.addEventListener("user:updated", syncIdlePreference);
+    window.addEventListener("auth:session-cleared", clearIdleTimer);
+
+    return () => {
+      clearIdleTimer();
+      removeActivityListeners();
+      window.removeEventListener("user:updated", syncIdlePreference);
+      window.removeEventListener("auth:session-cleared", clearIdleTimer);
+    };
+  }, [navigate]);
 
   const handleKeyDown = useCallback(
     (event) => {
@@ -291,10 +367,10 @@ export default function AdminSidebarLayout({
         </button>
         <Link className="admin-classic-brand" to="/admin/dashboard">
           <span className="admin-classic-logo">
-            <img src={logoPng} alt="CraftzyGifts" />
+            <img src={logoPng} alt={platformName} />
           </span>
           <span className="admin-classic-brand-copy">
-            <strong>CraftzyGifts</strong>
+            <strong>{platformName}</strong>
             <small>Administration Panel</small>
           </span>
         </Link>

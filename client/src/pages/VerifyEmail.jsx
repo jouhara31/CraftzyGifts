@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
+import { usePlatform } from "../hooks/usePlatform";
 import { API_URL } from "../apiBase";
 
 export default function VerifyEmail() {
+  const { platformName } = usePlatform();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [status, setStatus] = useState({
@@ -71,7 +73,7 @@ export default function VerifyEmail() {
         <div className="auth-card">
           <p className="auth-kicker">Account security</p>
           <h2 className="auth-title">Verify email</h2>
-          <p className="auth-sub">We are confirming the email linked to your CraftzyGifts account.</p>
+          <p className="auth-sub">We are confirming the email linked to your {platformName} account.</p>
           <div
             className={`auth-alert${status.type ? ` is-${status.type}` : ""}`}
             role={status.type === "error" ? "alert" : "status"}

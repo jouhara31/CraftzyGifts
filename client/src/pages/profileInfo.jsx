@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import { API_URL } from "../apiBase";
@@ -105,10 +105,10 @@ export default function ProfileInfo() {
     [location.search]
   );
   const savedAddressCount = useMemo(() => savedAddresses.length, [savedAddresses]);
-  const clearAndRedirect = () => {
+  const clearAndRedirect = useCallback(() => {
     clearAuthSession();
     navigate("/login");
-  };
+  }, [navigate]);
 
   useEffect(() => {
     const load = async () => {
@@ -140,7 +140,7 @@ export default function ProfileInfo() {
     };
 
     load();
-  }, [navigate]);
+  }, [clearAndRedirect, navigate]);
 
   useEffect(() => {
     if (!isEditing || !location.hash) return;

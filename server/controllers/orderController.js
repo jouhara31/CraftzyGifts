@@ -6,6 +6,8 @@ const {
   createCustomerNotification,
   maybeCreateInventoryNotifications,
 } = require("../utils/sellerNotifications");
+const { ensurePlatformSettings } = require("../utils/platformSettings");
+const { buildAppUrl, sendTransactionalEmail } = require("../utils/emailService");
 const { generateInvoicePdfBuffer } = require("../utils/invoiceDocument");
 const { issueNextInvoiceNumber } = require("../utils/invoiceNumbers");
 const { generateShippingLabelPdfBuffer } = require("../utils/shippingLabelDocument");
@@ -34,6 +36,8 @@ const MAX_RETURN_REASON_LENGTH = 500;
 const MIN_RETURN_REASON_LENGTH = 10;
 const MAX_CANCELLATION_REASON_LENGTH = 280;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_PLATFORM_NAME = "CraftzyGifts";
+const DEFAULT_DISPLAY_CURRENCY = "INR";
 const CUSTOMER_CANCELABLE_STATUSES = new Set(["pending_payment", "placed", "processing"]);
 const GENERIC_HAMPER_PRODUCT_NAME = "Build Your Own Hamper";
 const GENERIC_HAMPER_PRODUCT_CATEGORY = "Custom hamper";
@@ -467,6 +471,175 @@ const getOrderShortCode = (orderId) =>
     .slice(-8)
     .toUpperCase() || "ORDER";
 
+const formatDisplayCurrency = (value = 0, currencyCode = DEFAULT_DISPLAY_CURRENCY) => {
+  const normalizedCurrency =
+    String(currencyCode || DEFAULT_DISPLAY_CURRENCY).trim().toUpperCase() ||
+    DEFAULT_DISPLAY_CURRENCY;
+  const rounded = Math.round(Number(value || 0) * 100) / 100;
+  try {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: normalizedCurrency,
+      minimumFractionDigits: Math.abs(rounded - Math.round(rounded)) > 0.001 ? 2 : 0,
+      maximumFractionDigits: 2,
+    }).format(rounded);
+  } catch {
+    return `${normalizedCurrency} ${rounded.toLocaleString("en-IN", {
+      minimumFractionDigits: Math.abs(rounded - Math.round(rounded)) > 0.001 ? 2 : 0,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+};
+
+const loadCustomerEmailRecipient = async (order = {}) => {
+  const directEmail = String(order?.customer?.email || "").trim();
+  const directName =
+    String(order?.customer?.name || order?.shippingAddress?.name || "").trim() || "there";
+  if (directEmail) {
+    return {
+      name: directName,
+      email: directEmail,
+    };
+  }
+
+  const customerId = normalizeEntityId(order?.customer);
+  if (!customerId) return null;
+  const customer = await User.findById(customerId).select("name email");
+  if (!customer) return null;
+
+  return {
+    name: String(customer?.name || directName).trim() || "there",
+    email: String(customer?.email || "").trim(),
+  };
+};
+
+const sendOrderAlertEmail = async (
+  order,
+  {
+    platformSettings = null,
+    subject = "",
+    messageLines = [],
+    metadataType = "order_update",
+    metadata = {},
+  } = {}
+) => {
+  try {
+    const settings = platformSettings || (await ensurePlatformSettings());
+    if (settings?.enableOrderEmailAlerts === false) {
+      return null;
+    }
+
+    const recipient = await loadCustomerEmailRecipient(order);
+    if (!recipient?.email) {
+      return null;
+    }
+
+    const platformName =
+      String(settings?.platformName || DEFAULT_PLATFORM_NAME).trim() || DEFAULT_PLATFORM_NAME;
+
+    return await sendTransactionalEmail({
+      to: recipient.email,
+      subject: String(subject || "").trim(),
+      text: [
+        `Hello ${recipient.name},`,
+        "",
+        ...(Array.isArray(messageLines) ? messageLines.filter(Boolean) : []),
+        "",
+        `View updates: ${buildAppUrl("/orders")}`,
+      ].join("\n"),
+      metadata: {
+        type: metadataType,
+        orderId: String(order?._id || "").trim(),
+        orderStatus: String(order?.status || "").trim(),
+        paymentStatus: String(order?.paymentStatus || "").trim(),
+        platformName,
+        ...metadata,
+      },
+    });
+  } catch {
+    return null;
+  }
+};
+
+const sendPlacedOrderEmail = async (order, platformSettings) => {
+  const platformName =
+    String(platformSettings?.platformName || DEFAULT_PLATFORM_NAME).trim() || DEFAULT_PLATFORM_NAME;
+  const currencyCode =
+    String(platformSettings?.currencyCode || DEFAULT_DISPLAY_CURRENCY).trim() ||
+    DEFAULT_DISPLAY_CURRENCY;
+  const orderCode = getOrderShortCode(order?._id);
+  return sendOrderAlertEmail(order, {
+    platformSettings,
+    subject: `Your ${platformName} order #${orderCode} is placed`,
+    messageLines: [
+      `Order #${orderCode} has been placed successfully.`,
+      `Total: ${formatDisplayCurrency(order?.total || 0, currencyCode)}.`,
+      "We will notify you when it is packed and shipped.",
+    ],
+    metadataType: "order_placed_email",
+  });
+};
+
+const sendPendingPaymentEmail = async (order, platformSettings) => {
+  const platformName =
+    String(platformSettings?.platformName || DEFAULT_PLATFORM_NAME).trim() || DEFAULT_PLATFORM_NAME;
+  const currencyCode =
+    String(platformSettings?.currencyCode || DEFAULT_DISPLAY_CURRENCY).trim() ||
+    DEFAULT_DISPLAY_CURRENCY;
+  const orderCode = getOrderShortCode(order?._id);
+  return sendOrderAlertEmail(order, {
+    platformSettings,
+    subject: `Complete payment for ${platformName} order #${orderCode}`,
+    messageLines: [
+      `Payment is pending for order #${orderCode}.`,
+      `Amount due: ${formatDisplayCurrency(order?.total || 0, currencyCode)}.`,
+      "Complete the payment from your orders page to confirm the order.",
+    ],
+    metadataType: "payment_pending_email",
+  });
+};
+
+const sendOrderStatusEmail = async (order, status, platformSettings) => {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  const platformName =
+    String(platformSettings?.platformName || DEFAULT_PLATFORM_NAME).trim() || DEFAULT_PLATFORM_NAME;
+  const orderCode = getOrderShortCode(order?._id);
+  const subjectByStatus = {
+    processing: `Your ${platformName} order #${orderCode} is being prepared`,
+    shipped: `Your ${platformName} order #${orderCode} has shipped`,
+    out_for_delivery: `Your ${platformName} order #${orderCode} is out for delivery`,
+    delivered: `Your ${platformName} order #${orderCode} was delivered`,
+    cancelled: `Your ${platformName} order #${orderCode} was cancelled`,
+    return_requested: `Return requested for ${platformName} order #${orderCode}`,
+    return_rejected: `Return rejected for ${platformName} order #${orderCode}`,
+    refunded: `Refund completed for ${platformName} order #${orderCode}`,
+  };
+  const messageByStatus = {
+    processing: `Order #${orderCode} is now being prepared.`,
+    shipped: `Order #${orderCode} is on the way.`,
+    out_for_delivery: `Order #${orderCode} is out for delivery.`,
+    delivered: `Order #${orderCode} was delivered successfully.`,
+    cancelled: `Order #${orderCode} was cancelled.`,
+    return_requested: `A return request was recorded for order #${orderCode}.`,
+    return_rejected: `The return request for order #${orderCode} was rejected.`,
+    refunded: `A refund was completed for order #${orderCode}.`,
+  };
+
+  if (!subjectByStatus[normalizedStatus] || !messageByStatus[normalizedStatus]) {
+    return null;
+  }
+
+  return sendOrderAlertEmail(order, {
+    platformSettings,
+    subject: subjectByStatus[normalizedStatus],
+    messageLines: [messageByStatus[normalizedStatus]],
+    metadataType: "order_status_email",
+    metadata: {
+      nextStatus: normalizedStatus,
+    },
+  });
+};
+
 const buildCustomerOrderNotification = (order, details = {}) => ({
   customerId: order?.customer,
   type: String(details.type || "").trim(),
@@ -834,6 +1007,12 @@ const canAccessInvoice = (order, user = {}) => {
 
 const buildInvoicePayload = (order = {}) => {
   const product = resolveOrderProductForResponse(order) || {};
+  const platformName =
+    String(order?.platformSettings?.platformName || DEFAULT_PLATFORM_NAME).trim() ||
+    DEFAULT_PLATFORM_NAME;
+  const currencyCode =
+    String(order?.platformSettings?.currencyCode || DEFAULT_DISPLAY_CURRENCY).trim() ||
+    DEFAULT_DISPLAY_CURRENCY;
   const sellerSnapshot =
     order?.sellerSnapshot && typeof order.sellerSnapshot === "object"
       ? order.sellerSnapshot
@@ -904,6 +1083,8 @@ const buildInvoicePayload = (order = {}) => {
   };
 
   return {
+    platformName,
+    currencyCode,
     invoiceNumber,
     fileName,
     issuedAt: persistedIssuedAt,
@@ -1030,6 +1211,8 @@ const buildShippingLabelPayload = (order = {}) => {
         : {},
     items: Array.isArray(invoiceView?.items) ? invoiceView.items : [],
     collectAmount,
+    platformName: invoiceView?.platformName || DEFAULT_PLATFORM_NAME,
+    currencyCode: invoiceView?.currencyCode || DEFAULT_DISPLAY_CURRENCY,
   };
 };
 
@@ -1067,6 +1250,7 @@ const buildCheckoutPayload = ({
   amount,
   paymentGroupId = "",
   orders = [],
+  platformName = "",
 }) => {
   const { keyId } = getRazorpayConfig();
   return {
@@ -1078,6 +1262,7 @@ const buildCheckoutPayload = ({
     orderIds: orders
       .map((order) => String(order?._id || "").trim())
       .filter(Boolean),
+    platformName: String(platformName || DEFAULT_PLATFORM_NAME).trim() || DEFAULT_PLATFORM_NAME,
   };
 };
 
@@ -2247,6 +2432,7 @@ exports.createOrder = async (req, res) => {
     if (req.user?.role !== "customer") {
       return res.status(403).json({ message: "Only customer accounts can place orders." });
     }
+    const platformSettings = await ensurePlatformSettings();
 
     const shippingAddress = validateShippingAddress(req.body?.shippingAddress || {});
     const onlineMode = ONLINE_PAYMENT_MODES.has(req.body?.paymentMode);
@@ -2285,8 +2471,10 @@ exports.createOrder = async (req, res) => {
         entityId: String(order._id || "").trim(),
       });
       await createPlacedOrderNotification(order);
+      await sendPlacedOrderEmail(order, platformSettings);
     } else {
       await createPendingPaymentNotification(order);
+      await sendPendingPaymentEmail(order, platformSettings);
     }
 
     await populateOrderForCustomer(order);
@@ -2301,6 +2489,7 @@ exports.createCheckoutSession = async (req, res) => {
     if (req.user?.role !== "customer") {
       return res.status(403).json({ message: "Only customer accounts can place orders." });
     }
+    const platformSettings = await ensurePlatformSettings();
 
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     if (items.length === 0) {
@@ -2370,6 +2559,7 @@ exports.createCheckoutSession = async (req, res) => {
           entityId: String(row.order._id || "").trim(),
         });
         await createPlacedOrderNotification(row.order);
+        await sendPlacedOrderEmail(row.order, platformSettings);
       }
 
       const populated = await populateOrdersForCustomer(drafts);
@@ -2390,6 +2580,7 @@ exports.createCheckoutSession = async (req, res) => {
       );
       for (const order of drafts) {
         await createPendingPaymentNotification(order);
+        await sendPendingPaymentEmail(order, platformSettings);
       }
       const populated = await populateOrdersForCustomer(drafts);
       return res.status(201).json({
@@ -2400,6 +2591,7 @@ exports.createCheckoutSession = async (req, res) => {
           amount: totalAmount,
           paymentGroupId,
           orders: drafts,
+          platformName: platformSettings?.platformName,
         }),
       });
     } catch (error) {
@@ -2414,10 +2606,17 @@ exports.createCheckoutSession = async (req, res) => {
 exports.getPaymentConfig = async (_req, res) => {
   try {
     const config = getRazorpayConfig();
+    const platformSettings = await ensurePlatformSettings();
     return res.json({
       onlinePaymentsEnabled: Boolean(config.configured),
       paymentGateway: config.configured ? ONLINE_PAYMENT_GATEWAY : "",
       supportedModes: config.configured ? ["cod", "upi", "card"] : ["cod"],
+      platformName:
+        String(platformSettings?.platformName || DEFAULT_PLATFORM_NAME).trim() ||
+        DEFAULT_PLATFORM_NAME,
+      displayCurrency:
+        String(platformSettings?.currencyCode || DEFAULT_DISPLAY_CURRENCY).trim() ||
+        DEFAULT_DISPLAY_CURRENCY,
     });
   } catch (error) {
     return handleControllerError(res, error);
@@ -2438,6 +2637,7 @@ exports.getMyOrders = async (req, res) => {
 
 exports.getMyOrderInvoice = async (req, res) => {
   try {
+    const platformSettings = await ensurePlatformSettings();
     const order = await Order.findById(req.params.id)
       .populate("product")
       .populate("customer", "name email phone billingAddress")
@@ -2471,6 +2671,12 @@ exports.getMyOrderInvoice = async (req, res) => {
     }
 
     const invoicePayload = buildInvoicePayload(order);
+    invoicePayload.platformName =
+      String(platformSettings?.platformName || DEFAULT_PLATFORM_NAME).trim() ||
+      DEFAULT_PLATFORM_NAME;
+    invoicePayload.currencyCode =
+      String(platformSettings?.currencyCode || DEFAULT_DISPLAY_CURRENCY).trim() ||
+      DEFAULT_DISPLAY_CURRENCY;
     const pdfBuffer = await generateInvoicePdfBuffer(invoicePayload);
     const safeFileName =
       String(invoicePayload?.fileName || "invoice.pdf")
@@ -2493,6 +2699,7 @@ exports.getMyOrderInvoice = async (req, res) => {
 
 exports.getMyOrderShippingLabel = async (req, res) => {
   try {
+    const platformSettings = await ensurePlatformSettings();
     const order = await Order.findById(req.params.id)
       .populate("product")
       .populate("customer", "name email phone billingAddress")
@@ -2513,6 +2720,12 @@ exports.getMyOrderShippingLabel = async (req, res) => {
     }
 
     const labelPayload = buildShippingLabelPayload(order);
+    labelPayload.platformName =
+      String(platformSettings?.platformName || DEFAULT_PLATFORM_NAME).trim() ||
+      DEFAULT_PLATFORM_NAME;
+    labelPayload.currencyCode =
+      String(platformSettings?.currencyCode || DEFAULT_DISPLAY_CURRENCY).trim() ||
+      DEFAULT_DISPLAY_CURRENCY;
     const pdfBuffer = await generateShippingLabelPdfBuffer(labelPayload);
     const safeFileName =
       String(labelPayload?.fileName || "shipping-label.pdf")
@@ -2708,6 +2921,7 @@ exports.updateOrderShipment = async (req, res) => {
 
     order.shipment = nextShipment;
     await order.save();
+    await sendOrderStatusEmail(order, nextShipment.status, await ensurePlatformSettings());
 
     return res.json({
       message: "Shipment details updated.",
@@ -2817,6 +3031,7 @@ exports.payOrder = async (req, res) => {
     }
 
     const totalAmount = payableOrders.reduce((sum, entry) => sum + Number(entry?.total || 0), 0);
+    const platformSettings = await ensurePlatformSettings();
 
     return res.json({
       message: "Payment checkout created.",
@@ -2825,6 +3040,7 @@ exports.payOrder = async (req, res) => {
         amount: totalAmount,
         paymentGroupId: safePaymentGroupId,
         orders: payableOrders,
+        platformName: platformSettings?.platformName,
       }),
     });
   } catch (error) {
@@ -3091,6 +3307,7 @@ exports.requestReturn = async (req, res) => {
     if (customerReturnNotification) {
       await notifyCustomerForOrder(order, customerReturnNotification);
     }
+    await sendOrderStatusEmail(order, "return_requested");
     res.json(order);
   } catch (error) {
     return handleControllerError(res, error);
@@ -3135,6 +3352,7 @@ exports.cancelMyOrder = async (req, res) => {
     if (customerNotification) {
       await notifyCustomerForOrder(order, customerNotification);
     }
+    await sendOrderStatusEmail(order, "cancelled");
 
     await populateOrderForCustomer(order);
     return res.json({
@@ -3230,6 +3448,7 @@ exports.reviewReturn = async (req, res) => {
       if (customerNotification) {
         await notifyCustomerForOrder(order, customerNotification);
       }
+      await sendOrderStatusEmail(order, order.status);
       return res.json(order);
     }
 
@@ -3247,6 +3466,7 @@ exports.reviewReturn = async (req, res) => {
     if (customerNotification) {
       await notifyCustomerForOrder(order, customerNotification);
     }
+    await sendOrderStatusEmail(order, order.status);
     return res.json(order);
   } catch (error) {
     return handleControllerError(res, error);
@@ -3312,6 +3532,7 @@ exports.updateOrderStatus = async (req, res) => {
     if (customerNotification) {
       await notifyCustomerForOrder(order, customerNotification);
     }
+    await sendOrderStatusEmail(order, status);
     await populateOrderForCustomer(order);
     res.json(order);
   } catch (error) {

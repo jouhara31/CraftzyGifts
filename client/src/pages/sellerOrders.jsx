@@ -183,6 +183,7 @@ export default function SellerOrders() {
   const [orders, setOrders] = useState([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const [actingId, setActingId] = useState("");
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState("");
   const [downloadingLabelId, setDownloadingLabelId] = useState("");
@@ -220,6 +221,15 @@ export default function SellerOrders() {
 
   useEffect(() => {
     loadOrders();
+  }, [loadOrders]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadOrders();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadOrders]);
 
   const visibleOrders = useMemo(() => {
@@ -431,8 +441,14 @@ export default function SellerOrders() {
               Clear filter
             </button>
           )}
-          <button className="btn ghost" type="button" onClick={loadOrders}>
-            Refresh
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
       </div>

@@ -1,7 +1,10 @@
 import { Link } from "react-router-dom";
 import logoPng from "../assets/logo.png";
+import { usePlatform } from "../hooks/usePlatform";
 
 export default function Footer() {
+  const { platformName } = usePlatform();
+
   return (
     <section className="market-footer-shell">
       <div className="market-footer-benefits">
@@ -65,20 +68,21 @@ export default function Footer() {
             <img
               className="market-footer-newsletter-logo"
               src={logoPng}
-              alt="Craftzy Gifts logo"
+              alt={`${platformName} logo`}
             />
             <div>
-              <h3>Stay Updated</h3>
-              <p>Get the latest craft trends and exclusive deals</p>
+              <h3>{platformName}</h3>
+              <p>Curated gifting marketplace.</p>
             </div>
           </div>
-          <form
-            className="market-newsletter-form"
-            onSubmit={(event) => event.preventDefault()}
-          >
-            <input type="email" placeholder="Enter your email" />
-            <button type="submit">Subscribe</button>
-          </form>
+          <div className="market-footer-newsletter-actions">
+            <Link className="btn ghost" to="/products">
+              Browse products
+            </Link>
+            <Link className="btn ghost" to="/login">
+              Login
+            </Link>
+          </div>
         </div>
 
         <div className="market-footer-links-grid">
@@ -96,7 +100,7 @@ export default function Footer() {
             <Link to="/register">Create Account</Link>
             <Link to="/wishlist">Wishlist</Link>
             <Link to="/orders">My Orders</Link>
-            <a href="/#featured">Featured Gifts</a>
+            <Link to="/register?seller=1">Become a Seller</Link>
           </div>
 
           <div className="market-footer-links">
@@ -104,22 +108,19 @@ export default function Footer() {
             <a href="/#support">Contact Us</a>
             <Link to="/shipping-policy">Shipping Info</Link>
             <Link to="/return-policy">Returns &amp; Refunds</Link>
-            <a href="/#support">Track Order</a>
-            <a href="/#support">FAQ</a>
+            <Link to="/orders">Track Order</Link>
           </div>
 
           <div className="market-footer-links">
             <h4>Company</h4>
             <Link to="/#about-us">About Us</Link>
-            <a href="/#support">Blog</a>
-            <a href="/#support">Careers</a>
             <Link to="/privacy">Privacy Policy</Link>
             <Link to="/terms">Terms of Service</Link>
           </div>
         </div>
 
         <div className="market-footer-bottom">
-          <p>© 2026 CraftzyGifts. All rights reserved.</p>
+          <p>© 2026 {platformName}. All rights reserved.</p>
           <div className="market-payment-list">
             <span>Visa</span>
             <span>Mastercard</span>

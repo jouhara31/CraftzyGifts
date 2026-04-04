@@ -2,7 +2,7 @@ const PlatformSettings = require("../models/PlatformSettings");
 
 const PLATFORM_SETTINGS_KEY = "default";
 const DEFAULT_PLATFORM_SETTINGS = {
-  platformName: "CraftyGifts",
+  platformName: "CraftzyGifts",
   currencyCode: "INR",
   lowStockThreshold: 5,
   sellerCommissionPercent: 8,
@@ -101,6 +101,17 @@ const toPlatformSettingsPayload = (settings) => ({
   updatedAt: settings?.updatedAt || null,
 });
 
+// Public routes only expose branding and maintenance-safe fields.
+const toPublicPlatformSettingsPayload = (settings) => {
+  const payload = toPlatformSettingsPayload(settings);
+  return {
+    platformName: payload.platformName,
+    currencyCode: payload.currencyCode,
+    maintenanceMode: payload.maintenanceMode,
+    updatedAt: payload.updatedAt,
+  };
+};
+
 const ensurePlatformSettings = async () => {
   let settings = await PlatformSettings.findOne({ key: PLATFORM_SETTINGS_KEY });
   if (!settings) {
@@ -112,6 +123,7 @@ const ensurePlatformSettings = async () => {
     return settings;
   }
 
+  // Self-heal older documents when new settings fields are introduced.
   const normalized = normalizePlatformSettings(settings.toObject(), DEFAULT_PLATFORM_SETTINGS);
   const current = {
     platformName: settings.platformName,
@@ -138,4 +150,5 @@ module.exports = {
   ensurePlatformSettings,
   normalizePlatformSettings,
   toPlatformSettingsPayload,
+  toPublicPlatformSettingsPayload,
 };

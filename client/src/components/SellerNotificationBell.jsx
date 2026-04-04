@@ -93,7 +93,7 @@ export default function SellerNotificationBell() {
     } catch {
       return null;
     }
-  }, []);
+  }, [clearAndRedirect]);
 
   const openItem = useCallback(
     async (item) => {

@@ -21,6 +21,7 @@ const getLastMonths = (count = 6) => {
 export default function AdminAnalytics() {
   const [orders, setOrders] = useState([]);
   const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
   const clearAndRedirect = useCallback(() => {
     clearAuthSession();
@@ -52,6 +53,15 @@ export default function AdminAnalytics() {
 
   useEffect(() => {
     loadAnalytics();
+  }, [loadAnalytics]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadAnalytics();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadAnalytics]);
 
   const metrics = useMemo(() => {
@@ -109,8 +119,14 @@ export default function AdminAnalytics() {
       title="Analytics"
       description="Revenue charts and sales reports without external chart libraries."
       actions={
-        <button className="admin-text-action" type="button" onClick={loadAnalytics}>
-          Refresh
+        <button
+          className="admin-text-action"
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          aria-busy={refreshing}
+        >
+          {refreshing ? "Refreshing..." : "Refresh"}
         </button>
       }
     >

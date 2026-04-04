@@ -1,10 +1,12 @@
 import { Suspense, lazy, useEffect } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Footer from "./components/footer";
+import PlatformMaintenancePage from "./components/PlatformMaintenancePage";
 import SellerRoute from "./components/SellerRoute";
 import AdminRoute from "./components/AdminRoute";
 import SellerAccountRoute from "./components/SellerAccountRoute";
 import SellerSidebarLayout from "./components/SellerSidebarLayout";
+import { usePlatform } from "./hooks/usePlatform";
 import { readStoredSessionClaims } from "./utils/authRoute";
 
 const lazyPage = (loader) => {
@@ -115,6 +117,7 @@ const getPreloadTargets = (pathname, role) => {
 
 function App() {
   const { pathname } = useLocation();
+  const { loading: platformLoading, maintenanceMode, platformName } = usePlatform();
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -158,6 +161,21 @@ function App() {
     pathname === "/settings" ||
     pathname.startsWith("/seller/") ||
     pathname.startsWith("/admin/");
+
+  const sessionClaims = readStoredSessionClaims();
+  const role = String(sessionClaims.role || "").trim().toLowerCase();
+  const maintenanceExemptRoute =
+    pathname === "/login" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
+    pathname === "/verify-email" ||
+    pathname.startsWith("/admin/");
+  const shouldShowMaintenance =
+    !platformLoading && maintenanceMode && role !== "admin" && !maintenanceExemptRoute;
+
+  if (shouldShowMaintenance) {
+    return <PlatformMaintenancePage platformName={platformName} />;
+  }
 
   return (
     <>

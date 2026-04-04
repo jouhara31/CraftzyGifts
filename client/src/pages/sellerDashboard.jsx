@@ -213,6 +213,7 @@ export default function SellerDashboard() {
   );
   const [loading, setLoading] = useState(() => !initialDashboardSnapshot);
   const [hasLoadedDashboard, setHasLoadedDashboard] = useState(() => Boolean(initialDashboardSnapshot));
+  const [refreshing, setRefreshing] = useState(false);
   const [notificationsBusy, setNotificationsBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -351,6 +352,15 @@ export default function SellerDashboard() {
 
   useEffect(() => {
     loadDashboard();
+  }, [loadDashboard]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadDashboard({ silent: true });
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadDashboard]);
 
   const refreshDashboardIfStale = useCallback(() => {
@@ -776,8 +786,14 @@ export default function SellerDashboard() {
             <button className="btn ghost" type="button" onClick={downloadReport}>
               Download report
             </button>
-            <button className="btn ghost" type="button" onClick={loadDashboard}>
-              Refresh data
+            <button
+              className="btn ghost"
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              aria-busy={refreshing}
+            >
+              {refreshing ? "Refreshing..." : "Refresh data"}
             </button>
           </div>
         </div>

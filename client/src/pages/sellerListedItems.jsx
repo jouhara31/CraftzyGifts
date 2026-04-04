@@ -302,6 +302,7 @@ export default function SellerListedItems() {
   const [showBaseCategoryForm, setShowBaseCategoryForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [mainItemMode, setMainItemMode] = useState("select");
@@ -374,6 +375,15 @@ export default function SellerListedItems() {
 
   useEffect(() => {
     loadProducts();
+  }, [loadProducts]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadProducts();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadProducts]);
 
   const duplicateWarning = useMemo(() => {
@@ -917,8 +927,14 @@ export default function SellerListedItems() {
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
-          <button className="btn ghost" type="button" onClick={loadProducts}>
-            Refresh
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
       </div>

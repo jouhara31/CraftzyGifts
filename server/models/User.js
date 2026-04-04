@@ -103,6 +103,21 @@ const userSchema = new mongoose.Schema(
     sellerSecuritySettings: {
       loginOtpEnabled: { type: Boolean, default: false },
     },
+    adminSecuritySettings: {
+      loginOtpEnabled: { type: Boolean, default: false },
+      loginAlerts: { type: Boolean, default: true },
+      sessionTimeoutEnabled: { type: Boolean, default: false },
+    },
+    adminNotificationSettings: {
+      emailNotifications: { type: Boolean, default: true },
+      orderAlerts: { type: Boolean, default: true },
+      stockAlerts: { type: Boolean, default: true },
+      customerMessages: { type: Boolean, default: true },
+      weeklyReports: { type: Boolean, default: true },
+      marketingUpdates: { type: Boolean, default: false },
+      securityAlerts: { type: Boolean, default: true },
+      paymentAlerts: { type: Boolean, default: true },
+    },
     sellerShippingSettings: {
       defaultDeliveryCharge: { type: Number, default: 0, min: 0 },
       freeShippingThreshold: { type: Number, default: 0, min: 0 },

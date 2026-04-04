@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
 
 import { API_URL } from "../apiBase";
@@ -12,19 +12,24 @@ export default function AdminSellers() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [actingId, setActingId] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const clearAndRedirect = useCallback(() => {
     clearAuthSession();
     navigate("/login", { replace: true });
   }, [navigate]);
 
-  const loadSellers = useCallback(async () => {
+  const loadSellers = useCallback(async ({ showNotice = false } = {}) => {
     if (!hasActiveSession()) {
       clearAndRedirect();
       return;
     }
 
+    setLoading(true);
     setError("");
+    if (showNotice) {
+      setNotice("");
+    }
     try {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.set("status", statusFilter);
@@ -41,8 +46,13 @@ export default function AdminSellers() {
         return;
       }
       setSellers(Array.isArray(data) ? data : []);
+      if (showNotice) {
+        setNotice("Seller list refreshed.");
+      }
     } catch {
       setError("Unable to load sellers.");
+    } finally {
+      setLoading(false);
     }
   }, [clearAndRedirect, statusFilter]);
 
@@ -94,14 +104,14 @@ export default function AdminSellers() {
         .includes(text)
     );
   }, [sellers, query]);
-
   return (
     <AdminSidebarLayout
       title="Seller Approvals"
       description="Approve or reject new sellers and review seller accounts."
+      pageClassName="admin-sellers-page"
       actions={
-        <>
-          <div className="search">
+        <div className="admin-sellers-actions">
+          <div className="search admin-sellers-search">
             <input
               className="search-input"
               type="search"
@@ -111,7 +121,7 @@ export default function AdminSellers() {
             />
           </div>
           <select
-            className="search-input"
+            className="search-input admin-sellers-status"
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
           >
@@ -120,10 +130,15 @@ export default function AdminSellers() {
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
           </select>
-          <button className="admin-text-action" type="button" onClick={loadSellers}>
-            Refresh
+          <button
+            className="admin-text-action admin-sellers-refresh"
+            type="button"
+            onClick={() => loadSellers({ showNotice: true })}
+            disabled={loading}
+          >
+            {loading ? "Refreshing..." : "Refresh"}
           </button>
-        </>
+        </div>
       }
     >
 
@@ -136,7 +151,16 @@ export default function AdminSellers() {
           <article key={seller._id} className="seller-panel">
             <div className="card-head">
               <h3 className="card-title">{seller.storeName || seller.name || "Seller"}</h3>
-              <span className="chip">{seller.sellerStatus || "pending"}</span>
+              <div className="admin-seller-card-actions">
+                <Link className="admin-text-action admin-seller-store-link" to={`/store/${seller._id}`}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  <span>View Store</span>
+                </Link>
+                <span className="chip">{seller.sellerStatus || "pending"}</span>
+              </div>
             </div>
             <p className="muted">{seller.name || "No owner name"}</p>
             <p className="muted">{seller.email || "No email"}</p>

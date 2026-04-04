@@ -128,10 +128,16 @@ const sanitizeManagedHeaders = (headers) => {
 const withApiCredentials = (init = {}) => {
   const headers = new Headers(init?.headers || undefined);
   sanitizeManagedHeaders(headers);
+  const method = String(init?.method || "GET").trim().toUpperCase();
+  const shouldBypassCache = !init?.cache && (method === "GET" || method === "HEAD");
+  if (shouldBypassCache && !headers.has("Cache-Control")) {
+    headers.set("Cache-Control", "no-cache");
+  }
   return {
     ...(init || {}),
     headers,
     credentials: "include",
+    ...(shouldBypassCache ? { cache: "no-store" } : {}),
   };
 };
 

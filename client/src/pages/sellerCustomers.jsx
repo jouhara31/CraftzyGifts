@@ -50,6 +50,7 @@ export default function SellerCustomers() {
   const [searchText, setSearchText] = useState("");
   const [selectedCustomerKey, setSelectedCustomerKey] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const clearAndRedirect = useCallback(() => {
     clearAuthSession();
@@ -99,6 +100,15 @@ export default function SellerCustomers() {
 
   useEffect(() => {
     loadData();
+  }, [loadData]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadData]);
 
   const customers = useMemo(() => {
@@ -242,8 +252,14 @@ export default function SellerCustomers() {
           <p>Track repeat buyers, review history, order timeline, and direct store queries.</p>
         </div>
         <div className="seller-toolbar">
-          <button className="btn ghost" type="button" onClick={loadData}>
-            Refresh
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
       </div>

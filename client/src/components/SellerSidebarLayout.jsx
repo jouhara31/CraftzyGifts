@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import logoPng from "../assets/logo.png";
+import { usePlatform } from "../hooks/usePlatform";
 import { logoutSession, readStoredUser, readStoredUserId } from "../utils/authSession";
 import { readStoredSessionClaims } from "../utils/authRoute";
 import { buildSellerWorkspaceSections, isWorkspacePathActive } from "../utils/sellerWorkspace";
@@ -180,6 +181,7 @@ const buildNavGroups = (workspaceSections) => [
 ];
 
 export default function SellerSidebarLayout() {
+  const { platformName } = usePlatform();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -341,10 +343,10 @@ export default function SellerSidebarLayout() {
         </button>
         <Link className="admin-classic-brand seller-classic-brand" to="/seller/dashboard">
           <span className="admin-classic-logo">
-            <img src={logoPng} alt="CraftzyGifts" />
+            <img src={logoPng} alt={platformName} />
           </span>
           <span className="admin-classic-brand-copy">
-            <strong>CraftzyGifts</strong>
+            <strong>{platformName}</strong>
             <small>Seller Workspace</small>
           </span>
         </Link>

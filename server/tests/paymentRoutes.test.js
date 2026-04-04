@@ -52,6 +52,15 @@ jest.mock("../utils/sellerFinance", () => ({
   listAdminPayoutBatches: jest.fn(),
 }));
 
+jest.mock("../utils/platformSettings", () => ({
+  ensurePlatformSettings: jest.fn(),
+}));
+
+jest.mock("../utils/emailService", () => ({
+  buildAppUrl: jest.fn((path) => `https://example.test${path}`),
+  sendTransactionalEmail: jest.fn(),
+}));
+
 jest.mock("../utils/razorpayGateway", () => ({
   PAYMENT_CURRENCY: "INR",
   buildPaymentConfigError: jest.fn(),
@@ -64,6 +73,7 @@ jest.mock("../utils/razorpayGateway", () => ({
 }));
 
 const Order = require("../models/Order");
+const { ensurePlatformSettings } = require("../utils/platformSettings");
 const orderRoutes = require("../routes/orderRoutes");
 const {
   verifyRazorpayPaymentSignature,
@@ -79,6 +89,11 @@ const buildApp = () => {
 describe("payment routes", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    ensurePlatformSettings.mockResolvedValue({
+      platformName: "CraftzyGifts",
+      currencyCode: "INR",
+      enableOrderEmailAlerts: true,
+    });
   });
 
   test("returns checkout payload for a pending online payment order", async () => {

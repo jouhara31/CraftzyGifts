@@ -108,6 +108,7 @@ export default function AdminDashboard() {
   const [error, setError] = useState("");
   const [financeError, setFinanceError] = useState("");
   const [notice, setNotice] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const [actingSellerId, setActingSellerId] = useState("");
   const [actingBatchId, setActingBatchId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -257,10 +258,14 @@ export default function AdminDashboard() {
   const lowStockThreshold = toNumber(lowStock.threshold, 0);
   const payoutSummary = finance?.summary || {};
   const payoutBatches = Array.isArray(finance?.batches) ? finance.batches : [];
-  const refreshDashboard = () => {
-    loadOverview();
-    loadPayouts();
-  };
+  const refreshDashboard = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([loadOverview(), loadPayouts()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadOverview, loadPayouts]);
   const categoriesPanel = (
     <div className="seller-panel admin-categories-panel">
       <div className="card-head">
@@ -292,8 +297,14 @@ export default function AdminDashboard() {
       description="Overview with stats, recent orders, and activity."
       pageClassName="admin-dashboard-page"
       actions={
-        <button className="admin-text-action" type="button" onClick={refreshDashboard}>
-          Refresh
+        <button
+          className="admin-text-action"
+          type="button"
+          onClick={refreshDashboard}
+          disabled={refreshing}
+          aria-busy={refreshing}
+        >
+          {refreshing ? "Refreshing..." : "Refresh"}
         </button>
       }
     >
@@ -380,14 +391,21 @@ export default function AdminDashboard() {
             {payoutBatches.map((batch) => {
               const sellerLabel =
                 batch?.seller?.storeName || batch?.seller?.name || batch?.seller?.email || "Seller";
+              const transferLabel =
+                batch?.bank?.mode === "upi"
+                  ? "UPI"
+                  : batch?.bank?.mode === "bank_upi"
+                    ? "Bank / UPI"
+                    : "Bank";
               const bankSummary = [
                 batch?.bank?.bankName || batch?.bank?.upiId || "",
                 batch?.bank?.accountMasked || "",
               ]
                 .filter(Boolean)
                 .join(" • ");
-              const canProcess = batch.status === "requested";
-              const canPay = ["requested", "processing"].includes(batch.status);
+              const bankReady = Boolean(batch?.bank?.ready);
+              const canProcess = batch.status === "requested" && bankReady;
+              const canPay = ["requested", "processing"].includes(batch.status) && bankReady;
               const canReject = ["requested", "processing"].includes(batch.status);
 
               return (
@@ -404,7 +422,7 @@ export default function AdminDashboard() {
                     {batch.settlementCount} settlements • Requested {formatDateTime(batch.requestedAt)}
                   </p>
                   <p className="payout-sub">
-                    Bank: {bankSummary || "Seller bank details pending"}{" "}
+                    {transferLabel}: {bankSummary || "Missing"}{" "}
                     {batch?.bank?.ifscCode ? `• ${batch.bank.ifscCode}` : ""}
                   </p>
                   <p className="payout-sub">{batch.note || "No payout note added."}</p>

@@ -6,11 +6,13 @@ const { seedSampleData } = require("./seed");
 const { DEFAULT_SERVER_ERROR_MESSAGE } = require("./utils/apiError");
 
 const authRoutes = require("./routes/authRoutes");
+const platformRoutes = require("./routes/platformRoutes");
 const productRoutes = require("./routes/productRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const userRoutes = require("./routes/userRoutes");
+const { maintenanceGate } = require("./middleware/maintenance");
 
 const DEFAULT_ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"];
 const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || "10mb";
@@ -74,6 +76,8 @@ const createApp = () => {
   app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
   app.use("/api/auth", authRoutes);
+  app.use("/api/platform", platformRoutes);
+  app.use("/api", maintenanceGate);
   app.use("/api/products", productRoutes);
   app.use("/api/orders", orderRoutes);
   app.use("/api/messages", messageRoutes);

@@ -6,6 +6,7 @@ const {
   changeMyPassword,
   listMySessions,
   revokeMySession,
+  revokeAllMySessions,
   deleteMe,
   listMyApiKeys,
   createMyApiKey,
@@ -48,6 +49,7 @@ router.post(
 );
 router.patch("/me/password", auth, changeMyPassword);
 router.get("/me/sessions", auth, listMySessions);
+router.delete("/me/sessions", auth, revokeAllMySessions);
 router.delete("/me/sessions/:sessionId", auth, revokeMySession);
 router.delete("/me", auth, deleteMe);
 router.get("/me/api-keys", auth, requireRole("admin"), listMyApiKeys);

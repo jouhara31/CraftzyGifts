@@ -71,6 +71,7 @@ const sendTransactionalEmail = async ({
     throw new Error("Email recipient and subject are required.");
   }
 
+  // Webhook mode is production-friendly; outbox mode keeps email flows testable locally.
   if (EMAIL_MODE === "webhook" && EMAIL_WEBHOOK_URL) {
     try {
       return await postWebhookEmail(payload);

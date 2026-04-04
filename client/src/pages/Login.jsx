@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
+import { usePlatform } from "../hooks/usePlatform";
 
 import { API_URL } from "../apiBase";
 import { apiFetchJson, persistAuthSession } from "../utils/authSession";
 import { resolveAuthenticatedHomeForUser } from "../utils/authRoute";
 
 export default function Login() {
+  const { platformName } = usePlatform();
   const [form, setForm] = useState({ email: "", password: "" });
   const [otpCode, setOtpCode] = useState("");
   const [otpStep, setOtpStep] = useState(null);
@@ -101,7 +103,7 @@ export default function Login() {
       <div className="auth-shell">
         <form onSubmit={handleSubmit} className="auth-card">
           <p className="auth-kicker">Welcome back</p>
-          <h2 className="auth-title">Login to CraftzyGifts</h2>
+          <h2 className="auth-title">Login to {platformName}</h2>
           <p className="auth-sub">
             {otpStep?.challengeToken
               ? "Enter the verification code to finish signing in."
@@ -199,7 +201,6 @@ export default function Login() {
                 </div>
               </div>
               <div className="auth-inline-actions">
-                <span className="auth-note">Use your customer, seller, or admin account.</span>
                 <Link to="/forgot-password" className="auth-link">
                   Forgot password?
                 </Link>
@@ -277,7 +278,7 @@ export default function Login() {
                 </Link>
               </p>
               <p className="auth-foot">
-                Want to sell on CraftzyGifts?{" "}
+                Want to sell on {platformName}?{" "}
                 <Link to="/register?seller=1" className="auth-link">
                   Become a seller
                 </Link>

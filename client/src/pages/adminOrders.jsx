@@ -25,6 +25,11 @@ const STATUS_FILTERS = [
   { value: "cancelled", label: "Cancelled" },
 ];
 const formatStatus = (value = "") => String(value || "").replace(/_/g, " ");
+const toToken = (value = "") =>
+  String(value || "unknown")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_");
 const toNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -254,10 +259,30 @@ export default function AdminOrders() {
       title="Orders"
       description="Complete order management with search and filters."
       pageClassName="admin-page-orders"
-      titleActions={
-        <div className="admin-orders-title-actions">
+      actions={
+        <div className="admin-orders-toolbar">
+          <div className="search">
+            <input
+              className="search-input"
+              type="search"
+              placeholder="Search order/customer/product"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+          <select
+            className="search-input admin-orders-filter"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+          >
+            {STATUS_FILTERS.map((status) => (
+              <option key={status.value} value={status.value}>
+                {status.label}
+              </option>
+            ))}
+          </select>
           <button
-            className={`admin-text-action ${isRefreshing ? "is-loading" : ""}`.trim()}
+            className={`admin-text-action admin-orders-refresh-btn ${isRefreshing ? "is-loading" : ""}`.trim()}
             type="button"
             onClick={loadOrders}
             aria-busy={isRefreshing}
@@ -270,30 +295,6 @@ export default function AdminOrders() {
             {isRefreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
-      }
-      actions={
-        <>
-          <div className="search">
-            <input
-              className="search-input"
-              type="search"
-              placeholder="Search order/customer/product"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-          <select
-            className="search-input"
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-          >
-            {STATUS_FILTERS.map((status) => (
-              <option key={status.value} value={status.value}>
-                {status.label}
-              </option>
-            ))}
-          </select>
-        </>
       }
     >
 
@@ -324,100 +325,105 @@ export default function AdminOrders() {
 
           return (
             <div key={order._id} className="order-row admin-order-row">
-              <span data-label="Order">{order._id?.slice(-8)?.toUpperCase()}</span>
-              <span data-label="Customer">{order.customer?.name || "Customer"}</span>
-              <span data-label="Seller">
-                {order.seller?.storeName || order.seller?.name || "Seller"}
+              <span data-label="Order" className="admin-order-cell admin-order-code-cell">
+                <strong className="admin-order-primary">{order._id?.slice(-8)?.toUpperCase()}</strong>
+                <small className="admin-order-secondary">#{order._id?.slice(-12)?.toUpperCase()}</small>
               </span>
-              <span data-label="Product">{order.product?.name || "Product"}</span>
-              <span data-label="Status">{formatStatus(order.status)}</span>
-              <span data-label="Payment">
-                {String(order.paymentMode || "").toUpperCase()} / {order.paymentStatus}
+              <span data-label="Customer" className="admin-order-cell">
+                <strong className="admin-order-primary">{order.customer?.name || "Customer"}</strong>
+                <small className="admin-order-secondary">{order.customer?.email || "No email"}</small>
               </span>
-              <span className="order-total" data-label="Total">
-                {money(order.total)}
+              <span data-label="Seller" className="admin-order-cell">
+                <strong className="admin-order-primary">
+                  {order.seller?.storeName || order.seller?.name || "Seller"}
+                </strong>
+                <small className="admin-order-secondary">{order.seller?.name || "Store owner"}</small>
               </span>
-              <span data-label="Date">
-                {new Date(order.createdAt).toLocaleDateString("en-IN")}
+              <span data-label="Product" className="admin-order-cell">
+                <strong className="admin-order-primary">{order.product?.name || "Product"}</strong>
+                <small className="admin-order-secondary">Qty {toNumber(order?.quantity, 1)}</small>
+              </span>
+              <span data-label="Status" className="admin-order-cell">
+                <span className={`status-pill ${toToken(order.status)}`}>{formatStatus(order.status)}</span>
+              </span>
+              <span data-label="Payment" className="admin-order-cell">
+                <div className="admin-order-payment-badges">
+                  <span className="chip admin-order-mode-chip">
+                    {String(order.paymentMode || "NA").toUpperCase()}
+                  </span>
+                  <span className={`status-pill ${toToken(order.paymentStatus)}`}>
+                    {formatStatus(order.paymentStatus)}
+                  </span>
+                </div>
+              </span>
+              <span className="order-total admin-order-cell" data-label="Total">
+                <strong className="admin-order-primary">{money(order.total)}</strong>
+              </span>
+              <span data-label="Date" className="admin-order-cell">
+                <strong className="admin-order-primary">
+                  {new Date(order.createdAt).toLocaleDateString("en-IN")}
+                </strong>
               </span>
               <span data-label="Actions">
-                <div className="dropdown-inline admin-order-actions">
-                  {STATUS_NEXT[order.status]?.length ? (
-                    <>
-                      <select
-                        className="search-input admin-order-status-select"
-                        value={statusDraft[order._id] || ""}
-                        onChange={(event) =>
-                          setStatusDraft((prev) => ({
-                            ...prev,
-                            [order._id]: event.target.value,
-                          }))
-                        }
-                      >
-                        <option value="">Update status</option>
-                        {(STATUS_NEXT[order.status] || []).map((status) => (
-                          <option key={status} value={status}>
-                            {formatStatus(status)}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        className="btn ghost"
-                        type="button"
-                        disabled={!statusDraft[order._id] || actingId === order._id}
-                        onClick={() => updateStatus(order._id, statusDraft[order._id])}
-                      >
-                        {actingId === order._id ? "Updating..." : "Apply"}
-                      </button>
-                    </>
-                  ) : (
-                    <span className="field-hint">No updates</span>
-                  )}
-                  <button
-                    className="btn ghost"
-                    type="button"
-                    onClick={() => setDetailOrder(order)}
-                  >
-                    View details
-                  </button>
-                  <button
-                    className="btn ghost"
-                    type="button"
-                    disabled={!invoiceAvailable || downloadingInvoiceId === order._id}
-                    onClick={() => handleInvoiceDownload(order._id)}
-                  >
-                    {downloadingInvoiceId === order._id ? (
-                      "Preparing..."
-                    ) : (
+                <div className="admin-order-actions">
+                  <div className="admin-order-actions-main">
+                    {STATUS_NEXT[order.status]?.length ? (
                       <>
-                        <svg
-                          viewBox="0 0 24 24"
-                          aria-hidden="true"
-                          focusable="false"
-                          width="16"
-                          height="16"
+                        <select
+                          className="search-input admin-order-status-select"
+                          value={statusDraft[order._id] || ""}
+                          onChange={(event) =>
+                            setStatusDraft((prev) => ({
+                              ...prev,
+                              [order._id]: event.target.value,
+                            }))
+                          }
                         >
-                          <path
-                            d="M12 3v10m0 0 4-4m-4 4-4-4M5 15v4h14v-4"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>{" "}
-                        Invoice
+                          <option value="">Update status</option>
+                          {(STATUS_NEXT[order.status] || []).map((status) => (
+                            <option key={status} value={status}>
+                              {formatStatus(status)}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="btn ghost admin-order-apply-btn"
+                          type="button"
+                          disabled={!statusDraft[order._id] || actingId === order._id}
+                          onClick={() => updateStatus(order._id, statusDraft[order._id])}
+                        >
+                          {actingId === order._id ? "Updating..." : "Apply"}
+                        </button>
                       </>
+                    ) : (
+                      <span className="field-hint admin-order-no-updates">No updates</span>
                     )}
-                  </button>
-                  <button
-                    className="btn ghost"
-                    type="button"
-                    disabled={!shippingLabelAvailable || downloadingLabelId === order._id}
-                    onClick={() => handleShippingLabelDownload(order._id)}
-                  >
-                    {downloadingLabelId === order._id ? "Preparing label..." : "Shipping label"}
-                  </button>
+                  </div>
+                  <div className="admin-order-actions-links">
+                    <button
+                      className="admin-text-action admin-order-link-button"
+                      type="button"
+                      onClick={() => setDetailOrder(order)}
+                    >
+                      Details
+                    </button>
+                    <button
+                      className="admin-text-action admin-order-link-button"
+                      type="button"
+                      disabled={!invoiceAvailable || downloadingInvoiceId === order._id}
+                      onClick={() => handleInvoiceDownload(order._id)}
+                    >
+                      {downloadingInvoiceId === order._id ? "Preparing..." : "Invoice"}
+                    </button>
+                    <button
+                      className="admin-text-action admin-order-link-button"
+                      type="button"
+                      disabled={!shippingLabelAvailable || downloadingLabelId === order._id}
+                      onClick={() => handleShippingLabelDownload(order._id)}
+                    >
+                      {downloadingLabelId === order._id ? "Preparing..." : "Label"}
+                    </button>
+                  </div>
                 </div>
               </span>
             </div>
