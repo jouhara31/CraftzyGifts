@@ -15,6 +15,7 @@ import { API_URL } from "../apiBase";
 const MAX_SELLING_PRICE = 200000;
 const MAX_MRP = 500000;
 const MAX_SURCHARGE = 50000;
+const MAX_BUILD_PERCENT = 100;
 const MAX_TAX_RATE = 50;
 const MIN_PRODUCT_IMAGES = 3;
 const MAX_PRODUCT_IMAGES = 5;
@@ -39,8 +40,8 @@ const SKU_PATTERN = /^[A-Z0-9][A-Z0-9._/-]{0,47}$/;
 const HSN_CODE_PATTERN = /^[0-9]{4,8}$/;
 const normalizeText = (value = "") => String(value || "").trim();
 const BULK_IMPORT_TEMPLATE = [
-  "name,description,category,subcategory,brand,productType,price,mrp,sku,hsnCode,taxRate,stock,lowStockThreshold,weightGrams,lengthCm,widthCm,heightCm,deliveryMinDays,deliveryMaxDays,tags,shippingInfo,returnPolicy,occasions,includedItems,highlights,isCustomizable,makingCharge,status,images,variants",
-  '"Rose Celebration Box","Luxury floral gifting box","Flowers","Gift Box","Craftzy Select","Floral Hamper",1499,1899,ROSE-BOX-01,4819,18,12,4,850,28,22,14,2,4,"birthday|anniversary","Ships in rigid outer box","Replacement only for transit damage","Birthday|Anniversary","Preserved rose dome|Greeting card","Premium finish|Hand packed",false,0,active,"https://example.com/image-1.jpg|https://example.com/image-2.jpg|https://example.com/image-3.jpg","[{""id"":""variant_s_red"",""size"":""Standard"",""color"":""Red"",""material"":""Rose"",""sku"":""ROSE-RED-STD"",""price"":1499,""stock"":7,""active"":true},{""id"":""variant_s_pink"",""size"":""Standard"",""color"":""Pink"",""material"":""Rose"",""sku"":""ROSE-PINK-STD"",""price"":1549,""stock"":5,""active"":true}]"',
+  "name,description,category,subcategory,brand,productType,price,mrp,sku,hsnCode,taxRate,stock,lowStockThreshold,weightGrams,lengthCm,widthCm,heightCm,deliveryMinDays,deliveryMaxDays,tags,shippingInfo,returnPolicy,occasions,includedItems,highlights,isCustomizable,makingCharge,buildYourOwnPercent,buildYourOwnEnabled,status,images,variants",
+  '"Rose Celebration Box","Luxury floral gifting box","Flowers","Gift Box","Craftzy Select","Floral Hamper",1499,1899,ROSE-BOX-01,4819,18,12,4,850,28,22,14,2,4,"birthday|anniversary","Ships in rigid outer box","Replacement only for transit damage","Birthday|Anniversary","Preserved rose dome|Greeting card","Premium finish|Hand packed",false,0,10,false,active,"https://example.com/image-1.jpg|https://example.com/image-2.jpg|https://example.com/image-3.jpg","[{""id"":""variant_s_red"",""size"":""Standard"",""color"":""Red"",""material"":""Rose"",""sku"":""ROSE-RED-STD"",""price"":1499,""stock"":7,""active"":true},{""id"":""variant_s_pink"",""size"":""Standard"",""color"":""Pink"",""material"":""Rose"",""sku"":""ROSE-PINK-STD"",""price"":1549,""stock"":5,""active"":true}]"',
 ].join("\n");
 
 const resolveCategorySelectValue = (formState, categoryTree) => {
@@ -234,13 +235,11 @@ function PackagingStylesEditor({
 }) {
   return (
     <div className="field">
-      <label>Packaging styles</label>
-      <p className="field-hint">
-        Customers can choose these packaging styles on product detail page.
-      </p>
+      <label>Packaging</label>
+      <p className="field-hint">Optional packaging choices for this product.</p>
 
       {(styles || []).length === 0 && (
-        <p className="field-hint">No packaging style added yet.</p>
+        <p className="field-hint">No packaging added.</p>
       )}
 
       {(styles || []).map((style, index) => (
@@ -358,11 +357,9 @@ function VariantsEditor({
   return (
     <div className="field">
       <label>Variants</label>
-      <p className="field-hint">
-        Capture size, color, material, price, stock, and SKU combinations for this product.
-      </p>
+      <p className="field-hint">Optional size, color, material, price, stock, and SKU rows.</p>
       {(variants || []).length === 0 ? (
-        <p className="field-hint">No variants added yet.</p>
+        <p className="field-hint">No variants added.</p>
       ) : null}
       {(variants || []).map((variant, index) => (
         <div key={variant.id} className="seller-variant-card">
@@ -456,6 +453,170 @@ function VariantsEditor({
   );
 }
 
+function ProductFormSectionIcon({ kind }) {
+  switch (kind) {
+    case "media":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="4" y="5" width="16" height="14" rx="3" />
+          <circle cx="9" cy="10" r="1.5" />
+          <path d="M6.5 16l4-4 2.5 2.5 2.5-3 2.5 4.5" />
+        </svg>
+      );
+    case "pricing":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4v16" />
+          <path d="M16 7.5c0-1.4-1.8-2.5-4-2.5s-4 1.1-4 2.5 1.8 2.5 4 2.5 4 1.1 4 2.5-1.8 2.5-4 2.5-4-1.1-4-2.5" />
+        </svg>
+      );
+    case "delivery":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 7h11v8H3z" />
+          <path d="M14 10h3l3 3v2h-6z" />
+          <circle cx="8" cy="18" r="1.5" />
+          <circle cx="18" cy="18" r="1.5" />
+        </svg>
+      );
+    case "details":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M7 4h8l3 3v13H7z" />
+          <path d="M15 4v4h4" />
+          <path d="M10 12h5M10 16h4" />
+        </svg>
+      );
+    case "packaging":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3l7 4v10l-7 4-7-4V7z" />
+          <path d="M12 3v8m7-4-7 4-7-4" />
+        </svg>
+      );
+    case "variants":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 7h12M6 12h12M6 17h12" />
+          <circle cx="9" cy="7" r="1.6" />
+          <circle cx="15" cy="12" r="1.6" />
+          <circle cx="11" cy="17" r="1.6" />
+        </svg>
+      );
+    case "customization":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5l1.6 3.5L17 10l-3.4 1.6L12 15l-1.6-3.4L7 10l3.4-1.5z" />
+          <circle cx="18.5" cy="6" r="1" />
+          <circle cx="6" cy="18" r="1" />
+        </svg>
+      );
+    case "basics":
+    default:
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3l7 4v10l-7 4-7-4V7z" />
+          <path d="M12 11l7-4M12 11 5 7M12 11v10" />
+        </svg>
+      );
+  }
+}
+
+function ProductHeaderActionIcon({ kind }) {
+  switch (kind) {
+    case "add":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+      );
+    case "upload":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 16V6" />
+          <path d="M8.5 9.5 12 6l3.5 3.5" />
+          <path d="M5 18.5h14" />
+        </svg>
+      );
+    case "stock":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 17h16" />
+          <path d="M7 17V9M12 17V6M17 17v-4" />
+        </svg>
+      );
+    case "refresh":
+    default:
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20 12a8 8 0 1 1-2.3-5.6" />
+          <path d="M20 5v5h-5" />
+        </svg>
+      );
+  }
+}
+
+function ProductSummaryIcon({ kind }) {
+  switch (kind) {
+    case "active":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 12.5 10 16.5 18 8" />
+        </svg>
+      );
+    case "drafts":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M7 4h8l3 3v13H7z" />
+          <path d="M15 4v4h4" />
+          <path d="M10 12h5M10 16h4" />
+        </svg>
+      );
+    case "lowStock":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4 20 18H4z" />
+          <path d="M12 9v4M12 16h.01" />
+        </svg>
+      );
+    case "total":
+    default:
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 18h14" />
+          <path d="M8 18V9M12 18V6M16 18v-4" />
+        </svg>
+      );
+  }
+}
+
+function ProductFormSection({
+  title,
+  subtitle = "",
+  tag = "",
+  wide = false,
+  icon = "basics",
+  children,
+}) {
+  return (
+    <section className={`seller-product-form-section is-${icon}${wide ? " is-wide" : ""}`}>
+      <div className="seller-product-form-section-head">
+        <div className="seller-product-form-section-intro">
+          <span className={`seller-product-form-section-icon is-${icon}`}>
+            <ProductFormSectionIcon kind={icon} />
+          </span>
+          <div className="seller-product-form-section-copy">
+            <h4>{title}</h4>
+            {subtitle ? <p>{subtitle}</p> : null}
+          </div>
+        </div>
+        {tag ? <span className={`seller-form-chip ${tag.toLowerCase()}`}>{tag}</span> : null}
+      </div>
+      <div className="seller-product-form-section-body">{children}</div>
+    </section>
+  );
+}
+
 const buildInitialProductForm = () => ({
   name: "",
   description: "",
@@ -487,13 +648,41 @@ const buildInitialProductForm = () => ({
   packagingStyles: [],
   variants: [],
   isCustomizable: false,
+  buildYourOwnEnabled: false,
   makingCharge: "0",
+  buildYourOwnPercent: "0",
   imageList: [],
   imageNames: [],
   status: "active",
   customizationCatalog: [],
   hiddenCustomizationCatalog: [],
 });
+
+const isBuildYourOwnEnabled = (product = {}) =>
+  Boolean(product?.buildYourOwnEnabled ?? product?.isCustomizable);
+
+const resolveBuildYourOwnPercent = (product = {}) => {
+  const directValue = Number(product?.buildYourOwnPercent);
+  if (Number.isFinite(directValue) && directValue >= 0) {
+    return directValue;
+  }
+
+  const legacyValue = Number(product?.buildYourOwnCharge);
+  if (Number.isFinite(legacyValue) && legacyValue >= 0 && legacyValue <= MAX_BUILD_PERCENT) {
+    return legacyValue;
+  }
+
+  return 0;
+};
+
+const getProductCapabilityLabel = (product = {}) => {
+  const supportsCustomization = Boolean(product?.isCustomizable);
+  const supportsBuild = isBuildYourOwnEnabled(product);
+  if (supportsCustomization && supportsBuild) return "Custom + Build";
+  if (supportsCustomization) return "Customizable";
+  if (supportsBuild) return "Build-your-own";
+  return "Ready-made";
+};
 
 const buildProductPayload = (formState) => {
   const price = roundMoney(formState.price);
@@ -508,7 +697,7 @@ const buildProductPayload = (formState) => {
     : deliveryMinDays;
   const deliveryMaxDays =
     deliveryMinDays > 0 ? Math.max(deliveryMaxBase, deliveryMinDays) : deliveryMaxBase;
-  const preservedCustomizationCatalog = formState.isCustomizable
+  const preservedCustomizationCatalog = formState.buildYourOwnEnabled
     ? (Array.isArray(formState.hiddenCustomizationCatalog)
         ? formState.hiddenCustomizationCatalog
         : []
@@ -550,10 +739,14 @@ const buildProductPayload = (formState) => {
     packagingStyles: toPayloadPackagingStyles(formState.packagingStyles),
     variants: toPayloadVariants(formState.variants),
     isCustomizable: Boolean(formState.isCustomizable),
+    buildYourOwnEnabled: Boolean(formState.buildYourOwnEnabled),
     makingCharge: formState.isCustomizable ? roundMoney(formState.makingCharge || 0) : 0,
+    buildYourOwnPercent: formState.buildYourOwnEnabled
+      ? roundMoney(formState.buildYourOwnPercent || 0)
+      : 0,
     status: formState.status === "draft" ? "inactive" : "active",
     images: normalizeProductImages(formState.imageList),
-    customizationCatalog: formState.isCustomizable
+    customizationCatalog: formState.buildYourOwnEnabled
       ? preservedCustomizationCatalog
       : [],
   };
@@ -634,6 +827,15 @@ const validatePayload = (payload, { requireMinimumImages = false } = {}) => {
   }
   if (!payload.isCustomizable && payload.makingCharge > 0) {
     return "Making charge is only allowed for customizable products.";
+  }
+  if (!Number.isFinite(payload.buildYourOwnPercent) || payload.buildYourOwnPercent < 0) {
+    return "Build-your-own hamper fee percentage cannot be negative.";
+  }
+  if (payload.buildYourOwnEnabled && payload.buildYourOwnPercent > MAX_BUILD_PERCENT) {
+    return `Build-your-own hamper fee percentage cannot exceed ${MAX_BUILD_PERCENT}%.`;
+  }
+  if (!payload.buildYourOwnEnabled && payload.buildYourOwnPercent > 0) {
+    return "Build-your-own hamper fee percentage is only allowed when build your own hamper is enabled.";
   }
   if ((payload.packagingStyles || []).length > 12) {
     return "You can add up to 12 packaging styles only.";
@@ -782,7 +984,9 @@ const mapProductToForm = (product = {}) => {
     packagingStyles: normalizePackagingStylesForForm(product.packagingStyles),
     variants: normalizeVariantsForForm(product.variants),
     isCustomizable: Boolean(product.isCustomizable),
+    buildYourOwnEnabled: isBuildYourOwnEnabled(product),
     makingCharge: String(Number(product.makingCharge || 0)),
+    buildYourOwnPercent: String(Number(resolveBuildYourOwnPercent(product))),
     imageList: normalizeProductImages(
       Array.isArray(product.images) && product.images.length > 0
         ? product.images
@@ -807,6 +1011,9 @@ export default function SellerProducts() {
   const [actingId, setActingId] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(
     () => searchParams.get("new") === "1"
+  );
+  const [showBulkImport, setShowBulkImport] = useState(
+    () => searchParams.get("bulk") === "1"
   );
   const [lowStockOnly, setLowStockOnly] = useState(
     () => searchParams.get("lowStock") === "1"
@@ -842,6 +1049,7 @@ export default function SellerProducts() {
   useEffect(() => {
     if (searchParams.get("new") === "1") setShowCreateForm(true);
     if (searchParams.get("lowStock") === "1") setLowStockOnly(true);
+    if (searchParams.get("bulk") === "1") setShowBulkImport(true);
   }, [searchParams]);
 
   useEffect(() => {
@@ -915,6 +1123,18 @@ export default function SellerProducts() {
 
     return filtered;
   }, [products, query, lowStockOnly]);
+
+  const productSummary = useMemo(() => {
+    const total = products.length;
+    const active = products.filter((item) => item.status !== "inactive").length;
+    const drafts = products.filter((item) => item.status === "inactive").length;
+    const lowStock = products.filter((item) => {
+      const threshold = Number(item?.inventory?.lowStockThreshold ?? 5);
+      return Number(item.stock || 0) <= threshold;
+    }).length;
+
+    return { total, active, drafts, lowStock };
+  }, [products]);
 
   const patchProduct = async (productId, updates, successMessage) => {
     if (!hasActiveSession()) {
@@ -1046,7 +1266,9 @@ export default function SellerProducts() {
   };
 
   const handleFormChange = (field) => (event) => {
-    let value = field === "isCustomizable" ? event.target.checked : event.target.value;
+    let value = ["isCustomizable", "buildYourOwnEnabled"].includes(field)
+      ? event.target.checked
+      : event.target.value;
     if (field === "sku" && typeof value === "string") {
       value = value.toUpperCase();
     }
@@ -1061,12 +1283,21 @@ export default function SellerProducts() {
           makingCharge: "0",
         };
       }
+      if (field === "buildYourOwnEnabled" && !value) {
+        return {
+          ...prev,
+          buildYourOwnEnabled: false,
+          buildYourOwnPercent: "0",
+        };
+      }
       return { ...prev, [field]: value };
     });
   };
 
   const handleEditFormChange = (field) => (event) => {
-    let value = field === "isCustomizable" ? event.target.checked : event.target.value;
+    let value = ["isCustomizable", "buildYourOwnEnabled"].includes(field)
+      ? event.target.checked
+      : event.target.value;
     if (field === "sku" && typeof value === "string") {
       value = value.toUpperCase();
     }
@@ -1081,7 +1312,31 @@ export default function SellerProducts() {
           makingCharge: "0",
         };
       }
+      if (field === "buildYourOwnEnabled" && !value) {
+        return {
+          ...prev,
+          buildYourOwnEnabled: false,
+          buildYourOwnPercent: "0",
+        };
+      }
       return { ...prev, [field]: value };
+    });
+  };
+
+  const toggleFeatureFor = (setter, field) => () => {
+    setter((prev) => {
+      if (prev[field]) {
+        return {
+          ...prev,
+          [field]: false,
+          ...(field === "isCustomizable" ? { makingCharge: "0" } : {}),
+          ...(field === "buildYourOwnEnabled" ? { buildYourOwnPercent: "0" } : {}),
+        };
+      }
+      return {
+        ...prev,
+        [field]: true,
+      };
     });
   };
 
@@ -1464,54 +1719,110 @@ export default function SellerProducts() {
 
   return (
     <div className="seller-shell-view seller-products-page">
-      <div className="section-head">
-        <div>
-          <h2>Product catalog</h2>
-          <p>Manage pricing, stock, and visibility across your listings.</p>
+      <div className="seller-panel seller-products-hero">
+        <div className="seller-products-hero-top">
+          <div className="seller-products-hero-copy">
+            <span className="seller-products-kicker">Catalog</span>
+            <h2>Products</h2>
+            <p>Manage listings, stock, and visibility.</p>
+          </div>
+          <div className="seller-products-toolbar-actions">
+            <button
+              className="btn primary"
+              type="button"
+              onClick={() => setShowCreateForm((prev) => !prev)}
+            >
+              <ProductHeaderActionIcon kind="add" />
+              {showCreateForm ? "Close add form" : "Add product"}
+            </button>
+            <button
+              className={`btn ghost ${showBulkImport ? "is-active" : ""}`}
+              type="button"
+              onClick={() => setShowBulkImport((prev) => !prev)}
+              aria-expanded={showBulkImport}
+            >
+              <ProductHeaderActionIcon kind="upload" />
+              {showBulkImport ? "Close bulk upload" : "Bulk upload"}
+            </button>
+            <button
+              className={`btn ghost ${lowStockOnly ? "is-active" : ""}`}
+              type="button"
+              onClick={() => setLowStockOnly((prev) => !prev)}
+            >
+              <ProductHeaderActionIcon kind="stock" />
+              {lowStockOnly ? "All stock" : "Low stock only"}
+            </button>
+            <button
+              className="btn ghost"
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              aria-busy={refreshing}
+            >
+              <ProductHeaderActionIcon kind="refresh" />
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
         </div>
-        <div className="seller-toolbar">
-          <button
-            className="btn primary"
-            type="button"
-            onClick={() => setShowCreateForm((prev) => !prev)}
-          >
-            {showCreateForm ? "Close add form" : "Add product"}
-          </button>
-          <button
-            className="btn ghost"
-            type="button"
-            onClick={() => setLowStockOnly((prev) => !prev)}
-          >
-            {lowStockOnly ? "Show all stock" : "Show low stock"}
-          </button>
-          <div className="search wide">
+
+        <div className="seller-products-hero-bottom">
+          <div className="search wide seller-products-search">
             <input
               className="search-input"
               type="search"
-              placeholder="Search products"
+              placeholder="Search products, SKU, or category"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
-          <button
-            className="btn ghost"
-            type="button"
-            onClick={handleRefresh}
-            disabled={refreshing}
-            aria-busy={refreshing}
-          >
-            {refreshing ? "Refreshing..." : "Refresh"}
-          </button>
+        </div>
+
+        <div className="seller-products-summary">
+          <article className="seller-products-summary-item">
+            <span className="seller-products-summary-icon">
+              <ProductSummaryIcon kind="total" />
+            </span>
+            <div className="seller-products-summary-copy">
+              <strong>{productSummary.total}</strong>
+              <span>Total</span>
+            </div>
+          </article>
+          <article className="seller-products-summary-item">
+            <span className="seller-products-summary-icon">
+              <ProductSummaryIcon kind="active" />
+            </span>
+            <div className="seller-products-summary-copy">
+              <strong>{productSummary.active}</strong>
+              <span>Active</span>
+            </div>
+          </article>
+          <article className="seller-products-summary-item">
+            <span className="seller-products-summary-icon">
+              <ProductSummaryIcon kind="drafts" />
+            </span>
+            <div className="seller-products-summary-copy">
+              <strong>{productSummary.drafts}</strong>
+              <span>Drafts</span>
+            </div>
+          </article>
+          <article className="seller-products-summary-item">
+            <span className="seller-products-summary-icon">
+              <ProductSummaryIcon kind="lowStock" />
+            </span>
+            <div className="seller-products-summary-copy">
+              <strong>{productSummary.lowStock}</strong>
+              <span>Low stock</span>
+            </div>
+          </article>
         </div>
       </div>
 
+      {showBulkImport && (
       <div className="seller-panel seller-bulk-import-card">
         <div className="card-head">
           <div>
-            <h3 className="card-title">Bulk upload products</h3>
-            <p className="field-hint">
-              Import catalog rows by CSV without changing the existing manual add/edit flow.
-            </p>
+            <h3 className="card-title">Bulk upload</h3>
+            <p className="field-hint">Use CSV for multiple products.</p>
           </div>
           <div className="seller-toolbar">
             <button className="btn ghost" type="button" onClick={downloadBulkImportTemplate}>
@@ -1521,6 +1832,9 @@ export default function SellerProducts() {
               Upload CSV
               <input type="file" accept=".csv,text/csv" onChange={handleBulkFileSelection} />
             </label>
+            <button className="btn ghost" type="button" onClick={() => setShowBulkImport(false)}>
+              Close
+            </button>
           </div>
         </div>
 
@@ -1531,10 +1845,10 @@ export default function SellerProducts() {
             rows="8"
             value={bulkImportText}
             onChange={(event) => setBulkImportText(event.target.value)}
-            placeholder="Paste CSV rows here or use the upload button above."
+            placeholder="Paste CSV rows or load a file."
           />
           <p className="field-hint">
-            Use `|` between tags and image URLs. Variants column accepts JSON.
+            Use `|` between image URLs. Variants accepts JSON.
             {bulkImportFileName ? ` Loaded file: ${bulkImportFileName}.` : ""}
           </p>
         </div>
@@ -1580,12 +1894,21 @@ export default function SellerProducts() {
           </div>
         ) : null}
       </div>
+      )}
 
       {showCreateForm && (
-        <div className="seller-panel">
-          <div className="card-head">
-            <h3 className="card-title">Add new product</h3>
+        <div className="seller-panel seller-product-editor">
+          <div className="card-head seller-product-editor-head">
+            <h3 className="card-title">Add product</h3>
           </div>
+          <div className="seller-product-form-shell">
+            <ProductFormSection
+              title="Basics"
+              subtitle="Name, category, brand, and description."
+              tag="Required"
+              icon="basics"
+              wide
+            >
           <div className="field">
             <label htmlFor="newProductName">Product name</label>
             <input
@@ -1593,6 +1916,7 @@ export default function SellerProducts() {
               type="text"
               value={form.name}
               onChange={handleFormChange("name")}
+              placeholder="Ex: Birthday Frame Hamper"
             />
           </div>
 
@@ -1635,9 +1959,18 @@ export default function SellerProducts() {
               id="newProductDescription"
               value={form.description}
               onChange={handleFormChange("description")}
+              placeholder="Short product summary customers will read first."
             />
           </div>
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Media"
+              subtitle="Upload and arrange product images."
+              tag="Required"
+              icon="media"
+              wide
+            >
           <div className="field">
             <label htmlFor="newProductImageUpload">Upload product images</label>
             <input
@@ -1652,7 +1985,6 @@ export default function SellerProducts() {
               Add at least {MIN_PRODUCT_IMAGES} images. Up to {MAX_PRODUCT_IMAGES} JPG/PNG/WEBP
               files.
             </p>
-            <p className="field-hint">Images are optimized automatically after you upload them.</p>
             {form.imageList.length > 0 && (
               <p className="field-hint">Selected: {form.imageList.length} image(s)</p>
             )}
@@ -1702,7 +2034,14 @@ export default function SellerProducts() {
               ))}
             </div>
           )}
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Pricing & stock"
+              subtitle="Price, stock, and listing status."
+              tag="Required"
+              icon="pricing"
+            >
           <div className="field-row">
             <div className="field">
               <label htmlFor="newProductPrice">Sale price</label>
@@ -1712,6 +2051,7 @@ export default function SellerProducts() {
                 min="1"
                 value={form.price}
                 onChange={handleFormChange("price")}
+                placeholder="799"
               />
             </div>
             <div className="field">
@@ -1722,6 +2062,7 @@ export default function SellerProducts() {
                 min="0"
                 value={form.mrp}
                 onChange={handleFormChange("mrp")}
+                placeholder="999"
               />
             </div>
             <div className="field">
@@ -1732,6 +2073,7 @@ export default function SellerProducts() {
                 min="0"
                 value={form.stock}
                 onChange={handleFormChange("stock")}
+                placeholder="12"
               />
             </div>
             <div className="field">
@@ -1756,6 +2098,7 @@ export default function SellerProducts() {
                 min="0"
                 value={form.lowStockThreshold}
                 onChange={handleFormChange("lowStockThreshold")}
+                placeholder="5"
               />
             </div>
             <div className="field">
@@ -1766,10 +2109,18 @@ export default function SellerProducts() {
                 min="0"
                 value={form.weightGrams}
                 onChange={handleFormChange("weightGrams")}
+                placeholder="750"
               />
             </div>
           </div>
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Delivery & invoice"
+              subtitle="SKU, tax, size, and delivery timing."
+              tag="Optional"
+              icon="delivery"
+            >
           <div className="field-row">
             <div className="field">
               <label htmlFor="newProductSku">SKU</label>
@@ -1802,13 +2153,10 @@ export default function SellerProducts() {
                 step="0.01"
                 value={form.taxRate}
                 onChange={handleFormChange("taxRate")}
+                placeholder="18"
               />
             </div>
           </div>
-          <p className="field-hint">
-            Optional invoice metadata used for seller, customer, and admin invoice downloads.
-          </p>
-
           <div className="field-row">
             <div className="field">
               <label htmlFor="newProductLengthCm">Length (cm)</label>
@@ -1818,6 +2166,7 @@ export default function SellerProducts() {
                 min="0"
                 value={form.lengthCm}
                 onChange={handleFormChange("lengthCm")}
+                placeholder="28"
               />
             </div>
             <div className="field">
@@ -1828,6 +2177,7 @@ export default function SellerProducts() {
                 min="0"
                 value={form.widthCm}
                 onChange={handleFormChange("widthCm")}
+                placeholder="22"
               />
             </div>
             <div className="field">
@@ -1838,6 +2188,7 @@ export default function SellerProducts() {
                 min="0"
                 value={form.heightCm}
                 onChange={handleFormChange("heightCm")}
+                placeholder="14"
               />
             </div>
           </div>
@@ -1851,6 +2202,7 @@ export default function SellerProducts() {
                 min="0"
                 value={form.deliveryMinDays}
                 onChange={handleFormChange("deliveryMinDays")}
+                placeholder="2"
               />
             </div>
             <div className="field">
@@ -1861,10 +2213,20 @@ export default function SellerProducts() {
                 min="0"
                 value={form.deliveryMaxDays}
                 onChange={handleFormChange("deliveryMaxDays")}
+                placeholder="5"
               />
             </div>
           </div>
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Details"
+              subtitle="Tags, shipping notes, return rules, and highlights."
+              tag="Optional"
+              icon="details"
+              wide
+            >
+              <div className="seller-product-copy-grid">
           <div className="field">
             <label htmlFor="newProductTags">Tags / keywords</label>
             <textarea
@@ -1930,7 +2292,16 @@ export default function SellerProducts() {
               placeholder="Hand-packed by seller&#10;Premium gifting finish"
             />
           </div>
+              </div>
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Packaging"
+              subtitle="Extra packaging styles customers can choose."
+              tag="Optional"
+              icon="packaging"
+              wide
+            >
           <PackagingStylesEditor
             idPrefix="newProduct"
             styles={form.packagingStyles}
@@ -1940,7 +2311,15 @@ export default function SellerProducts() {
               changePackagingStyle(setForm, styleId, field, value)
             }
           />
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Variants"
+              subtitle="Sizes, colors, material, and stock rows."
+              tag="Optional"
+              icon="variants"
+              wide
+            >
           <VariantsEditor
             idPrefix="newProduct"
             variants={form.variants}
@@ -1950,24 +2329,50 @@ export default function SellerProducts() {
               changeVariant(setForm, variantId, field, value)
             }
           />
-          <p className="field-hint">
-            When variants are added, product stock is auto-synced from the active variant stock total.
-          </p>
+          <p className="field-hint">Variant stock controls the live total stock for this product.</p>
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Customization"
+              subtitle="Customize existing products and build-your-own hampers separately."
+              tag="Optional"
+              icon="customization"
+            >
+          <div className="seller-product-toggle-row">
+            <div className="seller-product-toggle-copy">
+              <span>Customize existing product</span>
+              <strong>{form.isCustomizable ? "On" : "Off"}</strong>
+            </div>
+            <button
+              id="newProductCustomizable"
+              className={`seller-product-switch ${form.isCustomizable ? "on" : ""}`.trim()}
+              type="button"
+              role="switch"
+              aria-checked={form.isCustomizable}
+              onClick={toggleFeatureFor(setForm, "isCustomizable")}
+            >
+              <span />
+            </button>
+          </div>
+          <div className="seller-product-toggle-row">
+            <div className="seller-product-toggle-copy">
+              <span>Enable build your own hamper</span>
+              <strong>{form.buildYourOwnEnabled ? "On" : "Off"}</strong>
+            </div>
+            <button
+              id="newProductBuildYourOwnEnabled"
+              className={`seller-product-switch ${form.buildYourOwnEnabled ? "on" : ""}`.trim()}
+              type="button"
+              role="switch"
+              aria-checked={form.buildYourOwnEnabled}
+              onClick={toggleFeatureFor(setForm, "buildYourOwnEnabled")}
+            >
+              <span />
+            </button>
+          </div>
           <div className="field-row">
             <div className="field">
-              <label htmlFor="newProductCustomizable">Customizable product</label>
-              <input
-                id="newProductCustomizable"
-                type="checkbox"
-                checked={form.isCustomizable}
-                onChange={handleFormChange("isCustomizable")}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="newProductMakingCharge">
-                {form.isCustomizable ? "Making charge" : "Making charge (customizable only)"}
-              </label>
+              <label htmlFor="newProductMakingCharge">Customization charge</label>
               {form.isCustomizable ? (
                 <input
                   id="newProductMakingCharge"
@@ -1975,19 +2380,45 @@ export default function SellerProducts() {
                   min="0"
                   value={form.makingCharge}
                   onChange={handleFormChange("makingCharge")}
+                  placeholder="150"
                 />
               ) : (
                 <input
                   id="newProductMakingCharge"
                   type="text"
-                  value="Not applicable for ready-made"
+                  value="Turn on product customization"
+                  disabled
+                />
+              )}
+            </div>
+            <div className="field">
+              <label htmlFor="newProductBuildYourOwnPercent">Build your own hamper fee (%)</label>
+              {form.buildYourOwnEnabled ? (
+                <input
+                  id="newProductBuildYourOwnPercent"
+                  type="number"
+                  min="0"
+                  max={MAX_BUILD_PERCENT}
+                  step="0.01"
+                  value={form.buildYourOwnPercent}
+                  onChange={handleFormChange("buildYourOwnPercent")}
+                  placeholder="10"
+                />
+              ) : (
+                <input
+                  id="newProductBuildYourOwnPercent"
+                  type="text"
+                  value="Turn on build your own hamper"
                   disabled
                 />
               )}
             </div>
           </div>
+            </ProductFormSection>
 
-          <div className="seller-toolbar">
+          </div>
+
+          <div className="seller-toolbar seller-product-editor-actions">
             <button className="btn primary" type="button" onClick={createProduct} disabled={creating}>
               {creating ? "Adding..." : "Create product"}
             </button>
@@ -2010,11 +2441,19 @@ export default function SellerProducts() {
       )}
 
       {editingId && (
-        <div ref={editPanelRef} className="seller-panel">
-          <div className="card-head">
+        <div ref={editPanelRef} className="seller-panel seller-product-editor">
+          <div className="card-head seller-product-editor-head">
             <h3 className="card-title">Edit product</h3>
             <span className="chip">ID: {editingId.slice(-8).toUpperCase()}</span>
           </div>
+          <div className="seller-product-form-shell">
+            <ProductFormSection
+              title="Basics"
+              subtitle="Name, category, brand, and description."
+              tag="Required"
+              icon="basics"
+              wide
+            >
           <div className="field">
             <label htmlFor="editProductName">Product name</label>
             <input
@@ -2023,6 +2462,7 @@ export default function SellerProducts() {
               type="text"
               value={editForm.name}
               onChange={handleEditFormChange("name")}
+              placeholder="Ex: Birthday Frame Hamper"
             />
           </div>
 
@@ -2065,9 +2505,18 @@ export default function SellerProducts() {
               id="editProductDescription"
               value={editForm.description}
               onChange={handleEditFormChange("description")}
+              placeholder="Short product summary customers will read first."
             />
           </div>
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Media"
+              subtitle="Replace and reorder product images."
+              tag="Required"
+              icon="media"
+              wide
+            >
           <div className="field">
             <label htmlFor="editProductImageUpload">Replace product images</label>
             <input
@@ -2081,7 +2530,6 @@ export default function SellerProducts() {
             <p className="field-hint">
               Replace with up to {MAX_PRODUCT_IMAGES} JPG/PNG/WEBP images.
             </p>
-            <p className="field-hint">Replacement images are optimized automatically after upload.</p>
             {editForm.imageList.length > 0 && (
               <p className="field-hint">Selected: {editForm.imageList.length} image(s)</p>
             )}
@@ -2131,7 +2579,14 @@ export default function SellerProducts() {
               ))}
             </div>
           )}
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Pricing & stock"
+              subtitle="Price, stock, and listing status."
+              tag="Required"
+              icon="pricing"
+            >
           <div className="field-row">
             <div className="field">
               <label htmlFor="editProductPrice">Sale price</label>
@@ -2141,6 +2596,7 @@ export default function SellerProducts() {
                 min="1"
                 value={editForm.price}
                 onChange={handleEditFormChange("price")}
+                placeholder="799"
               />
             </div>
             <div className="field">
@@ -2151,6 +2607,7 @@ export default function SellerProducts() {
                 min="0"
                 value={editForm.mrp}
                 onChange={handleEditFormChange("mrp")}
+                placeholder="999"
               />
             </div>
             <div className="field">
@@ -2161,6 +2618,7 @@ export default function SellerProducts() {
                 min="0"
                 value={editForm.stock}
                 onChange={handleEditFormChange("stock")}
+                placeholder="12"
               />
             </div>
             <div className="field">
@@ -2185,6 +2643,7 @@ export default function SellerProducts() {
                 min="0"
                 value={editForm.lowStockThreshold}
                 onChange={handleEditFormChange("lowStockThreshold")}
+                placeholder="5"
               />
             </div>
             <div className="field">
@@ -2195,10 +2654,18 @@ export default function SellerProducts() {
                 min="0"
                 value={editForm.weightGrams}
                 onChange={handleEditFormChange("weightGrams")}
+                placeholder="750"
               />
             </div>
           </div>
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Delivery & invoice"
+              subtitle="SKU, tax, size, and delivery timing."
+              tag="Optional"
+              icon="delivery"
+            >
           <div className="field-row">
             <div className="field">
               <label htmlFor="editProductSku">SKU</label>
@@ -2231,13 +2698,10 @@ export default function SellerProducts() {
                 step="0.01"
                 value={editForm.taxRate}
                 onChange={handleEditFormChange("taxRate")}
+                placeholder="18"
               />
             </div>
           </div>
-          <p className="field-hint">
-            Optional invoice metadata used for seller, customer, and admin invoice downloads.
-          </p>
-
           <div className="field-row">
             <div className="field">
               <label htmlFor="editProductLengthCm">Length (cm)</label>
@@ -2247,6 +2711,7 @@ export default function SellerProducts() {
                 min="0"
                 value={editForm.lengthCm}
                 onChange={handleEditFormChange("lengthCm")}
+                placeholder="28"
               />
             </div>
             <div className="field">
@@ -2257,6 +2722,7 @@ export default function SellerProducts() {
                 min="0"
                 value={editForm.widthCm}
                 onChange={handleEditFormChange("widthCm")}
+                placeholder="22"
               />
             </div>
             <div className="field">
@@ -2267,6 +2733,7 @@ export default function SellerProducts() {
                 min="0"
                 value={editForm.heightCm}
                 onChange={handleEditFormChange("heightCm")}
+                placeholder="14"
               />
             </div>
           </div>
@@ -2280,6 +2747,7 @@ export default function SellerProducts() {
                 min="0"
                 value={editForm.deliveryMinDays}
                 onChange={handleEditFormChange("deliveryMinDays")}
+                placeholder="2"
               />
             </div>
             <div className="field">
@@ -2290,16 +2758,27 @@ export default function SellerProducts() {
                 min="0"
                 value={editForm.deliveryMaxDays}
                 onChange={handleEditFormChange("deliveryMaxDays")}
+                placeholder="5"
               />
             </div>
           </div>
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Details"
+              subtitle="Tags, shipping notes, return rules, and highlights."
+              tag="Optional"
+              icon="details"
+              wide
+            >
+              <div className="seller-product-copy-grid">
           <div className="field">
             <label htmlFor="editProductTags">Tags / keywords</label>
             <textarea
               id="editProductTags"
               value={editForm.tagsText}
               onChange={handleEditFormChange("tagsText")}
+              placeholder="birthday&#10;premium gifting&#10;corporate"
             />
           </div>
 
@@ -2309,6 +2788,7 @@ export default function SellerProducts() {
               id="editProductShippingInfo"
               value={editForm.shippingInfo}
               onChange={handleEditFormChange("shippingInfo")}
+              placeholder="Ships in rigid outer box. Keep upright while handing to courier."
             />
           </div>
 
@@ -2318,6 +2798,7 @@ export default function SellerProducts() {
               id="editProductReturnPolicy"
               value={editForm.returnPolicy}
               onChange={handleEditFormChange("returnPolicy")}
+              placeholder="Replacement only for transit damage reported within 48 hours."
             />
           </div>
 
@@ -2329,6 +2810,7 @@ export default function SellerProducts() {
               id="editProductOccasions"
               value={editForm.occasionsText}
               onChange={handleEditFormChange("occasionsText")}
+              placeholder="Birthday&#10;Anniversary&#10;Corporate gifting"
             />
           </div>
 
@@ -2340,6 +2822,7 @@ export default function SellerProducts() {
               id="editProductIncludedItems"
               value={editForm.includedItemsText}
               onChange={handleEditFormChange("includedItemsText")}
+              placeholder="Chocolate box&#10;Scented candle&#10;Greeting card"
             />
           </div>
 
@@ -2351,9 +2834,19 @@ export default function SellerProducts() {
               id="editProductHighlights"
               value={editForm.highlightsText}
               onChange={handleEditFormChange("highlightsText")}
+              placeholder="Hand-packed by seller&#10;Premium gifting finish"
             />
           </div>
+              </div>
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Packaging"
+              subtitle="Extra packaging styles customers can choose."
+              tag="Optional"
+              icon="packaging"
+              wide
+            >
           <PackagingStylesEditor
             idPrefix="editProduct"
             styles={editForm.packagingStyles}
@@ -2363,7 +2856,15 @@ export default function SellerProducts() {
               changePackagingStyle(setEditForm, styleId, field, value)
             }
           />
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Variants"
+              subtitle="Sizes, colors, material, and stock rows."
+              tag="Optional"
+              icon="variants"
+              wide
+            >
           <VariantsEditor
             idPrefix="editProduct"
             variants={editForm.variants}
@@ -2373,24 +2874,50 @@ export default function SellerProducts() {
               changeVariant(setEditForm, variantId, field, value)
             }
           />
-          <p className="field-hint">
-            Variant stock now controls the live total stock for this product.
-          </p>
+          <p className="field-hint">Variant stock controls the live total stock for this product.</p>
+            </ProductFormSection>
 
+            <ProductFormSection
+              title="Customization"
+              subtitle="Customize existing products and build-your-own hampers separately."
+              tag="Optional"
+              icon="customization"
+            >
+          <div className="seller-product-toggle-row">
+            <div className="seller-product-toggle-copy">
+              <span>Customize existing product</span>
+              <strong>{editForm.isCustomizable ? "On" : "Off"}</strong>
+            </div>
+            <button
+              id="editProductCustomizable"
+              className={`seller-product-switch ${editForm.isCustomizable ? "on" : ""}`.trim()}
+              type="button"
+              role="switch"
+              aria-checked={editForm.isCustomizable}
+              onClick={toggleFeatureFor(setEditForm, "isCustomizable")}
+            >
+              <span />
+            </button>
+          </div>
+          <div className="seller-product-toggle-row">
+            <div className="seller-product-toggle-copy">
+              <span>Enable build your own hamper</span>
+              <strong>{editForm.buildYourOwnEnabled ? "On" : "Off"}</strong>
+            </div>
+            <button
+              id="editProductBuildYourOwnEnabled"
+              className={`seller-product-switch ${editForm.buildYourOwnEnabled ? "on" : ""}`.trim()}
+              type="button"
+              role="switch"
+              aria-checked={editForm.buildYourOwnEnabled}
+              onClick={toggleFeatureFor(setEditForm, "buildYourOwnEnabled")}
+            >
+              <span />
+            </button>
+          </div>
           <div className="field-row">
             <div className="field">
-              <label htmlFor="editProductCustomizable">Customizable product</label>
-              <input
-                id="editProductCustomizable"
-                type="checkbox"
-                checked={editForm.isCustomizable}
-                onChange={handleEditFormChange("isCustomizable")}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="editProductMakingCharge">
-                {editForm.isCustomizable ? "Making charge" : "Making charge (customizable only)"}
-              </label>
+              <label htmlFor="editProductMakingCharge">Customization charge</label>
               {editForm.isCustomizable ? (
                 <input
                   id="editProductMakingCharge"
@@ -2398,19 +2925,45 @@ export default function SellerProducts() {
                   min="0"
                   value={editForm.makingCharge}
                   onChange={handleEditFormChange("makingCharge")}
+                  placeholder="150"
                 />
               ) : (
                 <input
                   id="editProductMakingCharge"
                   type="text"
-                  value="Not applicable for ready-made"
+                  value="Turn on product customization"
+                  disabled
+                />
+              )}
+            </div>
+            <div className="field">
+              <label htmlFor="editProductBuildYourOwnPercent">Build your own hamper fee (%)</label>
+              {editForm.buildYourOwnEnabled ? (
+                <input
+                  id="editProductBuildYourOwnPercent"
+                  type="number"
+                  min="0"
+                  max={MAX_BUILD_PERCENT}
+                  step="0.01"
+                  value={editForm.buildYourOwnPercent}
+                  onChange={handleEditFormChange("buildYourOwnPercent")}
+                  placeholder="10"
+                />
+              ) : (
+                <input
+                  id="editProductBuildYourOwnPercent"
+                  type="text"
+                  value="Turn on build your own hamper"
                   disabled
                 />
               )}
             </div>
           </div>
+            </ProductFormSection>
 
-          <div className="seller-toolbar">
+          </div>
+
+          <div className="seller-toolbar seller-product-editor-actions">
             <button
               className="btn primary"
               type="button"
@@ -2432,10 +2985,21 @@ export default function SellerProducts() {
       )}
 
       {error && <p className="field-hint">{error}</p>}
-      {notice && <p className="field-hint">{notice}</p>}
-      {!error && visibleProducts.length === 0 && (
-        <p className="field-hint">No products found for this filter.</p>
-      )}
+      <div className="seller-panel seller-products-list-shell">
+        <div className="card-head seller-products-list-head">
+          <div>
+            <h3 className="card-title">All products</h3>
+            <p className="field-hint">
+              Showing {visibleProducts.length} of {products.length}
+            </p>
+          </div>
+          {lowStockOnly ? <span className="chip">Low stock filter</span> : null}
+        </div>
+
+        {notice && <p className="field-hint">{notice}</p>}
+        {!error && visibleProducts.length === 0 && (
+          <p className="field-hint">No products found for this filter.</p>
+        )}
 
       <div className="product-grid seller-products-grid">
         {visibleProducts.map((item) => (
@@ -2451,9 +3015,7 @@ export default function SellerProducts() {
             <div className="product-body">
               <div className="product-top">
                 <h3>{item.name}</h3>
-                <span className="chip">
-                  {item.isCustomizable ? "Customizable" : "Ready-made"}
-                </span>
+                <span className="chip">{getProductCapabilityLabel(item)}</span>
               </div>
               <div className="product-meta">
                 {item.brand ? <span>{item.brand}</span> : null}
@@ -2518,10 +3080,19 @@ export default function SellerProducts() {
                     MRP ₹{Number(item.mrp || 0).toLocaleString("en-IN")}
                   </span>
                 ) : null}
-                {item.isCustomizable ? (
-                  <span className="muted">
-                    Making charge: ₹{Number(item.makingCharge || 0).toLocaleString("en-IN")}
-                  </span>
+                {item.isCustomizable || isBuildYourOwnEnabled(item) ? (
+                  <>
+                    {item.isCustomizable ? (
+                      <span className="muted">
+                        Customization: ₹{Number(item.makingCharge || 0).toLocaleString("en-IN")}
+                      </span>
+                    ) : null}
+                    {isBuildYourOwnEnabled(item) ? (
+                      <span className="muted">
+                        Build fee: {Number(resolveBuildYourOwnPercent(item)).toLocaleString("en-IN")}%
+                      </span>
+                    ) : null}
+                  </>
                 ) : (
                   <span className="muted">Ready-made (no making charge)</span>
                 )}
@@ -2585,6 +3156,7 @@ export default function SellerProducts() {
             </div>
           </article>
         ))}
+      </div>
       </div>
     </div>
   );

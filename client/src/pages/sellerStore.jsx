@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
+import SellerWorkspaceTopbar from "../components/SellerWorkspaceTopbar";
 import ProductHoverImage from "../components/ProductHoverImage";
 import { optimizeImageFile } from "../utils/imageUpload";
 import { getProductImage } from "../utils/productMedia";
@@ -980,7 +981,16 @@ export default function SellerStore({ sellerWorkspaceMode = false }) {
           : "page seller-store-page"
       }
     >
-      {!showWorkspaceShell ? <Header variant={isOwnerSeller ? "seller" : undefined} /> : null}
+      {!showWorkspaceShell ? (
+        isOwnerSeller ? (
+          <SellerWorkspaceTopbar
+            brandPath="/seller/dashboard"
+            sellerStorePath={`/seller/store/${sellerId}`}
+          />
+        ) : (
+          <Header />
+        )
+      ) : null}
       <div className="seller-store-shell">
         <div className="seller-store-headline">
           <div>

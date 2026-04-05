@@ -189,6 +189,9 @@ const flattenProductItems = (product) =>
       })
   );
 
+const isBuildEnabledForProduct = (product = {}) =>
+  Boolean(product?.buildYourOwnEnabled ?? product?.isCustomizable);
+
 const toCatalogPayload = (baseCategories = [], items = []) => {
   const safeItems = (Array.isArray(items) ? items : [])
     .map((item) => {
@@ -313,7 +316,7 @@ export default function SellerListedItems() {
   }, []);
 
   const customizableProducts = useMemo(
-    () => (Array.isArray(products) ? products : []).filter((product) => Boolean(product?.isCustomizable)),
+    () => (Array.isArray(products) ? products : []).filter((product) => isBuildEnabledForProduct(product)),
     [products]
   );
 
@@ -343,7 +346,7 @@ export default function SellerListedItems() {
 
       const list = Array.isArray(productData) ? productData : [];
       setProducts(list);
-      const customizableList = list.filter((product) => Boolean(product?.isCustomizable));
+      const customizableList = list.filter((product) => isBuildEnabledForProduct(product));
 
       const seedProduct =
         customizableList.find(
@@ -363,7 +366,7 @@ export default function SellerListedItems() {
       setMainItemMode("select");
       if (customizableList.length === 0) {
         setNotice(
-          "Create at least one customizable product to use seller-wide hamper items."
+          "Enable build your own hamper on at least one product to use seller-wide hamper items."
         );
       }
     } catch {
@@ -604,7 +607,7 @@ export default function SellerListedItems() {
   ) => {
     if (customizableProducts.length === 0) {
       setError(
-        "No customizable products found. Create one customizable product to save these seller-wide hamper items."
+        "No build-your-own hamper products found. Enable build your own hamper on one product to save these seller-wide hamper items."
       );
       return false;
     }
@@ -646,7 +649,9 @@ export default function SellerListedItems() {
       setProducts((current) =>
         current.map((product) => ({
           ...product,
-          customizationCatalog: product?.isCustomizable ? payloadCatalog : product?.customizationCatalog || [],
+          customizationCatalog: isBuildEnabledForProduct(product)
+            ? payloadCatalog
+            : product?.customizationCatalog || [],
         }))
       );
       setBaseCategories(extractBaseCategories({ customizationCatalog: payloadCatalog }));
@@ -965,7 +970,7 @@ export default function SellerListedItems() {
       {notice && <p className="field-hint">{notice}</p>}
       {products.length > 0 && customizableProducts.length === 0 && (
         <p className="field-hint">
-          Mark at least one product as customizable to use seller-wide hamper items in customer
+          Enable build your own hamper on at least one product to use seller-wide hamper items in customer
           flows.
         </p>
       )}

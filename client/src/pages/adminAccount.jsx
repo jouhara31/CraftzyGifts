@@ -2587,7 +2587,6 @@ export default function AdminAccount() {
               className={`admin-profile-tab ${activeTab === tab.id ? "active" : ""}`.trim()}
               onClick={() => setActiveTab(tab.id)}
             >
-              <span className="admin-profile-tab-icon">{tab.icon}</span>
               <span>{tab.label}</span>
             </button>
           ))}

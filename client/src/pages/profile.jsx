@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
+import SellerWorkspaceTopbar from "../components/SellerWorkspaceTopbar";
 import logoPng from "../assets/logo.png";
 import { addToCart } from "../utils/cart";
 import { optimizeImageFile } from "../utils/imageUpload";
@@ -15,11 +16,13 @@ import {
   logoutSession,
   persistStoredUser,
   readStoredUser,
+  readStoredUserId,
 } from "../utils/authSession";
 import {
   buildSellerSidebarSections,
   isWorkspacePathActive,
 } from "../utils/sellerWorkspace";
+import { readStoredSessionClaims } from "../utils/authRoute";
 
 const ROLE_LABEL = {
   customer: "Customer",
@@ -146,6 +149,17 @@ const buildSidebarSections = (role, { sellerStorePath = "/seller/dashboard" } = 
     },
   ];
 };
+
+const buildPendingSellerSidebarSections = () => [
+  {
+    title: "Seller Account",
+    items: [
+      { label: "Profile Information", active: true },
+      { label: "Message Admin", path: "/seller/messages" },
+      { label: "Back to home", path: "/" },
+    ],
+  },
+];
 
 const ProfileMenuIcon = ({ name }) => {
   const key = String(name || "").toLowerCase();
@@ -416,6 +430,7 @@ const fetchRoleOverview = async (role) => {
 
 export default function Profile() {
   const location = useLocation();
+  const sessionClaims = readStoredSessionClaims();
   const [profile, setProfile] = useState(null);
   const [overview, setOverview] = useState({ cards: [], rowsTitle: "", rows: [] });
   const [customerOrders, setCustomerOrders] = useState([]);
@@ -431,17 +446,30 @@ export default function Profile() {
   const profileImageInputRef = useRef(null);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const role = profile?.role || "customer";
-  const headerVariant =
-    role === "seller" ? "seller" : role === "admin" ? "admin" : undefined;
+  const role = profile?.role || sessionClaims.role || "customer";
+  const headerVariant = role === "admin" ? "admin" : undefined;
   const roleLabel = ROLE_LABEL[role] || "Customer";
-  const sellerStorePath =
-    role === "seller" && String(profile?.id || profile?._id || "").trim()
-      ? `/seller/store/${String(profile?.id || profile?._id || "").trim()}`
+  const resolvedSellerId = String(
+    profile?.id || profile?._id || readStoredUserId() || ""
+  ).trim();
+  const normalizedSellerStatus = String(
+    profile?.sellerStatus || sessionClaims.sellerStatus || ""
+  )
+    .trim()
+    .toLowerCase();
+  const isApprovedSeller = role !== "seller" || normalizedSellerStatus === "approved";
+  const sellerWorkspacePath =
+    role === "seller" && resolvedSellerId
+      ? `/seller/store/${resolvedSellerId}`
       : "/seller/dashboard";
+  const sellerPublicStorePath =
+    role === "seller" && resolvedSellerId ? `/store/${resolvedSellerId}` : "/";
   const sidebarSections = useMemo(
-    () => buildSidebarSections(role, { sellerStorePath }),
-    [role, sellerStorePath]
+    () =>
+      role === "seller" && !isApprovedSeller
+        ? buildPendingSellerSidebarSections()
+        : buildSidebarSections(role, { sellerStorePath: sellerWorkspacePath }),
+    [isApprovedSeller, role, sellerWorkspacePath]
   );
   const isSellerProfileViewOnly = role === "seller";
   const isCustomerProfile = role === "customer";
@@ -502,6 +530,7 @@ export default function Profile() {
           phone: data.phone,
           profileImage: data.profileImage,
         };
+        const normalizedSellerStatus = String(data?.sellerStatus || "").trim().toLowerCase();
         if (data.role === "admin") {
           persistStoredUser(nextUserSnapshot);
           navigate("/admin/account", { replace: true });
@@ -510,14 +539,14 @@ export default function Profile() {
         if (data.role === "seller") {
           persistStoredUser(nextUserSnapshot);
           const sellerProfileId = String(data.id || data._id || "").trim();
-          if (sellerProfileId) {
+          if (normalizedSellerStatus === "approved" && sellerProfileId) {
             navigate(`/seller/store/${sellerProfileId}`, { replace: true });
             return;
           }
         }
         setProfile(data);
         setOverviewError("");
-        if (data.role === "customer") {
+        if (data.role === "customer" || (data.role === "seller" && normalizedSellerStatus !== "approved")) {
           setOverview({ cards: [], rowsTitle: "", rows: [] });
         } else {
           try {
@@ -1019,7 +1048,14 @@ export default function Profile() {
 
   return (
     <div className={pageClassName}>
-      <Header variant={headerVariant} />
+      {role === "seller" ? (
+        <SellerWorkspaceTopbar
+          brandPath={isApprovedSeller ? "/seller/dashboard" : "/profile"}
+          sellerStorePath={isApprovedSeller ? sellerWorkspacePath : sellerPublicStorePath}
+        />
+      ) : (
+        <Header variant={headerVariant} />
+      )}
       {isCustomerProfile && (
         <div className="profile-topbar">
           <div className="profile-topbar-brand">
@@ -1041,7 +1077,7 @@ export default function Profile() {
         <div>
           <h2>{isSellerProfileViewOnly ? "Seller Profile" : "My Account"}</h2>
         </div>
-        {!isCustomerProfile && (
+        {!isCustomerProfile && (role !== "seller" || isApprovedSeller) && (
           <Link className="link" to={ordersPath}>
             View orders
           </Link>
@@ -1251,8 +1287,8 @@ export default function Profile() {
                       </div>
                     </div>
                     <div className="seller-profile-hero-actions">
-                      <Link className="btn ghost" to="/seller/settings">
-                        Edit Store
+                      <Link className="btn ghost" to={isApprovedSeller ? "/seller/settings" : "/seller/messages"}>
+                        {isApprovedSeller ? "Edit Store" : "Message admin"}
                       </Link>
                     </div>
                   </div>
@@ -1305,33 +1341,35 @@ export default function Profile() {
                   </div>
                 </div>
 
-                <div className="profile-card">
-                  <div className="card-head">
-                    <h3 className="card-title">{roleLabel} Overview</h3>
+                {(role !== "seller" || isApprovedSeller || overviewError || overview.cards.length > 0 || overview.rows.length > 0) && (
+                  <div className="profile-card">
+                    <div className="card-head">
+                      <h3 className="card-title">{roleLabel} Overview</h3>
+                    </div>
+                    {overviewError && <p className="field-hint">{overviewError}</p>}
+                    {!overviewError && overview.cards.length > 0 && (
+                      <div className="stat-grid">
+                        {overview.cards.map((card) => (
+                          <div key={card.label} className="stat-card">
+                            <p className="stat-label">{card.label}</p>
+                            <p className="stat-value">{card.value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {!overviewError && overview.rows.length > 0 && (
+                      <div className="profile-role-table">
+                        <p className="profile-menu-title">{overview.rowsTitle}</p>
+                        {overview.rows.map((row) => (
+                          <div key={`${row.key}-${row.value}`} className="profile-role-row">
+                            <span className="profile-role-key">{row.key}</span>
+                            <span className="profile-role-value">{row.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  {overviewError && <p className="field-hint">{overviewError}</p>}
-                  {!overviewError && overview.cards.length > 0 && (
-                    <div className="stat-grid">
-                      {overview.cards.map((card) => (
-                        <div key={card.label} className="stat-card">
-                          <p className="stat-label">{card.label}</p>
-                          <p className="stat-value">{card.value}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {!overviewError && overview.rows.length > 0 && (
-                    <div className="profile-role-table">
-                      <p className="profile-menu-title">{overview.rowsTitle}</p>
-                      {overview.rows.map((row) => (
-                        <div key={`${row.key}-${row.value}`} className="profile-role-row">
-                          <span className="profile-role-key">{row.key}</span>
-                          <span className="profile-role-value">{row.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                )}
               </>
             )}
           </main>

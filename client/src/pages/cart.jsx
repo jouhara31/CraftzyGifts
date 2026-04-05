@@ -136,7 +136,7 @@ export default function Cart() {
   );
   const customizationChargeLabel =
     items.length > 0 && items.every((item) => isGenericHamperItem(item))
-      ? "Making charge"
+      ? "Build total"
       : "Customization charges";
   const itemsTotal = subtotal + customizationTotal;
   const deliveryCharge = itemsTotal >= 999 ? 0 : 99;

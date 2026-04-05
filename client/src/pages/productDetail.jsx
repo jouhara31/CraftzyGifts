@@ -283,6 +283,7 @@ export default function ProductDetail() {
   }, [wishlistNotice]);
 
   const isCustomizationEnabled = Boolean(product?.isCustomizable);
+  const isBuildYourOwnEnabled = Boolean(product?.buildYourOwnEnabled ?? product?.isCustomizable);
   const baseMakingCharge = Number(product?.makingCharge || 0);
   const readyMadeVariants = useMemo(
     () => normalizeProductVariants(product?.variants),
@@ -631,6 +632,7 @@ export default function ProductDetail() {
       price: unitPrice,
       mrp,
       isCustomizable: product.isCustomizable,
+      buildYourOwnEnabled: isBuildYourOwnEnabled,
       quantity,
       category: product.category,
       deliveryMinDays,
@@ -708,6 +710,10 @@ export default function ProductDetail() {
     }
     if (!sellerId) {
       setNotice("Store details are unavailable right now. The hamper builder will be back shortly.");
+      return;
+    }
+    if (!isBuildYourOwnEnabled) {
+      setNotice("Build your own hamper is not enabled for this product.");
       return;
     }
     const params = new URLSearchParams();
@@ -813,7 +819,13 @@ export default function ProductDetail() {
                       <span className="pdp-rating-copy">No ratings yet</span>
                     )}
                     <span className="pdp-rating-copy">
-                      {isCustomizationEnabled ? "Customizable" : "Ready-made"}
+                      {isCustomizationEnabled && isBuildYourOwnEnabled
+                        ? "Custom + Build"
+                        : isCustomizationEnabled
+                          ? "Customizable"
+                          : isBuildYourOwnEnabled
+                            ? "Build-your-own"
+                            : "Ready-made"}
                     </span>
                   </div>
                 </div>
@@ -1189,7 +1201,7 @@ export default function ProductDetail() {
                     </button>
                   )}
                 </div>
-                {sellerId && (
+                {sellerId && isBuildYourOwnEnabled && (
                   <div className="pdp-build-helper">
                     <span>Want a fully custom hamper?</span>
                     <button

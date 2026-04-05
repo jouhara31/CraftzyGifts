@@ -18,10 +18,6 @@ import {
 import { readStoredSessionClaims } from "../utils/authRoute";
 import { openNotificationStream } from "../utils/notificationStream";
 import {
-  buildSellerHeaderNavItems,
-  isWorkspacePathActive,
-} from "../utils/sellerWorkspace";
-import {
   DEFAULT_CATEGORY_TREE,
   buildCategoryPath,
   loadCategoryTree,
@@ -236,7 +232,6 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const categoriesMenuRef = useRef(null);
   const categoryLinksRef = useRef(null);
   const isAuthNav = variant === "auth";
-  const isSellerNav = variant === "seller";
   const isCartRoute = location.pathname === "/cart";
   const brandLogo = isCartRoute ? logoCartPng : logoPng;
   const brandLabel = isCartRoute ? "Your Cart" : platformName;
@@ -392,8 +387,8 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       window.innerWidth || 0,
       document.documentElement?.clientWidth || 0
     );
-    const minWidth = isSellerNav ? 180 : 240;
-    const maxWidth = isSellerNav ? 220 : 320;
+    const minWidth = 240;
+    const maxWidth = 320;
     const width = Math.max(minWidth, Math.min(maxWidth, viewportWidth - 24));
     const left = Math.max(12, Math.min(rect.right - width, viewportWidth - width - 12));
 
@@ -404,7 +399,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       right: "auto",
       width: `${Math.round(width)}px`,
     });
-  }, [isSellerNav]);
+  }, []);
 
   const getNotificationAnchor = () => {
     const candidates = [notificationButtonRef.current, notificationMobileButtonRef.current];
@@ -509,14 +504,9 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
   const effectiveUserRole = String(user?.role || readStoredSessionClaims().role || "")
     .trim()
     .toLowerCase();
-  const accountMenuUsesStore = isSellerNav || effectiveUserRole === "seller";
-  const sellerNameLabel = (user?.storeName || user?.name || "Seller").trim() || "Seller";
-  const sellerAvatarSrc =
-    user?.profileImage || user?.avatar || user?.photo || user?.image || user?.imageUrl || "";
-  const sellerAvatarInitial = sellerNameLabel.slice(0, 1).toUpperCase() || "S";
+  const accountMenuUsesStore = effectiveUserRole === "seller";
   const sellerId = String(user?.id || user?._id || readStoredUserId()).trim();
   const sellerStorePath = sellerId ? `/seller/store/${sellerId}` : "/seller/dashboard";
-  const sellerHeaderNavItems = buildSellerHeaderNavItems({ sellerStorePath });
   const accountMenuPath = accountMenuUsesStore ? sellerStorePath : "/profile";
   const accountMenuLabel = accountMenuUsesStore ? "My Store" : "My Profile";
   const accountMenuIcon = accountMenuUsesStore ? "seller" : "profile";
@@ -548,8 +538,8 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     { label: "Contact", href: "/#support" },
   ];
   const isCustomerUser = Boolean(user) && (!effectiveUserRole || effectiveUserRole === "customer");
-  const showCustomerNotification = isCustomerUser && !isSellerNav && !isAuthNav;
-  const showNotificationMenu = isSellerNav || showCustomerNotification;
+  const showCustomerNotification = isCustomerUser && !isAuthNav;
+  const showNotificationMenu = showCustomerNotification;
   const customerBottomNavItems = [
     { label: "Home", to: "/", icon: "home", active: location.pathname === "/" },
     {
@@ -642,7 +632,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
     let active = true;
     let intervalId = null;
     let hasLoadedOnce = false;
-    const eventName = isSellerNav ? "seller:notifications-updated" : "customer:notifications-updated";
+    const eventName = "customer:notifications-updated";
 
     const fetchNotifications = async () => {
       if (!hasActiveSession()) return;
@@ -688,7 +678,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       window.removeEventListener(eventName, fetchNotifications);
       closeStream();
     };
-  }, [isSellerNav, navigate, showNotificationMenu, user]);
+  }, [navigate, showNotificationMenu, user]);
 
   const markNotificationsRead = async ({ ids = [], all = false } = {}) => {
     if (!hasActiveSession()) return null;
@@ -720,9 +710,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
         )
       );
       setNotificationUnreadCount(Math.max(0, Number(data?.unreadCount || 0)));
-      window.dispatchEvent(
-        new Event(isSellerNav ? "seller:notifications-updated" : "customer:notifications-updated")
-      );
+      window.dispatchEvent(new Event("customer:notifications-updated"));
       return data;
     } catch {
       return null;
@@ -736,7 +724,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       await markNotificationsRead({ ids: [itemId] });
     }
     setNotificationOpen(false);
-    navigate(nextLink || (isSellerNav ? "/seller/dashboard" : "/orders"));
+    navigate(nextLink || "/orders");
   };
 
   useEffect(() => {
@@ -767,16 +755,14 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       window.removeEventListener("resize", syncPosition);
       window.removeEventListener("scroll", syncPosition, true);
     };
-  }, [accountOpen, isSellerNav, updateAccountMenuPosition]);
+  }, [accountOpen, updateAccountMenuPosition]);
 
   const notificationDropdown =
     showNotificationMenu && notificationOpen && typeof document !== "undefined"
       ? createPortal(
           <div
             ref={notificationDropdownRef}
-            className={`account-dropdown seller-notification-dropdown ${
-              isSellerNav ? "" : "customer-notification-dropdown"
-            }`}
+            className="account-dropdown seller-notification-dropdown customer-notification-dropdown"
             role="menu"
             style={
               notificationMenuStyle || {
@@ -829,10 +815,10 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               type="button"
               onClick={() => {
                 setNotificationOpen(false);
-                navigate(isSellerNav ? "/seller/dashboard" : "/orders");
+                navigate("/orders");
               }}
             >
-              {isSellerNav ? "View all in dashboard" : "View all orders"}
+              View all orders
             </button>
           </div>,
           document.body
@@ -844,17 +830,15 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       ? createPortal(
           <div
             ref={accountDropdownRef}
-            className={`account-dropdown ${isSellerNav ? "seller-account-dropdown" : ""}`}
+            className="account-dropdown"
             role="menu"
             style={
               accountMenuStyle || {
                 position: "fixed",
-                top: isSellerNav ? "64px" : "76px",
+                top: "76px",
                 right: "12px",
                 left: "auto",
-                width: isSellerNav
-                  ? "min(220px, calc(100vw - 24px))"
-                  : "min(240px, calc(100vw - 24px))",
+                width: "min(240px, calc(100vw - 24px))",
               }
             }
           >
@@ -877,7 +861,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                   {accountMenuLabel}
                 </button>
                 <button
-                  className={`dropdown-item with-icon ${isSellerNav ? "danger" : ""}`}
+                  className="dropdown-item with-icon"
                   type="button"
                   onClick={handleLogout}
                 >
@@ -1051,148 +1035,6 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
             </Link>
           )}
         </nav>
-      </header>
-    );
-  }
-
-  if (isSellerNav) {
-      return (
-        <header
-          className={`main-header seller-header seller-nav-header${mobileMenuOpen ? " mobile-menu-open" : ""}${
-            mobileSearchOpen ? " mobile-search-open" : ""
-          }`}
-        >
-          <Link className="brand" to="/">
-            <img src={brandLogo} alt={`${platformName} logo`} className="brand-logo-head" />
-            <span className="brand-head-copy">
-              <span className="brand-head-text">{brandLabel}</span>
-              {brandSubtext && <span className="brand-head-sub">{brandSubtext}</span>}
-            </span>
-          </Link>
-
-          <form className="search wide seller-search-form" onSubmit={handleCatalogSearch}>
-            <input
-              className="search-input seller-search-input"
-              type="search"
-              placeholder="Search hampers, gifts..."
-              value={searchText}
-              onChange={(event) => setSearchText(event.target.value)}
-            />
-            <button className="seller-search-submit" type="submit" aria-label="Search">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle
-                  cx="11"
-                  cy="11"
-                  r="6.5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                />
-                <path d="M16 16l4.2 4.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
-              </svg>
-            </button>
-          </form>
-
-          <div className="seller-profile-wrap">
-            <div className="seller-mobile-actions">
-              <button
-                className={`icon-btn mobile-header-btn ${mobileSearchOpen ? "active" : ""}`}
-                type="button"
-                aria-label={mobileSearchOpen ? "Close search" : "Open search"}
-                aria-expanded={mobileSearchOpen}
-                onClick={toggleMobileSearch}
-              >
-                <HeaderUtilityIcon kind={mobileSearchOpen ? "close" : "search"} />
-              </button>
-              <button
-                className={`icon-btn mobile-header-btn ${mobileMenuOpen ? "active" : ""}`}
-                type="button"
-                aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
-                aria-expanded={mobileMenuOpen}
-                onClick={toggleMobileMenu}
-              >
-                <HeaderUtilityIcon kind={mobileMenuOpen ? "close" : "menu"} />
-              </button>
-            </div>
-            <div className="seller-notification-menu">
-              <button
-                ref={notificationButtonRef}
-                className={`icon-btn seller-notification-btn ${notificationOpen ? "active" : ""}`}
-                type="button"
-                aria-label="Notifications"
-                aria-haspopup="menu"
-                aria-expanded={notificationOpen}
-                onClick={() => {
-                  if (!notificationOpen) {
-                    updateNotificationMenuPosition();
-                  }
-                  setNotificationOpen((prev) => !prev);
-                }}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M12 4.5a4 4 0 0 1 4 4v2.5c0 1.5.5 2.7 1.5 3.7l.8.8H5.7l.8-.8c1-1 1.5-2.2 1.5-3.7V8.5a4 4 0 0 1 4-4z"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M10.2 18.2a2 2 0 0 0 3.6 0"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <span className="seller-notification-label">Alerts</span>
-                {notificationUnreadCount > 0 && (
-                  <span className="icon-badge">{notificationUnreadCount}</span>
-                )}
-              </button>
-            </div>
-            <Link className="seller-help-link" to="/seller/messages">
-              Support
-            </Link>
-            <span className="seller-profile-name">{sellerNameLabel}</span>
-            <div className="icon-group seller-icon-group">
-              <div className="account-menu seller-account-menu">
-                <button
-                  ref={accountButtonRef}
-                  className={`icon-btn profile-icon-btn ${sellerAvatarSrc ? "has-avatar" : ""} ${
-                    accountOpen ? "active" : ""
-                  }`}
-                  type="button"
-                  aria-label="Account menu"
-                  aria-haspopup="menu"
-                  aria-expanded={accountOpen}
-                  onClick={toggleAccountMenu}
-                >
-                  {sellerAvatarSrc ? (
-                    <img className="seller-avatar-thumb" src={sellerAvatarSrc} alt={sellerNameLabel} />
-                  ) : (
-                    <span className="seller-avatar-fallback">{sellerAvatarInitial}</span>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-          {notificationDropdown}
-          {accountDropdown}
-
-          <nav className="nav-links">
-            {sellerHeaderNavItems.map((item) => (
-              <Link
-                key={item.id}
-                className={`nav-link ${isWorkspacePathActive(location, item) ? "active" : ""}`}
-                to={item.path}
-                onClick={closeMobileMenu}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
       </header>
     );
   }

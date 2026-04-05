@@ -9,6 +9,7 @@ const { handleControllerError } = require("../utils/apiError");
 const MAX_SELLING_PRICE = 200000;
 const MAX_MRP = 500000;
 const MAX_SURCHARGE = 50000;
+const MAX_BUILD_PERCENT = 100;
 const MAX_SKU_LENGTH = 48;
 const MAX_HSN_LENGTH = 8;
 const MAX_TAX_RATE = 50;
@@ -775,6 +776,23 @@ const parseCustomizationCatalog = (value, fallback = []) => {
     .filter(Boolean);
 };
 
+const isBuildYourOwnEnabled = (product = {}) =>
+  Boolean(product?.buildYourOwnEnabled ?? product?.isCustomizable);
+
+const resolveBuildYourOwnPercent = (product = {}) => {
+  const directValue = Number(product?.buildYourOwnPercent);
+  if (Number.isFinite(directValue) && directValue >= 0) {
+    return roundMoney(directValue);
+  }
+
+  const legacyValue = Number(product?.buildYourOwnCharge);
+  if (Number.isFinite(legacyValue) && legacyValue >= 0 && legacyValue <= MAX_BUILD_PERCENT) {
+    return roundMoney(legacyValue);
+  }
+
+  return 0;
+};
+
 const BLOCKED_PRODUCT_TERMS = [
   "counterfeit",
   "fake",
@@ -1217,17 +1235,19 @@ exports.getSellerProducts = async (req, res) => {
 
 exports.saveSellerCustomizationCatalog = async (req, res) => {
   try {
-    const customizableProducts = await Product.find({
+    const buildEnabledProducts = await Product.find({
       seller: req.user.id,
-      isCustomizable: true,
     })
-      .select("_id")
+      .select("_id isCustomizable buildYourOwnEnabled")
       .lean();
+    const targetProducts = buildEnabledProducts.filter((product) =>
+      isBuildYourOwnEnabled(product)
+    );
 
-    if (!Array.isArray(customizableProducts) || customizableProducts.length === 0) {
+    if (!Array.isArray(targetProducts) || targetProducts.length === 0) {
       return res.status(400).json({
         message:
-          "No customizable products found. Create at least one customizable product first.",
+          "No build-your-own hamper products found. Enable build your own hamper on at least one product first.",
       });
     }
 
@@ -1235,8 +1255,7 @@ exports.saveSellerCustomizationCatalog = async (req, res) => {
 
     await Product.updateMany(
       {
-        seller: req.user.id,
-        isCustomizable: true,
+        _id: { $in: targetProducts.map((product) => product._id) },
       },
       {
         $set: { customizationCatalog },
@@ -1245,7 +1264,7 @@ exports.saveSellerCustomizationCatalog = async (req, res) => {
 
     return res.json({
       customizationCatalog,
-      publishedCount: customizableProducts.length,
+      publishedCount: targetProducts.length,
     });
   } catch (error) {
     return handleControllerError(res, error);
@@ -1279,20 +1298,20 @@ exports.getSellerCustomizationCatalog = async (req, res) => {
     const visibility = getPublicVisibilityFilter();
     const productFilter = {
       seller: sellerId,
-      isCustomizable: true,
       $and: visibility.$and,
     };
-    const products = await Product.find(productFilter)
+    const sellerProducts = await Product.find(productFilter)
       .select(
-        "name price makingCharge customizationCatalog customizationOptions seller isCustomizable"
+        "name price makingCharge buildYourOwnPercent buildYourOwnCharge customizationCatalog customizationOptions seller isCustomizable buildYourOwnEnabled"
       )
       .sort({ createdAt: -1 })
       .lean();
+    const products = sellerProducts.filter((product) => isBuildYourOwnEnabled(product));
 
     if (!Array.isArray(products) || products.length === 0) {
       return res
         .status(404)
-        .json({ message: "Seller has no customizable products yet." });
+        .json({ message: "Seller has no build-your-own hamper products yet." });
     }
 
     const hasCatalogItems = (product) =>
@@ -1311,15 +1330,12 @@ exports.getSellerCustomizationCatalog = async (req, res) => {
         .json({ message: "Seller hamper catalog not found." });
     }
 
-    const charges = products
-      .map((product) => Number(product?.makingCharge || 0))
-      .filter((value) => Number.isFinite(value) && value > 0);
-    const sellerMinimumCharge = charges.length > 0 ? Math.min(...charges) : 0;
+    const sellerBuildFeePercent = Number(resolveBuildYourOwnPercent(catalogProduct));
 
     res.json({
       seller,
       catalogProductId,
-      sellerMinimumCharge,
+      sellerBuildFeePercent,
       catalogProduct,
     });
   } catch (error) {
@@ -1614,19 +1630,42 @@ exports.createProduct = async (req, res) => {
 
     const requestedStock = parseStock(req.body.stock, 0);
     const isCustomizable = parseBoolean(req.body.isCustomizable, false);
+    const buildYourOwnEnabled = parseBoolean(req.body.buildYourOwnEnabled, isCustomizable);
     const makingChargeInput = isCustomizable
       ? parseMoneyInput(req.body.makingCharge, 0)
+      : 0;
+    const buildYourOwnPercentInput = buildYourOwnEnabled
+      ? parseMoneyInput(
+          req.body.buildYourOwnPercent ?? req.body.buildYourOwnCharge ?? req.body.makingCharge,
+          0
+        )
       : 0;
     if (isCustomizable && !Number.isFinite(makingChargeInput)) {
       return res.status(400).json({ message: "Making charge must be a valid number." });
     }
+    if (buildYourOwnEnabled && !Number.isFinite(buildYourOwnPercentInput)) {
+      return res
+        .status(400)
+        .json({ message: "Build-your-own hamper fee percentage must be a valid number." });
+    }
     if (isCustomizable && makingChargeInput < 0) {
       return res.status(400).json({ message: "Making charge cannot be negative." });
     }
+    if (buildYourOwnEnabled && buildYourOwnPercentInput < 0) {
+      return res
+        .status(400)
+        .json({ message: "Build-your-own hamper fee percentage cannot be negative." });
+    }
     const makingCharge = isCustomizable ? makingChargeInput : 0;
+    const buildYourOwnPercent = buildYourOwnEnabled ? buildYourOwnPercentInput : 0;
     if (makingCharge > MAX_SURCHARGE) {
       return res.status(400).json({
         message: `Making charge cannot exceed ₹${MAX_SURCHARGE.toLocaleString("en-IN")}.`,
+      });
+    }
+    if (buildYourOwnPercent > MAX_BUILD_PERCENT) {
+      return res.status(400).json({
+        message: `Build-your-own hamper fee percentage cannot exceed ${MAX_BUILD_PERCENT}%.`,
       });
     }
 
@@ -1702,7 +1741,7 @@ exports.createProduct = async (req, res) => {
         source: "seller_create",
       }
     );
-    const customizationCatalog = isCustomizable
+    const customizationCatalog = buildYourOwnEnabled
       ? parseCustomizationCatalog(req.body.customizationCatalog, [])
       : [];
     const moderation = await deriveAutoModeration({
@@ -1744,7 +1783,9 @@ exports.createProduct = async (req, res) => {
       stock,
       inventory,
       isCustomizable,
+      buildYourOwnEnabled,
       makingCharge,
+      buildYourOwnPercent,
       variants,
       status,
       moderationStatus: moderation.status,
@@ -1828,7 +1869,14 @@ exports.bulkImportProducts = async (req, res) => {
         });
         const status = parseProductStatus(row.status, "active");
         const isCustomizable = parseBoolean(row.isCustomizable, false);
+        const buildYourOwnEnabled = parseBoolean(row.buildYourOwnEnabled, isCustomizable);
         const makingCharge = isCustomizable ? parseMoneyInput(row.makingCharge, 0) : 0;
+        const buildYourOwnPercent = buildYourOwnEnabled
+          ? parseMoneyInput(
+              row.buildYourOwnPercent ?? row.buildYourOwnCharge ?? row.makingCharge,
+              0
+            )
+          : 0;
         const occasions = parseStringList(parseDelimitedList(row.occasions, 8), [], 8);
         const includedItems = parseStringList(
           parseDelimitedList(row.includedItems, 20),
@@ -1873,6 +1921,19 @@ exports.bulkImportProducts = async (req, res) => {
         if (invoiceMetadataError) throw new Error(invoiceMetadataError);
         if (!Number.isFinite(makingCharge) || makingCharge < 0) {
           throw new Error("Making charge must be a valid non-negative number.");
+        }
+        if (makingCharge > MAX_SURCHARGE) {
+          throw new Error(
+            `Making charge cannot exceed ₹${MAX_SURCHARGE.toLocaleString("en-IN")}.`
+          );
+        }
+        if (!Number.isFinite(buildYourOwnPercent) || buildYourOwnPercent < 0) {
+          throw new Error("Build-your-own hamper fee percentage must be a valid non-negative number.");
+        }
+        if (buildYourOwnPercent > MAX_BUILD_PERCENT) {
+          throw new Error(
+            `Build-your-own hamper fee percentage cannot exceed ${MAX_BUILD_PERCENT}%.`
+          );
         }
 
         const inventory = appendStockHistoryEntry(
@@ -1926,7 +1987,9 @@ exports.bulkImportProducts = async (req, res) => {
           packagingStyles: [],
           variants,
           isCustomizable,
+          buildYourOwnEnabled,
           makingCharge: isCustomizable ? makingCharge : 0,
+          buildYourOwnPercent: buildYourOwnEnabled ? buildYourOwnPercent : 0,
           images,
           status,
           customizationCatalog: [],
@@ -1986,6 +2049,12 @@ exports.updateProduct = async (req, res) => {
     const nextCustomizable = has("isCustomizable")
       ? parseBoolean(updates.isCustomizable, product.isCustomizable)
       : product.isCustomizable;
+    const nextBuildYourOwnEnabled = has("buildYourOwnEnabled")
+      ? parseBoolean(
+          updates.buildYourOwnEnabled,
+          product.buildYourOwnEnabled ?? product.isCustomizable
+        )
+      : product.buildYourOwnEnabled ?? product.isCustomizable;
 
     if (has("name")) {
       updates.name = String(updates.name || "").trim();
@@ -2161,6 +2230,9 @@ exports.updateProduct = async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(updates, "isCustomizable")) {
       updates.isCustomizable = nextCustomizable;
     }
+    if (Object.prototype.hasOwnProperty.call(updates, "buildYourOwnEnabled")) {
+      updates.buildYourOwnEnabled = nextBuildYourOwnEnabled;
+    }
     if (Object.prototype.hasOwnProperty.call(updates, "makingCharge")) {
       const parsedMakingCharge = parseMoneyInput(updates.makingCharge, 0);
       if (!Number.isFinite(parsedMakingCharge)) {
@@ -2180,6 +2252,40 @@ exports.updateProduct = async (req, res) => {
           message: "Making charge is allowed only for customizable products.",
         });
       }
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(updates, "buildYourOwnPercent") ||
+      Object.prototype.hasOwnProperty.call(updates, "buildYourOwnCharge")
+    ) {
+      const parsedBuildYourOwnPercent = parseMoneyInput(
+        Object.prototype.hasOwnProperty.call(updates, "buildYourOwnPercent")
+          ? updates.buildYourOwnPercent
+          : updates.buildYourOwnCharge,
+        0
+      );
+      if (!Number.isFinite(parsedBuildYourOwnPercent)) {
+        return res.status(400).json({
+          message: "Build-your-own hamper fee percentage must be a valid number.",
+        });
+      }
+      if (parsedBuildYourOwnPercent < 0) {
+        return res.status(400).json({
+          message: "Build-your-own hamper fee percentage cannot be negative.",
+        });
+      }
+      updates.buildYourOwnPercent = parsedBuildYourOwnPercent;
+      if (updates.buildYourOwnPercent > MAX_BUILD_PERCENT) {
+        return res.status(400).json({
+          message: `Build-your-own hamper fee percentage cannot exceed ${MAX_BUILD_PERCENT}%.`,
+        });
+      }
+      if (!nextBuildYourOwnEnabled && updates.buildYourOwnPercent > 0) {
+        return res.status(400).json({
+          message:
+            "Build-your-own hamper fee percentage is allowed only when build your own hamper is enabled.",
+        });
+      }
+      delete updates.buildYourOwnCharge;
     }
     if (Object.prototype.hasOwnProperty.call(updates, "images")) {
       updates.images = parseImageUrls(updates.images, product.images || []);
@@ -2217,6 +2323,9 @@ exports.updateProduct = async (req, res) => {
 
     if (!nextCustomizable) {
       updates.makingCharge = 0;
+    }
+    if (!nextBuildYourOwnEnabled) {
+      updates.buildYourOwnPercent = 0;
       updates.customizationCatalog = [];
     }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { API_URL } from "../apiBase";
 import {
@@ -57,13 +57,6 @@ export default function SellerSettings() {
     ifscCode: "",
     upiId: "",
   });
-  const [notificationSettings, setNotificationSettings] = useState({
-    orderUpdates: true,
-    customerMessages: true,
-    payoutUpdates: true,
-    lowStockAlerts: true,
-    marketingEmails: false,
-  });
   const [securitySettings, setSecuritySettings] = useState({
     loginOtpEnabled: false,
   });
@@ -73,7 +66,6 @@ export default function SellerSettings() {
     gstCertificateUrl: "",
     kycDocumentUrl: "",
     agreementNotes: "",
-    invoiceTemplate: "compact",
   });
   const [sessions, setSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -127,13 +119,6 @@ export default function SellerSettings() {
         ifscCode: String(data?.sellerBankDetails?.ifscCode || "").trim(),
         upiId: String(data?.sellerBankDetails?.upiId || "").trim(),
       });
-      setNotificationSettings({
-        orderUpdates: Boolean(data?.sellerNotificationSettings?.orderUpdates ?? true),
-        customerMessages: Boolean(data?.sellerNotificationSettings?.customerMessages ?? true),
-        payoutUpdates: Boolean(data?.sellerNotificationSettings?.payoutUpdates ?? true),
-        lowStockAlerts: Boolean(data?.sellerNotificationSettings?.lowStockAlerts ?? true),
-        marketingEmails: Boolean(data?.sellerNotificationSettings?.marketingEmails),
-      });
       setSecuritySettings({
         loginOtpEnabled: Boolean(data?.sellerSecuritySettings?.loginOtpEnabled),
       });
@@ -143,7 +128,6 @@ export default function SellerSettings() {
         gstCertificateUrl: String(data?.sellerDocuments?.gstCertificateUrl || "").trim(),
         kycDocumentUrl: String(data?.sellerDocuments?.kycDocumentUrl || "").trim(),
         agreementNotes: String(data?.sellerDocuments?.agreementNotes || "").trim(),
-        invoiceTemplate: String(data?.sellerDocuments?.invoiceTemplate || "compact").trim() || "compact",
       });
     } catch {
       setError("Unable to load seller settings.");
@@ -181,12 +165,6 @@ export default function SellerSettings() {
     loadProfile();
     loadSessions();
   }, [loadProfile, loadSessions]);
-
-  const previewUrl = useMemo(() => {
-    const text = normalizeInstagramInput(instagramUrl);
-    if (!text || !looksLikeInstagramUrl(text)) return "";
-    return /^https?:\/\//i.test(text) ? text : `https://${text}`;
-  }, [instagramUrl]);
 
   const handleSave = async (event) => {
     event.preventDefault();
@@ -238,7 +216,6 @@ export default function SellerSettings() {
             ifscCode: bankDetails.ifscCode.trim().toUpperCase(),
             upiId: bankDetails.upiId.trim(),
           },
-          sellerNotificationSettings: notificationSettings,
           sellerSecuritySettings: securitySettings,
           sellerDocuments: {
             panNumber: documents.panNumber.trim().toUpperCase(),
@@ -246,7 +223,6 @@ export default function SellerSettings() {
             gstCertificateUrl: documents.gstCertificateUrl.trim(),
             kycDocumentUrl: documents.kycDocumentUrl.trim(),
             agreementNotes: documents.agreementNotes.trim(),
-            invoiceTemplate: documents.invoiceTemplate,
           },
         }),
       });
@@ -297,19 +273,6 @@ export default function SellerSettings() {
         ifscCode: String(data?.sellerBankDetails?.ifscCode || bankDetails.ifscCode || "").trim(),
         upiId: String(data?.sellerBankDetails?.upiId || bankDetails.upiId || "").trim(),
       });
-      setNotificationSettings({
-        orderUpdates: Boolean(data?.sellerNotificationSettings?.orderUpdates ?? notificationSettings.orderUpdates),
-        customerMessages: Boolean(
-          data?.sellerNotificationSettings?.customerMessages ?? notificationSettings.customerMessages
-        ),
-        payoutUpdates: Boolean(data?.sellerNotificationSettings?.payoutUpdates ?? notificationSettings.payoutUpdates),
-        lowStockAlerts: Boolean(
-          data?.sellerNotificationSettings?.lowStockAlerts ?? notificationSettings.lowStockAlerts
-        ),
-        marketingEmails: Boolean(
-          data?.sellerNotificationSettings?.marketingEmails ?? notificationSettings.marketingEmails
-        ),
-      });
       setSecuritySettings({
         loginOtpEnabled: Boolean(
           data?.sellerSecuritySettings?.loginOtpEnabled ?? securitySettings.loginOtpEnabled
@@ -329,9 +292,6 @@ export default function SellerSettings() {
         agreementNotes: String(
           data?.sellerDocuments?.agreementNotes || documents.agreementNotes || ""
         ).trim(),
-        invoiceTemplate:
-          String(data?.sellerDocuments?.invoiceTemplate || documents.invoiceTemplate || "compact")
-            .trim() || "compact",
       });
       setNotice("Seller settings updated successfully.");
     } catch {
@@ -406,14 +366,12 @@ export default function SellerSettings() {
     }
   };
 
-  const storeEditorPath = profile?.id ? `/seller/store/${profile.id}?edit=1` : "/seller/dashboard";
-
   return (
     <div className="seller-shell-view seller-settings-page">
       <div className="section-head">
         <div>
           <h2>Seller settings</h2>
-          <p>Manage storefront presentation, returns, and invoice-ready business details.</p>
+          <p>Manage business details, payouts, account security, and compliance records.</p>
         </div>
       </div>
 
@@ -422,22 +380,20 @@ export default function SellerSettings() {
       {notice ? <p className="field-hint">{notice}</p> : null}
 
       {!loading ? (
-        <div className="seller-settings-grid">
+        <form className="seller-settings-shell" onSubmit={handleSave}>
+          <div className="seller-settings-grid">
           <section
             className="seller-panel seller-settings-card seller-anchor-section"
-            id="settings-storefront"
+            id="settings-business"
           >
             <div className="seller-panel-head">
               <div>
-                <h3>Invoice and storefront settings</h3>
-                <p>
-                  Add your public social link and the business details that should appear on
-                  order invoices.
-                </p>
+                <h3>Business details</h3>
+                <p>Keep invoice-ready business identity, billing address, and return rules together.</p>
               </div>
             </div>
 
-            <form className="auth-form seller-settings-form" onSubmit={handleSave}>
+            <div className="auth-form seller-settings-form">
               <div className="field-row">
                 <label className="field">
                   <span>Legal business name</span>
@@ -551,69 +507,6 @@ export default function SellerSettings() {
                 Customers can request a return only within these days after delivery. Set `0` to disable returns.
               </p>
 
-              <div className="seller-settings-actions">
-                <button className="btn primary" type="submit" disabled={saving}>
-                  {saving ? "Saving..." : "Save settings"}
-                </button>
-                <Link className="btn ghost" to={storeEditorPath}>
-                  Open store editor
-                </Link>
-              </div>
-            </form>
-          </section>
-
-          <section
-            className="seller-panel seller-settings-card seller-anchor-section"
-            id="settings-operations"
-          >
-            <div className="seller-panel-head">
-              <div>
-                <h3>Operations</h3>
-                <p>Open dedicated seller tools for shipping, marketing, reports, and reviews.</p>
-              </div>
-            </div>
-
-            <div className="seller-dashboard-action-list">
-              <div className="seller-dashboard-action-item">
-                <span className="seller-dashboard-action-count">01</span>
-                <div className="seller-dashboard-action-copy">
-                  <strong>Shipping workspace</strong>
-                  <p>Pickup rules, courier preferences, and shipment tracking updates.</p>
-                </div>
-                <Link className="btn ghost" to="/seller/shipping">
-                  Open
-                </Link>
-              </div>
-              <div className="seller-dashboard-action-item">
-                <span className="seller-dashboard-action-count">02</span>
-                <div className="seller-dashboard-action-copy">
-                  <strong>Marketing workspace</strong>
-                  <p>Coupons, featured products, and promotional banner settings.</p>
-                </div>
-                <Link className="btn ghost" to="/seller/marketing">
-                  Open
-                </Link>
-              </div>
-              <div className="seller-dashboard-action-item">
-                <span className="seller-dashboard-action-count">03</span>
-                <div className="seller-dashboard-action-copy">
-                  <strong>Reports</strong>
-                  <p>Revenue, order, customer, product, and tax snapshots.</p>
-                </div>
-                <Link className="btn ghost" to="/seller/reports">
-                  Open
-                </Link>
-              </div>
-              <div className="seller-dashboard-action-item">
-                <span className="seller-dashboard-action-count">04</span>
-                <div className="seller-dashboard-action-copy">
-                  <strong>Reviews</strong>
-                  <p>Seller replies, hide/show controls, and admin review flags.</p>
-                </div>
-                <Link className="btn ghost" to="/seller/reviews">
-                  Open
-                </Link>
-              </div>
             </div>
           </section>
 
@@ -623,7 +516,7 @@ export default function SellerSettings() {
           >
             <div className="seller-panel-head">
               <div>
-                <h3>Security and sessions</h3>
+                <h3>Security</h3>
                 <p>Verify your email and keep an eye on every active login session.</p>
               </div>
             </div>
@@ -729,12 +622,12 @@ export default function SellerSettings() {
 
           <section
             className="seller-panel seller-settings-card seller-anchor-section"
-            id="settings-bank"
+            id="settings-payouts"
           >
             <div className="seller-panel-head">
               <div>
-                <h3>Bank and notifications</h3>
-                <p>Keep payout details and seller alerts ready for finance follow-ups.</p>
+                <h3>Payout details</h3>
+                <p>Store the bank account or UPI destination used when payouts are released.</p>
               </div>
             </div>
 
@@ -809,89 +702,6 @@ export default function SellerSettings() {
                   placeholder="your-upi@bank"
                 />
               </label>
-
-              <div className="field-row">
-                <label className="field">
-                  <span>Order updates</span>
-                  <select
-                    value={notificationSettings.orderUpdates ? "on" : "off"}
-                    onChange={(event) =>
-                      setNotificationSettings((prev) => ({
-                        ...prev,
-                        orderUpdates: event.target.value === "on",
-                      }))
-                    }
-                  >
-                    <option value="on">On</option>
-                    <option value="off">Off</option>
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Customer messages</span>
-                  <select
-                    value={notificationSettings.customerMessages ? "on" : "off"}
-                    onChange={(event) =>
-                      setNotificationSettings((prev) => ({
-                        ...prev,
-                        customerMessages: event.target.value === "on",
-                      }))
-                    }
-                  >
-                    <option value="on">On</option>
-                    <option value="off">Off</option>
-                  </select>
-                </label>
-              </div>
-
-              <div className="field-row">
-                <label className="field">
-                  <span>Payout alerts</span>
-                  <select
-                    value={notificationSettings.payoutUpdates ? "on" : "off"}
-                    onChange={(event) =>
-                      setNotificationSettings((prev) => ({
-                        ...prev,
-                        payoutUpdates: event.target.value === "on",
-                      }))
-                    }
-                  >
-                    <option value="on">On</option>
-                    <option value="off">Off</option>
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Low stock alerts</span>
-                  <select
-                    value={notificationSettings.lowStockAlerts ? "on" : "off"}
-                    onChange={(event) =>
-                      setNotificationSettings((prev) => ({
-                        ...prev,
-                        lowStockAlerts: event.target.value === "on",
-                      }))
-                    }
-                  >
-                    <option value="on">On</option>
-                    <option value="off">Off</option>
-                  </select>
-                </label>
-              </div>
-
-              <label className="field">
-                <span>Marketing emails</span>
-                <select
-                  value={notificationSettings.marketingEmails ? "on" : "off"}
-                  onChange={(event) =>
-                    setNotificationSettings((prev) => ({
-                      ...prev,
-                      marketingEmails: event.target.value === "on",
-                    }))
-                  }
-                >
-                  <option value="off">Off</option>
-                  <option value="on">On</option>
-                </select>
-              </label>
-              <p className="field-hint">Use the main `Save settings` button above to store these finance and alert preferences.</p>
             </div>
           </section>
 
@@ -901,44 +711,26 @@ export default function SellerSettings() {
           >
             <div className="seller-panel-head">
               <div>
-                <h3>Documents and compliance</h3>
-                <p>Keep PAN, KYC, GST certificate, and invoice template preferences on file.</p>
+                <h3>Compliance</h3>
+                <p>Save PAN, GST, KYC, and internal compliance notes for future review.</p>
               </div>
             </div>
 
             <div className="auth-form seller-settings-form">
-              <div className="field-row">
-                <label className="field">
-                  <span>PAN number</span>
-                  <input
-                    type="text"
-                    value={documents.panNumber}
-                    onChange={(event) =>
-                      setDocuments((prev) => ({
-                        ...prev,
-                        panNumber: event.target.value.toUpperCase(),
-                      }))
-                    }
-                    placeholder="ABCDE1234F"
-                  />
-                </label>
-                <label className="field">
-                  <span>Invoice template</span>
-                  <select
-                    value={documents.invoiceTemplate}
-                    onChange={(event) =>
-                      setDocuments((prev) => ({
-                        ...prev,
-                        invoiceTemplate: event.target.value,
-                      }))
-                    }
-                  >
-                    <option value="compact">Compact</option>
-                    <option value="classic">Classic</option>
-                    <option value="a5">A5</option>
-                  </select>
-                </label>
-              </div>
+              <label className="field">
+                <span>PAN number</span>
+                <input
+                  type="text"
+                  value={documents.panNumber}
+                  onChange={(event) =>
+                    setDocuments((prev) => ({
+                      ...prev,
+                      panNumber: event.target.value.toUpperCase(),
+                    }))
+                  }
+                  placeholder="ABCDE1234F"
+                />
+              </label>
 
               <label className="field">
                 <span>PAN document URL</span>
@@ -987,59 +779,17 @@ export default function SellerSettings() {
                   placeholder="Internal policy note, acceptance record, or compliance remark."
                 />
               </label>
-              <p className="field-hint">These compliance details are saved together with the main seller settings form.</p>
             </div>
           </section>
 
-          <section
-            className="seller-panel seller-settings-card seller-settings-preview seller-anchor-section"
-            id="settings-preview"
-          >
-            <div className="seller-panel-head">
-              <div>
-                <h3>Preview</h3>
-                <p>This is how the Instagram call-to-action appears on your public store page.</p>
-              </div>
-            </div>
+          </div>
 
-            <div className="seller-instagram-preview-card">
-              <span className="seller-instagram-kicker">Public storefront</span>
-              <h4>{profile?.storeName || profile?.name || "Your store"}</h4>
-              <p>Invite customers to explore new arrivals, behind-the-scenes craft updates, and reels.</p>
-              <p className="field-hint">
-                Invoice name: {legalBusinessName.trim() || profile?.storeName || profile?.name || "Not set"}
-              </p>
-              <p className="field-hint">GST: {gstNumber.trim() || "Not added"}</p>
-              <p className="field-hint">
-                Billing address:{" "}
-                {[billingAddress.line1, billingAddress.city, billingAddress.state, billingAddress.pincode]
-                  .filter(Boolean)
-                  .join(", ") || "Not added"}
-              </p>
-              <p className="field-hint">
-                Returns accepted within {Number.parseInt(returnWindowDays, 10) || 0} day
-                {(Number.parseInt(returnWindowDays, 10) || 0) === 1 ? "" : "s"} of delivery.
-              </p>
-              {previewUrl ? (
-                <a
-                  className="seller-store-instagram-btn"
-                  href={previewUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <rect x="4.5" y="4.5" width="15" height="15" rx="4.2" />
-                    <circle cx="12" cy="12" r="3.4" />
-                    <circle cx="17.2" cy="6.8" r="1.05" fill="currentColor" stroke="none" />
-                  </svg>
-                  Visit Instagram
-                </a>
-              ) : (
-                <p className="field-hint">Add a valid profile link to preview the Instagram button.</p>
-              )}
-            </div>
-          </section>
-        </div>
+          <div className="seller-settings-footer">
+            <button className="btn primary" type="submit" disabled={saving}>
+              {saving ? "Saving..." : "Save changes"}
+            </button>
+          </div>
+        </form>
       ) : null}
     </div>
   );

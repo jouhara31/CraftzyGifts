@@ -974,8 +974,8 @@ const buildInvoiceLineItems = ({
   if (assemblyCharge > 0 || itemRows.length === 0) {
     itemRows.push({
       id: "hamper-assembly-charge",
-      name: "Making charge",
-      meta: ["Seller-set making charge and service"],
+      name: "Build fee",
+      meta: ["Seller-set hamper assembly fee"],
       quantity: 1,
       unitPrice: assemblyCharge,
       total: assemblyCharge,
@@ -1074,7 +1074,7 @@ const buildInvoicePayload = (order = {}) => {
   const summary = {
     subtotalLabel: isGenericHamper ? "Selected hamper items" : "Item subtotal",
     subtotal: isGenericHamper ? itemizedSubtotal : subtotal,
-    makingChargeLabel: isGenericHamper ? "Making charge" : "Customization / packaging",
+    makingChargeLabel: isGenericHamper ? "Build fee" : "Customization / packaging",
     makingCharge: isGenericHamper ? assemblyCharge : makingCharge,
     taxLabel: "Tax included",
     taxAmount: taxBreakdown.taxAmount,
@@ -1339,6 +1339,23 @@ const getProductCustomizationCatalog = (product) =>
         .filter((item) => item.id && item.name),
     }))
     .filter((category) => category.id && category.name && category.items.length > 0);
+
+const isBuildYourOwnEnabled = (product = {}) =>
+  Boolean(product?.buildYourOwnEnabled ?? product?.isCustomizable);
+
+const resolveBuildYourOwnPercent = (product = {}) => {
+  const directValue = Number(product?.buildYourOwnPercent);
+  if (Number.isFinite(directValue) && directValue >= 0) {
+    return directValue;
+  }
+
+  const legacyValue = Number(product?.buildYourOwnCharge);
+  if (Number.isFinite(legacyValue) && legacyValue >= 0 && legacyValue <= 100) {
+    return legacyValue;
+  }
+
+  return 0;
+};
 
 const getCustomizationItemSnapshot = async ({ itemId, scopeFilter = {} }) => {
   const itemKey = String(itemId || "").trim();
@@ -1680,7 +1697,7 @@ const buildOrderDraft = async ({
       error.status = 400;
       throw error;
     }
-    if (!product.isCustomizable) {
+    if (!isBuildYourOwnEnabled(product)) {
       const error = new Error("Hamper customization not available for this product.");
       error.status = 400;
       throw error;
@@ -1723,34 +1740,57 @@ const buildOrderDraft = async ({
     .join(" | ");
   const normalizedPreferenceNote = requestedSpecialNote || derivedPreferenceNote;
 
-  const hasReadyMadeOnlyFields =
+  const customizationMode = String(customization?.mode || "").trim().toLowerCase();
+  const isBuildMode = isGenericHamper || customizationMode === "build" || customizationMode === "build_bulk";
+  const supportsExistingCustomization = Boolean(product.isCustomizable);
+  const supportsBuildYourOwn = isBuildYourOwnEnabled(product);
+  const selectedOptions =
+    customization?.selectedOptions && typeof customization.selectedOptions === "object"
+      ? customization.selectedOptions
+      : {};
+  const hasBuildOptionFields =
+    Boolean(String(selectedOptions.hamperBase || "").trim()) ||
+    Boolean(String(selectedOptions.hamperPackage || "").trim());
+  const hasExistingOptionFields = Object.keys(selectedOptions).some(
+    (key) => !["hamperbase", "hamperpackage"].includes(String(key || "").trim().toLowerCase())
+  );
+  const hasBuildOnlyFields =
+    Boolean(String(customization?.catalogSellerId || "").trim()) ||
+    isBuildMode ||
+    hasBuildOptionFields ||
+    (Array.isArray(customization?.selectedItems) && customization.selectedItems.length > 0) ||
+    (Array.isArray(customization?.bulkPlan?.baseSelections) &&
+      customization.bulkPlan.baseSelections.length > 0);
+  const hasExistingOnlyFields =
     Boolean(String(customization?.referenceImageUrl || "").trim()) ||
     (Array.isArray(customization?.referenceImageUrls) &&
       customization.referenceImageUrls.some((value) => String(value || "").trim())) ||
     Boolean(String(customization?.ideaDescription || "").trim()) ||
-    Boolean(String(customization?.catalogSellerId || "").trim()) ||
-    Boolean(String(customization?.mode || "").trim()) ||
-    (customization?.selectedOptions &&
-      typeof customization.selectedOptions === "object" &&
-      Object.keys(customization.selectedOptions).length > 0) ||
-    (Array.isArray(customization?.selectedItems) && customization.selectedItems.length > 0);
+    hasExistingOptionFields;
 
-  if (!product.isCustomizable && hasReadyMadeOnlyFields) {
-    const error = new Error(
-      "Only occasion, packaging style, and gift message are available for this product."
-    );
+  if (!supportsExistingCustomization && (customizationMode === "existing" || hasExistingOnlyFields)) {
+    const error = new Error("This product does not support existing-product customization.");
     error.status = 400;
     throw error;
   }
 
-  const customizationMode = String(customization?.mode || "").trim().toLowerCase();
-  let normalizedCustomization = product.isCustomizable
+  if (!supportsBuildYourOwn && (isGenericHamper || hasBuildOnlyFields)) {
+    const error = new Error("Build-your-own hamper is not available for this product.");
+    error.status = 400;
+    throw error;
+  }
+
+  const shouldNormalizeCatalogSelections =
+    (supportsExistingCustomization &&
+      (customizationMode === "existing" || hasExistingOptionFields)) ||
+    (supportsBuildYourOwn && isBuildMode);
+  let normalizedCustomization = shouldNormalizeCatalogSelections
     ? { ...(customization || {}) }
     : undefined;
   let minimumCatalogCharge = 0;
   let normalizedBulkPlan;
 
-  if (product.isCustomizable) {
+  if (shouldNormalizeCatalogSelections) {
     const normalizedCatalog = normalizeCatalogSelections(product, customization, parsedQuantity);
     normalizedCustomization = {
       ...(customization || {}),
@@ -1761,8 +1801,7 @@ const buildOrderDraft = async ({
       selectedItems: normalizedCatalog.selectedItems,
       selectedOptions: normalizedCatalog.selectedOptions,
     };
-    minimumCatalogCharge =
-      customizationMode === "existing" ? 0 : normalizedCatalog.minimumChargeFromCatalog;
+    minimumCatalogCharge = isBuildMode ? normalizedCatalog.minimumChargeFromCatalog : 0;
     normalizedBulkPlan = normalizedCatalog.bulkPlan;
     if (customizationMode === "build_bulk") {
       normalizedCustomization.bulkPlan = normalizedBulkPlan;
@@ -1772,6 +1811,7 @@ const buildOrderDraft = async ({
   }
 
   const sellerCharge = Number(product.makingCharge || 0);
+  const sellerBuildFeePercent = resolveBuildYourOwnPercent(product);
   const requestedCharge = Number(customization?.makingCharge);
   const resolvedCharge =
     Number.isFinite(requestedCharge) && requestedCharge >= 0
@@ -1784,13 +1824,16 @@ const buildOrderDraft = async ({
     ? getResolvedVariantUnitPrice(product, selectedVariant)
     : Math.max(0, Number(product.price || 0));
   const standardPrice = resolvedUnitPrice * parsedQuantity;
-  const standardMakingCharge = product.isCustomizable
-    ? Math.max(sellerCharge, requestedCustomizationCharge, minimumCatalogCharge)
+  const standardMakingCharge = supportsExistingCustomization
+    ? Math.max(sellerCharge, requestedCustomizationCharge)
     : packagingStyleCharge;
   const standardTotal = standardPrice + standardMakingCharge;
+  const buildFeeAmount = isGenericHamper
+    ? roundCurrency((minimumCatalogCharge * sellerBuildFeePercent) / 100)
+    : 0;
   const price = isGenericHamper ? 0 : standardPrice;
   const makingCharge = isGenericHamper
-    ? Math.max(0, sellerCharge) + minimumCatalogCharge
+    ? roundCurrency(minimumCatalogCharge + buildFeeAmount)
     : standardMakingCharge;
   const total = isGenericHamper ? makingCharge : standardTotal;
   const onlineMode = ONLINE_PAYMENT_MODES.has(mode);
@@ -1807,10 +1850,18 @@ const buildOrderDraft = async ({
       : {}),
   };
 
-  if (product.isCustomizable) {
+  if (supportsExistingCustomization || supportsBuildYourOwn) {
     normalizedCustomization = {
       ...(normalizedCustomization || {}),
       ...preferenceCustomization,
+      ...(isGenericHamper
+        ? {
+            buildFeePercent: sellerBuildFeePercent,
+            buildFeeAmount,
+            buildItemsSubtotal: minimumCatalogCharge,
+            makingCharge,
+          }
+        : {}),
     };
   } else if (hasCustomization(preferenceCustomization)) {
     normalizedCustomization = {

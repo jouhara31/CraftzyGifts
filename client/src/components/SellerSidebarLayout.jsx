@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import logoPng from "../assets/logo.png";
-import { usePlatform } from "../hooks/usePlatform";
 import { logoutSession, readStoredUser, readStoredUserId } from "../utils/authSession";
 import { readStoredSessionClaims } from "../utils/authRoute";
 import { buildSellerWorkspaceSections, isWorkspacePathActive } from "../utils/sellerWorkspace";
-import SellerNotificationBell from "./SellerNotificationBell";
+import SellerWorkspaceTopbar from "./SellerWorkspaceTopbar";
 
 const readStoredSellerId = () => {
   const sellerId = readStoredUserId();
@@ -181,7 +179,6 @@ const buildNavGroups = (workspaceSections) => [
 ];
 
 export default function SellerSidebarLayout() {
-  const { platformName } = usePlatform();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -224,11 +221,10 @@ export default function SellerSidebarLayout() {
 
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
   const toggleSidebar = useCallback(() => setSidebarOpen((prev) => !prev), []);
-
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     await logoutSession();
     navigate("/login");
-  };
+  }, [navigate]);
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -327,63 +323,14 @@ export default function SellerSidebarLayout() {
 
   return (
     <div className={["page seller-page admin-page seller-shell-page", routeClasses].filter(Boolean).join(" ")}>
-      <div className="admin-classic-top seller-classic-top">
-        <button
-          ref={menuButtonRef}
-          className="admin-menu-btn"
-          type="button"
-          aria-label={sidebarOpen ? "Close menu" : "Open menu"}
-          aria-expanded={sidebarOpen}
-          aria-controls="sellerMobileSidebar"
-          onClick={toggleSidebar}
-        >
-          <span />
-          <span />
-          <span />
-        </button>
-        <Link className="admin-classic-brand seller-classic-brand" to="/seller/dashboard">
-          <span className="admin-classic-logo">
-            <img src={logoPng} alt={platformName} />
-          </span>
-          <span className="admin-classic-brand-copy">
-            <strong>{platformName}</strong>
-            <small>Seller Workspace</small>
-          </span>
-        </Link>
-        <div className="admin-classic-actions seller-classic-actions">
-          <SellerNotificationBell />
-          <Link className="admin-text-action" to={sellerStorePath}>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4.5 8.2h15v11.3h-15z" />
-              <path d="M7 8.2V5.7a1.7 1.7 0 0 1 1.7-1.7h6.6A1.7 1.7 0 0 1 17 5.7v2.5" />
-              <path d="M8.5 12.5h7" />
-            </svg>
-            <span className="admin-view-site-label admin-view-site-desktop">Visit store</span>
-            <span className="admin-view-site-label admin-view-site-mobile">Store</span>
-          </Link>
-          <Link className="admin-text-action" to="/">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M14 5h5v5" />
-              <path d="M10 14 19 5" />
-              <path d="M19 13v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4" />
-            </svg>
-            <span className="admin-view-site-label admin-view-site-desktop">Visit site</span>
-            <span className="admin-view-site-label admin-view-site-mobile">Site</span>
-          </Link>
-          <button
-            className="admin-text-action admin-view-site-desktop"
-            type="button"
-            onClick={handleLogout}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M11 4H5v16h6" />
-              <path d="M21 12H10" />
-              <path d="m13 9-3 3 3 3" />
-            </svg>
-            <span className="admin-view-site-label admin-view-site-desktop">Logout</span>
-          </button>
-        </div>
-      </div>
+      <SellerWorkspaceTopbar
+        sellerStorePath={sellerStorePath}
+        brandPath="/seller/dashboard"
+        showMenuButton
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={toggleSidebar}
+        menuButtonRef={menuButtonRef}
+      />
 
       <div className={`admin-shell seller-shell ${sidebarOpen ? "sidebar-open" : ""}`.trim()}>
         <button

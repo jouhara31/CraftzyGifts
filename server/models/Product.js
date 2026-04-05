@@ -40,6 +40,7 @@ const productSchema = new mongoose.Schema(
     images: [{ type: String }],
     seller: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     isCustomizable: { type: Boolean, default: false },
+    buildYourOwnEnabled: { type: Boolean, default: false },
     customizationOptions: {
       giftBoxes: [{ type: String }],
       chocolates: [{ type: String }],
@@ -98,6 +99,8 @@ const productSchema = new mongoose.Schema(
       ],
     },
     makingCharge: { type: Number, default: 0 },
+    buildYourOwnPercent: { type: Number, default: 0 },
+    buildYourOwnCharge: { type: Number, default: 0 },
     status: { type: String, enum: ["active", "inactive"], default: "active" },
     viewsCount: { type: Number, default: 0, min: 0 },
     moderationStatus: {

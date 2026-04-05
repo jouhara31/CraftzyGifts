@@ -31,6 +31,7 @@ const HIDDEN_EXISTING_OPTION_KEYS = new Set(["custom_hamper_items"]);
 const GENERIC_HAMPER_LABEL = "Build Your Own Hamper";
 const BASE_CATEGORY_KIND = "base_category";
 
+const roundAmount = (value) => Math.round(Number(value || 0) * 100) / 100;
 const formatPrice = (value) => Number(value || 0).toLocaleString("en-IN");
 const calculateOfferPercent = (mrp, price) => {
   const livePrice = Number(price || 0);
@@ -96,6 +97,23 @@ const getSellerCatalogItems = (product) =>
       categoryDescription: category.description,
     }))
   );
+
+const isBuildEnabledForProduct = (product = {}) =>
+  Boolean(product?.buildYourOwnEnabled ?? product?.isCustomizable);
+
+const resolveBuildYourOwnPercent = (product = {}) => {
+  const directValue = Number(product?.buildYourOwnPercent);
+  if (Number.isFinite(directValue) && directValue >= 0) {
+    return directValue;
+  }
+
+  const legacyValue = Number(product?.buildYourOwnCharge);
+  if (Number.isFinite(legacyValue) && legacyValue >= 0 && legacyValue <= 100) {
+    return legacyValue;
+  }
+
+  return 0;
+};
 
 const getDefaultExistingSelections = () => ({});
 
@@ -183,7 +201,7 @@ export default function Customization() {
   const [catalogProductId, setCatalogProductId] = useState("");
   const [catalogSellerId, setCatalogSellerId] = useState("");
   const [sellerProfile, setSellerProfile] = useState(null);
-  const [sellerMinimumCharge, setSellerMinimumCharge] = useState(0);
+  const [sellerBuildFeePercent, setSellerBuildFeePercent] = useState(0);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [sessionClaims, setSessionClaims] = useState(() => readStoredSessionClaims());
@@ -220,7 +238,7 @@ export default function Customization() {
       setCatalogProductId("");
       setCatalogSellerId("");
       setSellerProfile(null);
-      setSellerMinimumCharge(0);
+      setSellerBuildFeePercent(0);
       setProduct(null);
       setExistingProduct(null);
       setEnableBulkBases(false);
@@ -266,7 +284,17 @@ export default function Customization() {
           `${API_URL}/api/products/seller/${activeSellerId}/customization`
         );
         if (!catalogRes.ok) {
+          setCatalogSellerId(activeSellerId);
           setProduct(null);
+          setExistingProduct(resolvedExistingProduct);
+          setExistingCustomization(getDefaultExistingCustomization(resolvedExistingProduct));
+          if (resolvedExistingProduct?.seller && typeof resolvedExistingProduct.seller === "object") {
+            setSellerProfile(resolvedExistingProduct.seller);
+          }
+          if (preferBuild) {
+            setCustomizationMode("build");
+            setNotice("Build your own hamper is not enabled for this seller yet.");
+          }
           return;
         }
         const catalogData = await catalogRes.json();
@@ -278,8 +306,10 @@ export default function Customization() {
         setCatalogSellerId(activeSellerId);
         setSellerProfile(catalogData?.seller || null);
         setCatalogProductId(resolvedCatalogProductId);
-        setSellerMinimumCharge(
-          Number(catalogData?.sellerMinimumCharge || catalogProduct?.makingCharge || 0)
+        setSellerBuildFeePercent(
+          Number(
+            catalogData?.sellerBuildFeePercent ?? resolveBuildYourOwnPercent(catalogProduct)
+          )
         );
         setProduct(catalogProduct);
         setExistingProduct(resolvedExistingProduct);
@@ -761,8 +791,9 @@ export default function Customization() {
 
   const selectedQuantity = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
   const itemSubtotal = selectedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const minimumHamperCharge = Number(sellerMinimumCharge || 0);
-  const buildModeCharge = minimumHamperCharge + itemSubtotal;
+  const buildFeePercent = Math.max(0, Number(sellerBuildFeePercent || 0));
+  const buildFeeAmount = roundAmount((itemSubtotal * buildFeePercent) / 100);
+  const buildModeCharge = roundAmount(itemSubtotal + buildFeeAmount);
   const existingModeCharge = Number(existingProduct?.makingCharge || 0);
   const effectiveCustomizationCharge =
     customizationMode === "build"
@@ -780,7 +811,7 @@ export default function Customization() {
     sellerProfile?.storeName || sellerProfile?.name || ""
   ).trim();
   const isExistingUnavailable = !existingProduct || !existingProduct.isCustomizable;
-  const isBuildDisabled = Boolean(product && !product.isCustomizable);
+  const isBuildDisabled = !product || !isBuildEnabledForProduct(product);
   const isDisabled = customizationMode === "existing" ? isExistingUnavailable : isBuildDisabled;
   const isBuildUnavailable = customizationMode === "build" && !hasSellerBuildOptions;
   const isModeChosen = Boolean(customizationMode);
@@ -874,7 +905,7 @@ export default function Customization() {
         return false;
       }
     } else if (customizationMode === "build") {
-      if (!product || !product.isCustomizable) return false;
+      if (!product || !isBuildEnabledForProduct(product)) return false;
       if (!hasSellerBuildOptions) {
         setNotice("Seller has not listed custom hamper items yet.");
         return false;
@@ -931,6 +962,7 @@ export default function Customization() {
           name: String(existingProduct?.name || GENERIC_HAMPER_LABEL).trim(),
           price: Number(existingProduct?.price || 0),
           isCustomizable: Boolean(existingProduct?.isCustomizable),
+          buildYourOwnEnabled: isBuildEnabledForProduct(existingProduct),
           category: String(existingProduct?.category || "Custom hamper").trim(),
           image: getProductImage(existingProduct || {}),
           seller: {
@@ -971,7 +1003,8 @@ export default function Customization() {
         id: catalogProductId,
         name: GENERIC_HAMPER_LABEL,
         price: 0,
-        isCustomizable: product.isCustomizable,
+        isCustomizable: false,
+        buildYourOwnEnabled: isBuildEnabledForProduct(product),
         category: "Custom hamper",
         image: "",
         isGenericHamper: true,
@@ -1014,6 +1047,9 @@ export default function Customization() {
       referenceImageUrls: buildReferenceImages,
       referenceImageUrl: buildReferenceImages[0] || "",
       makingCharge: buildModeCharge,
+      buildFeePercent,
+      buildFeeAmount,
+      buildItemsSubtotal: itemSubtotal,
       catalogSellerId: catalogSellerId || undefined,
     };
 
@@ -1715,8 +1751,8 @@ export default function Customization() {
             {customizationMode === "build" && (
               <>
                 <div className="hamper-total-row">
-                  <span>Making charge</span>
-                  <strong>₹{formatPrice(minimumHamperCharge)}</strong>
+                  <span>Build fee ({buildFeePercent}%)</span>
+                  <strong>₹{formatPrice(buildFeeAmount)}</strong>
                 </div>
                 {enableBulkBases && (
                   <div className="hamper-total-row">
@@ -1725,7 +1761,7 @@ export default function Customization() {
                   </div>
                 )}
                 <div className="hamper-total-row">
-                  <span>{enableBulkBases ? "Base total" : "Base + items total"}</span>
+                  <span>{enableBulkBases ? "Selected items total" : "Selected items total"}</span>
                   <strong>₹{formatPrice(enableBulkBases ? selectedBaseSubtotal : itemSubtotal)}</strong>
                 </div>
                 {selectedAddonSubtotal > 0 && (
