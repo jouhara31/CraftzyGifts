@@ -9,7 +9,6 @@ const MIME_EXTENSION_MAP = {
   "image/jpeg": "jpg",
   "image/webp": "webp",
   "image/gif": "gif",
-  "image/svg+xml": "svg",
 };
 
 const persistInlineAsset = async ({ value = "", folder = "misc", prefix = "asset" } = {}) => {
@@ -26,7 +25,7 @@ const persistInlineAsset = async ({ value = "", folder = "misc", prefix = "asset
   const base64Content = String(match[2] || "");
   const extension = MIME_EXTENSION_MAP[mimeType];
   if (!extension) {
-    throw new Error("Only image attachments are supported.");
+    throw new Error("Only PNG, JPG, WebP, or GIF image attachments are supported.");
   }
 
   const buffer = Buffer.from(base64Content, "base64");

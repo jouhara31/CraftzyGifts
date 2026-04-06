@@ -10,7 +10,6 @@ const IMAGE_EXTENSION_MAP = {
   "image/jpeg": "jpg",
   "image/webp": "webp",
   "image/gif": "gif",
-  "image/svg+xml": "svg",
 };
 
 const sanitizeUploadSegment = (value = "", fallback = "general") => {
@@ -84,7 +83,7 @@ const createImageUploadMiddleware = ({
       const mimeType = String(file?.mimetype || "").toLowerCase();
       if (!IMAGE_EXTENSION_MAP[mimeType]) {
         const error = new Error(
-          "Only PNG, JPG, WebP, GIF, or SVG image uploads are supported."
+          "Only PNG, JPG, WebP, or GIF image uploads are supported."
         );
         error.status = 400;
         callback(error);

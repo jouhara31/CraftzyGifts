@@ -11,8 +11,10 @@ const MIME_EXTENSION_MAP = {
   "image/jpeg": "jpg",
   "image/webp": "webp",
   "image/gif": "gif",
-  "image/svg+xml": "svg",
 };
+
+const isSupportedUploadType = (mimeType = "") =>
+  Boolean(MIME_EXTENSION_MAP[String(mimeType || "").toLowerCase()]);
 
 const sanitizeUploadHeaderValue = (value, fallback) =>
   String(value || "")
@@ -99,6 +101,9 @@ export const uploadImageFile = async (
   if (!(file instanceof Blob)) {
     throw new Error("Please choose a valid image file.");
   }
+  if (!isSupportedUploadType(file.type || "image/jpeg")) {
+    throw new Error("Please choose a PNG, JPG, WebP, or GIF image.");
+  }
 
   const formData = new FormData();
   const fileName = buildUploadFileName(file, file.type || "image/jpeg");
@@ -138,6 +143,9 @@ export const optimizeImageFile = async (
 ) => {
   if (!(file instanceof File) || !String(file.type || "").startsWith("image/")) {
     throw new Error("Please choose a valid image file.");
+  }
+  if (!isSupportedUploadType(file.type || "")) {
+    throw new Error("Please choose a PNG, JPG, WebP, or GIF image.");
   }
 
   const objectUrl = URL.createObjectURL(file);
