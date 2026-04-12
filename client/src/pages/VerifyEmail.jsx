@@ -89,7 +89,7 @@ export default function VerifyEmail() {
                   state: {
                     notice:
                       status.type === "success"
-                        ? "Email verified successfully. Please login."
+                        ? "Email verified successfully. Please log in."
                         : undefined,
                   },
                 })

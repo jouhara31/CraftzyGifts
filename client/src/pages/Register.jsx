@@ -25,6 +25,7 @@ export default function Register() {
     phone: "",
   });
   const [showPassword, setShowPassword] = useState(false);
+  const [status, setStatus] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -33,10 +34,12 @@ export default function Register() {
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+    if (status) setStatus(null);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (status) setStatus(null);
     const payload = {
       name: form.name.trim(),
       email: form.email.trim(),
@@ -54,13 +57,26 @@ export default function Register() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert("Registration successful!");
-        navigate("/login");
+        navigate("/login", {
+          replace: true,
+          state: {
+            notice:
+              form.role === "seller"
+                ? "Seller account created successfully. Please log in and wait for admin review."
+                : "Registration successful. Please log in to continue.",
+          },
+        });
       } else {
-        alert(data.message);
+        setStatus({
+          type: "error",
+          message: data.message || "Unable to create your account right now.",
+        });
       }
     } catch (err) {
-      alert("Error: " + err.message);
+      setStatus({
+        type: "error",
+        message: `Error: ${err.message}`,
+      });
     }
   };
 
@@ -95,6 +111,15 @@ export default function Register() {
               <p className="auth-kicker">Join {platformName}</p>
               <h2 className="auth-title">Become a seller</h2>
               <p className="auth-sub">Create your seller account and start listing products.</p>
+              {status?.message ? (
+                <div
+                  className={`auth-alert${status.type ? ` is-${status.type}` : ""}`}
+                  role={status.type === "error" ? "alert" : "status"}
+                  aria-live={status.type === "error" ? "assertive" : "polite"}
+                >
+                  {status.message}
+                </div>
+              ) : null}
 
               <div className="seller-form-grid">
                 <div className="auth-form">
@@ -246,6 +271,15 @@ export default function Register() {
             <p className="auth-sub">
               Create your customer account for shopping, cart, wishlist, and checkout.
             </p>
+            {status?.message ? (
+              <div
+                className={`auth-alert${status.type ? ` is-${status.type}` : ""}`}
+                role={status.type === "error" ? "alert" : "status"}
+                aria-live={status.type === "error" ? "assertive" : "polite"}
+              >
+                {status.message}
+              </div>
+            ) : null}
 
             <div className="auth-form">
               <label className="auth-label" htmlFor="name">

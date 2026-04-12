@@ -60,7 +60,7 @@ export default function ResetPassword() {
       navigate("/login", {
         replace: true,
         state: {
-          notice: data?.message || "Password reset successful. Please login again.",
+          notice: data?.message || "Password reset successful. Please log in again.",
         },
       });
     } catch (error) {

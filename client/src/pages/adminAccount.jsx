@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
+import { useDialog } from "../hooks/useDialog";
 import { optimizeImageFile } from "../utils/imageUpload";
 import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 
@@ -1213,6 +1214,7 @@ function ProfileImageModal({
 }
 
 export default function AdminAccount() {
+  const { showConfirm } = useDialog();
   const [profile, setProfile] = useState(EMPTY_PROFILE);
   const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -2088,7 +2090,13 @@ export default function AdminAccount() {
   const revokeAllSessions = async () => {
     if (!requireSession()) return;
 
-    const confirmed = window.confirm("Revoke every active session for this admin account?");
+    const confirmed = await showConfirm({
+      tone: "danger",
+      title: "Revoke all active sessions?",
+      message: "Every active session for this admin account will be signed out.",
+      confirmLabel: "Revoke sessions",
+      cancelLabel: "Keep sessions",
+    });
     if (!confirmed) return;
 
     setRevokingAllSessions(true);
@@ -2308,7 +2316,13 @@ export default function AdminAccount() {
   const handleRevokeApiKey = async (keyId) => {
     if (!requireSession()) return;
     if (!keyId) return;
-    const proceed = window.confirm("Revoke this API key? This action cannot be undone.");
+    const proceed = await showConfirm({
+      tone: "danger",
+      title: "Revoke this API key?",
+      message: "This action cannot be undone.",
+      confirmLabel: "Revoke key",
+      cancelLabel: "Keep key",
+    });
     if (!proceed) return;
 
     setApiKeySaving(true);
@@ -2406,7 +2420,13 @@ export default function AdminAccount() {
   const handleDeleteWebhook = async (webhookId) => {
     if (!requireSession()) return;
     if (!webhookId) return;
-    const proceed = window.confirm("Delete this webhook? This action cannot be undone.");
+    const proceed = await showConfirm({
+      tone: "danger",
+      title: "Delete this webhook?",
+      message: "This action cannot be undone.",
+      confirmLabel: "Delete webhook",
+      cancelLabel: "Keep webhook",
+    });
     if (!proceed) return;
 
     setWebhookSaving(true);

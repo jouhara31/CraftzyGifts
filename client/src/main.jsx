@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import { DialogProvider } from "./components/DialogProvider";
 import { PlatformProvider } from "./components/PlatformProvider";
 import "./index.css";
 import { hydrateAuthSession, installAuthFetchInterceptor } from "./utils/authSession";
@@ -14,9 +15,11 @@ const renderApp = () => {
   root.render(
     <React.StrictMode>
       <PlatformProvider>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
+        <DialogProvider>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </DialogProvider>
       </PlatformProvider>
     </React.StrictMode>
   );

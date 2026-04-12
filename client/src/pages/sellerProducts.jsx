@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useDialog } from "../hooks/useDialog";
 import {
   DEFAULT_CATEGORY_TREE,
   clearCategoryTreeCache,
@@ -1002,6 +1003,7 @@ const mapProductToForm = (product = {}) => {
 };
 
 export default function SellerProducts() {
+  const { showConfirm } = useDialog();
   const [searchParams] = useSearchParams();
   const [products, setProducts] = useState([]);
   const [query, setQuery] = useState(() => searchParams.get("q") || "");
@@ -1572,9 +1574,13 @@ export default function SellerProducts() {
   };
 
   const deleteProduct = async (product) => {
-    const confirmed = window.confirm(
-      `Delete "${product.name}" permanently? This action cannot be undone.`
-    );
+    const confirmed = await showConfirm({
+      tone: "danger",
+      title: "Delete this product?",
+      message: `Delete "${product.name}" permanently? This action cannot be undone.`,
+      confirmLabel: "Delete product",
+      cancelLabel: "Keep product",
+    });
     if (!confirmed) return;
 
     if (!hasActiveSession()) {

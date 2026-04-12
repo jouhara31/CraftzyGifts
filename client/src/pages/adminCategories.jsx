@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminSidebarLayout from "../components/AdminSidebarLayout";
+import { useDialog } from "../hooks/useDialog";
 import { clearCategoryTreeCache, DEFAULT_CATEGORY_TREE } from "../utils/categoryMaster";
 
 import { API_URL } from "../apiBase";
@@ -90,14 +91,13 @@ export default function AdminCategories() {
   const [savingId, setSavingId] = useState("");
   const [deletingId, setDeletingId] = useState("");
   const [restoringDefaults, setRestoringDefaults] = useState(false);
-  const [confirmRestore, setConfirmRestore] = useState(false);
   const [updatedAt, setUpdatedAt] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const navigate = useNavigate();
+  const { showConfirm } = useDialog();
   const groupsRef = useRef([]);
-  const restoreConfirmRef = useRef(null);
   const clearAndRedirect = useCallback(() => {
     clearAuthSession();
     navigate("/login", { replace: true });
@@ -106,14 +106,6 @@ export default function AdminCategories() {
   useEffect(() => {
     groupsRef.current = groups;
   }, [groups]);
-
-  useEffect(() => {
-    return () => {
-      if (restoreConfirmRef.current) {
-        clearTimeout(restoreConfirmRef.current);
-      }
-    };
-  }, []);
 
   const syncCategoryState = useCallback(
     (payload, { preserveOnEmpty = false, preserveOnShrink = false } = {}) => {
@@ -265,21 +257,14 @@ export default function AdminCategories() {
       setNotice("All default categories are already present.");
       return;
     }
-    if (!confirmRestore) {
-      setConfirmRestore(true);
-      setNotice("Tap Restore all again to confirm.");
-      if (restoreConfirmRef.current) {
-        clearTimeout(restoreConfirmRef.current);
-      }
-      restoreConfirmRef.current = setTimeout(() => {
-        setConfirmRestore(false);
-      }, 2500);
+    const shouldRestore = await showConfirm({
+      title: "Restore missing default categories?",
+      message: `Add ${missingDefaults.length} default categories back to the master list?`,
+      confirmLabel: "Restore all",
+      cancelLabel: "Not now",
+    });
+    if (!shouldRestore) {
       return;
-    }
-    setConfirmRestore(false);
-    if (restoreConfirmRef.current) {
-      clearTimeout(restoreConfirmRef.current);
-      restoreConfirmRef.current = null;
     }
     if (!hasActiveSession()) {
       clearAndRedirect();
@@ -473,11 +458,13 @@ export default function AdminCategories() {
   const restoreDefaults = async (group) => {
     const defaults = getDefaultSubcategories(group?.category || "");
     if (defaults.length === 0) return;
-    if (
-      !window.confirm(
-        `Restore ${defaults.length} default subcategories for "${group?.category}"?`
-      )
-    ) {
+    const shouldRestore = await showConfirm({
+      title: "Restore default subcategories?",
+      message: `Restore ${defaults.length} default subcategories for "${group?.category}"?`,
+      confirmLabel: "Restore",
+      cancelLabel: "Keep current",
+    });
+    if (!shouldRestore) {
       return;
     }
     setDrafts((prev) => ({
@@ -493,7 +480,14 @@ export default function AdminCategories() {
       return;
     }
 
-    if (!window.confirm(`Delete category "${categoryName}" from the master list?`)) {
+    const shouldDelete = await showConfirm({
+      tone: "danger",
+      title: "Delete category?",
+      message: `Delete category "${categoryName}" from the master list? This action cannot be undone.`,
+      confirmLabel: "Delete",
+      cancelLabel: "Keep category",
+    });
+    if (!shouldDelete) {
       return;
     }
 
@@ -603,11 +597,7 @@ export default function AdminCategories() {
               onClick={restoreMissingDefaults}
               disabled={restoringDefaults}
             >
-              {restoringDefaults
-                ? "Restoring..."
-                : confirmRestore
-                  ? "Tap again to confirm"
-                  : "Restore all"}
+              {restoringDefaults ? "Restoring..." : "Restore all"}
             </button>
           </div>
           <div className="seller-meta">
