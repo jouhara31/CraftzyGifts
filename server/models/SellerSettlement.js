@@ -7,7 +7,7 @@ const sellerSettlementSchema = new mongoose.Schema(
     payoutBatch: { type: mongoose.Schema.Types.ObjectId, ref: "SellerPayoutBatch", default: null },
     status: {
       type: String,
-      enum: ["pending_payment", "holding", "ready", "requested", "paid", "reversed"],
+      enum: ["pending_payment", "holding", "ready", "requested", "paid", "reversed", "cancelled"],
       default: "pending_payment",
     },
     orderStatus: { type: String, default: "" },

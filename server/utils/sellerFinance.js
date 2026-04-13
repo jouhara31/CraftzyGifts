@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const User = require("../models/User");
 const SellerSettlement = require("../models/SellerSettlement");
@@ -5,6 +6,13 @@ const SellerPayoutBatch = require("../models/SellerPayoutBatch");
 const { ensurePlatformSettings } = require("./platformSettings");
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const PAYOUT_BATCH_STATUSES = ["requested", "processing", "paid", "rejected"];
+const PAYOUT_BATCH_TRANSITIONS = {
+  requested: ["processing", "paid", "rejected"],
+  processing: ["paid", "rejected"],
+  paid: [],
+  rejected: [],
+};
 
 const roundCurrency = (value = 0) => Math.round(Number(value || 0) * 100) / 100;
 
@@ -19,6 +27,18 @@ const asDate = (value) => {
   const candidate = new Date(value);
   return Number.isNaN(candidate.getTime()) ? null : candidate;
 };
+
+const getWriteCount = (result) =>
+  Math.max(0, Number(result?.modifiedCount ?? result?.matchedCount ?? 0));
+
+const buildReadySettlementReset = (timestamp = new Date(), note = "Settlement is ready again.") => ({
+  status: "ready",
+  payoutBatch: null,
+  payoutReference: "",
+  requestedAt: null,
+  lastSyncedAt: timestamp,
+  notes: note,
+});
 
 // Manual payouts stay open-ended; daily/weekly schedules expose the next release window.
 const computeNextPayoutAt = (schedule = "", value = Date.now()) => {
@@ -140,6 +160,10 @@ const computeSettlementSnapshot = (order, settings, currentSettlement = null) =>
     refundAmount = payoutableAmount;
     netAmount = 0;
     notes = "Order refunded; payout reversed.";
+  } else if (orderStatus === "cancelled") {
+    status = "cancelled";
+    netAmount = 0;
+    notes = "Order cancelled before payout eligibility.";
   } else if (paymentStatus !== "paid") {
     status = "pending_payment";
     notes = paymentMode === "cod" ? "Waiting for COD collection." : "Waiting for payment confirmation.";
@@ -164,12 +188,14 @@ const computeSettlementSnapshot = (order, settings, currentSettlement = null) =>
     status = "requested";
     notes = "Included in a payout request.";
   }
-  if (currentSettlement?.status === "paid" && status !== "reversed") {
-    status = "paid";
-    notes = "Paid out to seller.";
-  }
   if (currentSettlement?.status === "paid" && status === "reversed") {
     notes = "Order refunded after payout; reversal needed.";
+  } else if (
+    currentSettlement?.status === "paid" &&
+    !["cancelled", "reversed"].includes(status)
+  ) {
+    status = "paid";
+    notes = "Paid out to seller.";
   }
 
   return {
@@ -181,7 +207,7 @@ const computeSettlementSnapshot = (order, settings, currentSettlement = null) =>
     commissionPercent,
     commissionAmount,
     refundAmount,
-    payoutableAmount: status === "reversed" ? 0 : payoutableAmount,
+    payoutableAmount: ["cancelled", "reversed"].includes(status) ? 0 : payoutableAmount,
     netAmount,
     eligibleAt,
     notes,
@@ -407,26 +433,21 @@ const requestSellerPayout = async (sellerId, { note = "" } = {}) => {
   const totalAmount = roundCurrency(
     readySettlements.reduce((sum, entry) => sum + Number(entry?.payoutableAmount || 0), 0)
   );
+  const batchId = new mongoose.Types.ObjectId();
   const reference = buildPayoutReference();
   const requestedAt = new Date();
 
-  const batch = await SellerPayoutBatch.create({
-    seller: sellerId,
-    settlementIds,
-    reference,
-    status: "requested",
-    totalAmount,
-    settlementCount: settlementIds.length,
-    requestedAt,
-    note: String(note || "").trim().slice(0, 400),
-  });
-
-  await SellerSettlement.updateMany(
-    { _id: { $in: settlementIds } },
+  const lockResult = await SellerSettlement.updateMany(
+    {
+      _id: { $in: settlementIds },
+      seller: sellerId,
+      status: "ready",
+      payoutBatch: null,
+    },
     {
       $set: {
         status: "requested",
-        payoutBatch: batch._id,
+        payoutBatch: batchId,
         payoutReference: reference,
         requestedAt,
         notes: "Included in a payout request.",
@@ -434,6 +455,52 @@ const requestSellerPayout = async (sellerId, { note = "" } = {}) => {
       },
     }
   );
+
+  const lockedCount = getWriteCount(lockResult);
+  if (lockedCount !== settlementIds.length) {
+    if (lockedCount > 0) {
+      await SellerSettlement.updateMany(
+        { _id: { $in: settlementIds }, payoutBatch: batchId, status: "requested" },
+        {
+          $set: buildReadySettlementReset(
+            requestedAt,
+            "Payout request could not be completed. Settlement is ready again."
+          ),
+        }
+      );
+    }
+
+    return {
+      error: "These settlements were just updated. Refresh and try again.",
+      status: 409,
+    };
+  }
+
+  let batch;
+  try {
+    batch = await SellerPayoutBatch.create({
+      _id: batchId,
+      seller: sellerId,
+      settlementIds,
+      reference,
+      status: "requested",
+      totalAmount,
+      settlementCount: settlementIds.length,
+      requestedAt,
+      note: String(note || "").trim().slice(0, 400),
+    });
+  } catch (error) {
+    await SellerSettlement.updateMany(
+      { _id: { $in: settlementIds }, payoutBatch: batchId, status: "requested" },
+      {
+        $set: buildReadySettlementReset(
+          new Date(),
+          "Payout request could not be created. Settlement is ready again."
+        ),
+      }
+    );
+    throw error;
+  }
 
   return {
     batch: formatPayoutBatch(batch),
@@ -447,9 +514,24 @@ const updatePayoutBatchStatus = async (batchId, nextStatus) => {
     return { error: "Payout batch not found.", status: 404 };
   }
 
+  const currentStatus = String(batch?.status || "").trim().toLowerCase();
   const normalizedStatus = String(nextStatus || "").trim().toLowerCase();
-  if (!["requested", "processing", "paid", "rejected"].includes(normalizedStatus)) {
+  if (!PAYOUT_BATCH_STATUSES.includes(normalizedStatus)) {
     return { error: "Payout status is invalid.", status: 400 };
+  }
+  if (!PAYOUT_BATCH_STATUSES.includes(currentStatus)) {
+    return { error: "Payout batch state is invalid.", status: 400 };
+  }
+  if (normalizedStatus === currentStatus) {
+    return { batch: formatPayoutBatch(batch) };
+  }
+
+  const allowedTransitions = PAYOUT_BATCH_TRANSITIONS[currentStatus] || [];
+  if (!allowedTransitions.includes(normalizedStatus)) {
+    return {
+      error: `Cannot move payout batch from ${currentStatus} to ${normalizedStatus}.`,
+      status: 409,
+    };
   }
 
   if (normalizedStatus === "paid") {
@@ -466,7 +548,7 @@ const updatePayoutBatchStatus = async (batchId, nextStatus) => {
 
   if (normalizedStatus === "paid") {
     await SellerSettlement.updateMany(
-      { _id: { $in: batch.settlementIds } },
+      { _id: { $in: batch.settlementIds }, payoutBatch: batch._id, status: "requested" },
       {
         $set: {
           status: "paid",
@@ -478,21 +560,17 @@ const updatePayoutBatchStatus = async (batchId, nextStatus) => {
     );
   } else if (normalizedStatus === "rejected") {
     await SellerSettlement.updateMany(
-      { _id: { $in: batch.settlementIds } },
+      { _id: { $in: batch.settlementIds }, payoutBatch: batch._id, status: "requested" },
       {
-        $set: {
-          status: "ready",
-          payoutBatch: null,
-          payoutReference: "",
-          requestedAt: null,
-          lastSyncedAt: new Date(),
-          notes: "Payout request rejected. Settlement is ready again.",
-        },
+        $set: buildReadySettlementReset(
+          new Date(),
+          "Payout request rejected. Settlement is ready again."
+        ),
       }
     );
   } else if (normalizedStatus === "processing") {
     await SellerSettlement.updateMany(
-      { _id: { $in: batch.settlementIds } },
+      { _id: { $in: batch.settlementIds }, payoutBatch: batch._id, status: "requested" },
       {
         $set: {
           status: "requested",
@@ -508,7 +586,7 @@ const updatePayoutBatchStatus = async (batchId, nextStatus) => {
 
 const listAdminPayoutBatches = async ({ status = "", limit = 18 } = {}) => {
   const normalizedStatus = String(status || "").trim().toLowerCase();
-  const filter = ["requested", "processing", "paid", "rejected"].includes(normalizedStatus)
+  const filter = PAYOUT_BATCH_STATUSES.includes(normalizedStatus)
     ? { status: normalizedStatus }
     : {};
   const normalizedLimit = Math.min(

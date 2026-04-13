@@ -11,7 +11,7 @@ const payoutStatusClass = (status = "") => {
   const normalized = String(status || "").trim().toLowerCase();
   if (["paid", "ready"].includes(normalized)) return "success";
   if (["requested", "processing", "holding"].includes(normalized)) return "warning";
-  if (["reversed", "rejected"].includes(normalized)) return "locked";
+  if (["reversed", "rejected", "cancelled"].includes(normalized)) return "locked";
   return "info";
 };
 
