@@ -246,8 +246,8 @@ export default function SellerDashboard() {
       const [profileResult, productsResult, ordersResult, contactResult, notificationsResult] =
         await Promise.all([
           apiFetchJson(`${API_URL}/api/users/me`),
-          apiFetchJson(`${API_URL}/api/products/seller/me`),
-          apiFetchJson(`${API_URL}/api/orders/seller`),
+          apiFetchJson(`${API_URL}/api/products/seller/me?compact=1&limit=200`),
+          apiFetchJson(`${API_URL}/api/orders/seller?compact=1&limit=300`),
           apiFetchJson(`${API_URL}/api/users/me/contact-requests?${contactQuery.toString()}`),
           apiFetchJson(`${API_URL}/api/users/me/notifications?limit=8`),
         ]);
@@ -774,7 +774,7 @@ export default function SellerDashboard() {
             <span className="seller-chip">Joined: {sellerJoinedLabel}</span>
           </div>
           <div className="seller-actions seller-dashboard-actions">
-            <button className="btn primary" type="button" onClick={() => goToProducts({ new: true })}>
+            <button className="btn ghost" type="button" onClick={() => goToProducts({ new: true })}>
               Add new product
             </button>
             <button className="btn ghost" type="button" onClick={() => openMyStore(false)}>

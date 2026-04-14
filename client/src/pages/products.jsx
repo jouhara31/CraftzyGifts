@@ -445,6 +445,10 @@ export default function Products() {
       name: String(item?.seller?.name || "").trim(),
       storeName: String(item?.seller?.storeName || "").trim(),
       profileImage: String(item?.seller?.profileImage || "").trim(),
+      shippingSummary:
+        item?.seller?.shippingSummary && typeof item.seller.shippingSummary === "object"
+          ? item.seller.shippingSummary
+          : undefined,
     },
   });
 

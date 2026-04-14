@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1100" role="img" aria-labelledby="title desc">
+  <title id="title">Level-1 DFD for Customer Module</title>
+  <desc id="desc">Customer-focused data flow diagram for CraftzyGifts showing account, product discovery, checkout, and order tracking processes.</desc>
+  <defs>
+    <style>
+      .bg { fill: #fffdfb; }
+      .frame { fill: #fffdfb; stroke: #d7c9b8; stroke-width: 2; }
+      .header { fill: #6f2b34; }
+      .header-text { font: 700 30px 'Segoe UI', Arial, sans-serif; fill: #fffaf5; }
+      .sub-text { font: 500 15px 'Segoe UI', Arial, sans-serif; fill: #6f6258; }
+      .entity { fill: #f7efe4; stroke: #6f2b34; stroke-width: 2.1; }
+      .process { fill: #ffffff; stroke: #243447; stroke-width: 2.6; }
+      .store { fill: #f3f6fa; stroke: #607086; stroke-width: 2.1; }
+      .entity-title { font: 700 22px 'Segoe UI', Arial, sans-serif; fill: #6f2b34; }
+      .process-title { font: 700 22px 'Segoe UI', Arial, sans-serif; fill: #243447; }
+      .store-title { font: 700 19px 'Segoe UI', Arial, sans-serif; fill: #243447; }
+      .body { font: 500 14px 'Segoe UI', Arial, sans-serif; fill: #334155; }
+      .small { font: 500 13px 'Segoe UI', Arial, sans-serif; fill: #556273; }
+      .connector { fill: none; stroke: #6f2b34; stroke-width: 3; marker-end: url(#arrow); }
+      .note { fill: #fffaf3; stroke: #d3c4b1; stroke-width: 1.3; }
+      .note-text { font: 500 12px 'Segoe UI', Arial, sans-serif; fill: #4b5563; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#6f2b34" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1600" height="1100" />
+  <rect class="frame" x="24" y="24" width="1552" height="1052" rx="28" />
+  <rect class="header" x="24" y="24" width="1552" height="86" rx="28" />
+  <text class="header-text" x="800" y="77" text-anchor="middle">Figure 7.2 Level-1 DFD for Customer Module</text>
+  <text class="sub-text" x="800" y="136" text-anchor="middle">Customer interactions with authentication, discovery, checkout, and order history workflows</text>
+
+  <rect class="entity" x="70" y="446" width="220" height="118" rx="22" />
+  <text class="entity-title" x="180" y="495" text-anchor="middle">Customer</text>
+  <text class="body" x="180" y="525" text-anchor="middle">Uses the storefront</text>
+
+  <rect class="entity" x="72" y="870" width="220" height="110" rx="22" />
+  <text class="entity-title" x="182" y="915" text-anchor="middle">Payment Gateway</text>
+  <text class="body" x="182" y="944" text-anchor="middle">Payment status source</text>
+
+  <rect class="process" x="360" y="160" width="470" height="124" rx="28" />
+  <text class="process-title" x="595" y="211" text-anchor="middle">1.0 Account and Session Management</text>
+  <text class="body" x="595" y="240" text-anchor="middle">Register, login, verify email, reset password, restore session</text>
+
+  <rect class="process" x="360" y="350" width="470" height="124" rx="28" />
+  <text class="process-title" x="595" y="401" text-anchor="middle">2.0 Product Discovery and Product View</text>
+  <text class="body" x="595" y="430" text-anchor="middle">Browse products, apply filters, open details, view seller store</text>
+
+  <rect class="process" x="360" y="540" width="470" height="124" rx="28" />
+  <text class="process-title" x="595" y="591" text-anchor="middle">3.0 Cart, Checkout, and Payment Processing</text>
+  <text class="body" x="595" y="620" text-anchor="middle">Cart updates, address selection, order creation, payment outcome</text>
+
+  <rect class="process" x="360" y="730" width="470" height="124" rx="28" />
+  <text class="process-title" x="595" y="781" text-anchor="middle">4.0 Orders and Profile Management</text>
+  <text class="body" x="595" y="810" text-anchor="middle">Track orders, manage addresses, profile updates, wishlist access</text>
+
+  <rect class="store" x="1030" y="130" width="420" height="102" rx="20" />
+  <line x1="1058" y1="130" x2="1058" y2="232" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1084" y="170">D1 User</text>
+  <text class="small" x="1084" y="196">Accounts, sessions, profile details, addresses</text>
+
+  <rect class="store" x="1030" y="300" width="420" height="102" rx="20" />
+  <line x1="1058" y1="300" x2="1058" y2="402" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1084" y="340">D2 Product</text>
+  <text class="small" x="1084" y="366">Catalog, pricing, seller-linked items, media</text>
+
+  <rect class="store" x="1030" y="470" width="420" height="102" rx="20" />
+  <line x1="1058" y1="470" x2="1058" y2="572" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1084" y="510">D4 CategoryMaster / CustomizationMaster</text>
+  <text class="small" x="1084" y="536">Category filters and customization reference data</text>
+
+  <rect class="store" x="1030" y="700" width="420" height="110" rx="20" />
+  <line x1="1058" y1="700" x2="1058" y2="810" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1084" y="741">D3 Order</text>
+  <text class="small" x="1084" y="767">Order records, payment status, shipping and history</text>
+
+  <path class="connector" d="M290 505 L360 222" />
+  <path class="connector" d="M290 505 L360 412" />
+  <path class="connector" d="M290 505 L360 602" />
+  <path class="connector" d="M290 505 L360 792" />
+
+  <path class="connector" d="M830 222 L1030 180" />
+  <path class="connector" d="M830 412 L1030 351" />
+  <path class="connector" d="M830 432 L1030 522" />
+  <path class="connector" d="M830 602 L1030 755" />
+  <path class="connector" d="M830 792 L1030 755" />
+  <path class="connector" d="M830 602 L1030 522" />
+  <path class="connector" d="M830 792 L1030 180" />
+  <path class="connector" d="M292 924 L360 622" />
+
+  <rect class="note" x="166" y="208" width="152" height="44" rx="12" />
+  <text class="note-text" x="242" y="235" text-anchor="middle">credentials, tokens</text>
+
+  <rect class="note" x="170" y="385" width="142" height="44" rx="12" />
+  <text class="note-text" x="241" y="412" text-anchor="middle">search and filters</text>
+
+  <rect class="note" x="171" y="617" width="166" height="44" rx="12" />
+  <text class="note-text" x="254" y="644" text-anchor="middle">cart and checkout data</text>
+
+  <rect class="note" x="170" y="797" width="174" height="44" rx="12" />
+  <text class="note-text" x="257" y="824" text-anchor="middle">orders and profile actions</text>
+
+  <rect class="note" x="862" y="158" width="134" height="42" rx="12" />
+  <text class="note-text" x="929" y="183" text-anchor="middle">user records</text>
+
+  <rect class="note" x="880" y="330" width="128" height="42" rx="12" />
+  <text class="note-text" x="944" y="355" text-anchor="middle">catalog data</text>
+
+  <rect class="note" x="862" y="560" width="146" height="42" rx="12" />
+  <text class="note-text" x="935" y="585" text-anchor="middle">order write/read</text>
+
+  <rect class="note" x="880" y="470" width="130" height="42" rx="12" />
+  <text class="note-text" x="945" y="495" text-anchor="middle">reference data</text>
+</svg>

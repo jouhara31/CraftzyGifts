@@ -74,6 +74,12 @@ const createShipmentDrafts = (orders = []) =>
     return acc;
   }, {});
 
+const SHIPPING_WORKSPACE_TABS = [
+  { id: "dispatch", label: "Dispatch console" },
+  { id: "summary", label: "Live summary" },
+  { id: "queue", label: "Shipment queue" },
+];
+
 export default function SellerShipping() {
   const navigate = useNavigate();
   useHashScroll();
@@ -107,6 +113,7 @@ export default function SellerShipping() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState("dispatch");
 
   const clearAndRedirect = useCallback(() => {
     clearAuthSession();
@@ -251,6 +258,30 @@ export default function SellerShipping() {
       storeLabel: asText(profile?.storeName || profile?.name) || "Your store",
     };
   }, [pickupAddress, profile, shippingSettings]);
+  const workspaceStatusLabel = error
+    ? "Attention needed"
+    : notice
+      ? "Saved for your store"
+      : refreshing
+        ? "Refreshing console"
+        : loading
+          ? "Preparing console"
+          : "Shipping desk note";
+  const workspaceStatusMessage =
+    error ||
+    notice ||
+    (refreshing
+      ? "Refreshing shipping controls and the live shipment queue."
+      : loading
+        ? "Loading current shipping controls and delivery defaults."
+        : "Shape checkout charges, pickup readiness, and dispatch promises before every handoff.");
+  const workspaceStatusTone = error
+    ? "is-error"
+    : notice
+      ? "is-success"
+      : refreshing || loading
+        ? "is-loading"
+        : "is-info";
 
   const handleSettingsSave = async (event) => {
     event.preventDefault();
@@ -391,127 +422,173 @@ export default function SellerShipping() {
 
   return (
     <div className="seller-shell-view seller-shipping-page">
-      <div className="section-head">
-        <div>
-          <h2>Shipping and delivery</h2>
-          <p>Control pickup settings, delivery charges, courier preferences, and tracking data.</p>
-        </div>
-        <div className="seller-toolbar">
-          <button
-            className="btn ghost"
-            type="button"
-            onClick={handleRefresh}
-            disabled={refreshing}
-            aria-busy={refreshing}
-          >
-            {refreshing ? "Refreshing..." : "Refresh"}
-          </button>
-        </div>
-      </div>
+      <div className="shipping-workspace-frame">
+        <section className="shipping-workspace-hero" aria-label="Shipping workspace overview">
+          <div className="shipping-workspace-hero-main">
+            <div className="shipping-workspace-copy">
+              <span className="shipping-workspace-eyebrow">Seller logistics console</span>
+              <h2>Shipping and delivery</h2>
+              <p>
+                Control pickup settings, delivery charges, courier preferences, and tracking data
+                from one focused workspace.
+              </p>
+            </div>
+            <div className="shipping-workspace-actions">
+              <span className={`shipping-workspace-status ${workspaceStatusTone}`.trim()}>
+                <span className="shipping-workspace-status-label">{workspaceStatusLabel}</span>
+                <strong>{workspaceStatusMessage}</strong>
+              </span>
+              <button
+                className="btn ghost shipping-workspace-refresh"
+                type="button"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                aria-busy={refreshing}
+              >
+                <svg
+                  className={refreshing ? "is-spinning" : ""}
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M20 12a8 8 0 1 1-2.3-5.6" />
+                  <path d="M20 5v5h-5" />
+                </svg>
+                <span>{refreshing ? "Refreshing..." : "Refresh"}</span>
+              </button>
+            </div>
+          </div>
 
-      {loading ? <p className="field-hint">Loading shipping workspace...</p> : null}
-      {error ? <p className="field-hint">{error}</p> : null}
-      {notice ? <p className="field-hint">{notice}</p> : null}
+          {!loading ? (
+            <div className="shipping-workspace-hero-grid">
+              <div className="shipping-workspace-metrics" aria-label="Shipping highlights">
+                <article className="shipping-workspace-stat">
+                  <span>Base rate</span>
+                  <strong>{money(shippingOverview.deliveryCharge)}</strong>
+                  <p>
+                    {shippingOverview.freeThreshold > 0
+                      ? `Free shipping unlocks at ${money(shippingOverview.freeThreshold)}.`
+                      : "Free shipping is currently disabled."}
+                  </p>
+                </article>
+                <article className="shipping-workspace-stat">
+                  <span>Dispatch promise</span>
+                  <strong>{shippingOverview.processingWindow}</strong>
+                  <p>
+                    Default method: {shippingOverview.methodLabel}. Handled by{" "}
+                    {shippingOverview.deliveryManagerLabel}.
+                  </p>
+                </article>
+                <article className="shipping-workspace-stat">
+                  <span>Live queue</span>
+                  <strong>
+                    {shipmentQueue.length} active shipment{shipmentQueue.length === 1 ? "" : "s"}
+                  </strong>
+                  <p>Orders ready for courier assignment, tracking, and AWB updates.</p>
+                </article>
+              </div>
 
-      {!loading ? (
-        <div className="seller-settings-grid">
+              <div
+                className={`shipping-workspace-spotlight ${
+                  shippingOverview.pickupReady ? "is-ready" : "is-pending"
+                }`.trim()}
+              >
+                <div className="shipping-workspace-spotlight-top">
+                  <span className="shipping-workspace-spotlight-label">Pickup origin</span>
+                  <span className="shipping-workspace-spotlight-badge">
+                    {shippingOverview.pickupReady ? "Ready for handoff" : "Needs completion"}
+                  </span>
+                </div>
+                <strong>
+                  {shippingOverview.pickupPreview ||
+                    "Add a complete pickup address to make dispatch handoffs smoother."}
+                </strong>
+                <p>
+                  {shippingOverview.pickupReady
+                    ? `Active window ${shippingOverview.pickupWindow}${
+                        shippingOverview.pickupContact
+                          ? ` • Contact ${shippingOverview.pickupContact}`
+                          : ""
+                      } for ${shippingOverview.storeLabel}.`
+                    : "Line 1, city, state, and pincode together create the dispatch-ready pickup profile."}
+                </p>
+                <div className="shipping-workspace-spotlight-chips" aria-label="Shipping defaults">
+                  <span className="shipping-workspace-spotlight-chip">
+                    {shippingOverview.methodLabel}
+                  </span>
+                  <span className="shipping-workspace-spotlight-chip">
+                    {shippingOverview.courierLabel}
+                  </span>
+                  <span className="shipping-workspace-spotlight-chip">
+                    {shippingOverview.deliveryRegions.length > 0
+                      ? `${shippingOverview.deliveryRegions.length} saved region${
+                          shippingOverview.deliveryRegions.length === 1 ? "" : "s"
+                        }`
+                      : "All India coverage"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+        </section>
+
+        {!loading ? (
+          <div className="shipping-workspace-nav">
+            <div className="shipping-workspace-tabs" role="tablist" aria-label="Shipping workspace tabs">
+              {SHIPPING_WORKSPACE_TABS.map((tab) => {
+                const isActive = activeWorkspaceTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    className={`shipping-workspace-tab${isActive ? " is-active" : ""}`}
+                    onClick={() => setActiveWorkspaceTab(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {!loading ? (
+          <div className="seller-settings-grid">
           <section
             className="seller-panel seller-settings-card seller-shipping-settings-card seller-anchor-section"
             id="shipping-settings"
+            hidden={activeWorkspaceTab === "queue"}
           >
             <div className="shipping-settings-shell">
-              <div className="shipping-settings-hero">
-                <div className="shipping-settings-summary">
-                  <span className="seller-instagram-kicker shipping-settings-kicker">
-                    Dispatch console
-                  </span>
-                  <div className="shipping-settings-heading">
-                    <h3>Delivery settings</h3>
-                    <p>
-                      Set your default shipping rules and pickup address used by the seller team.
-                    </p>
-                  </div>
-                  <div
-                    className={`shipping-settings-preview ${
-                      shippingOverview.pickupReady ? "is-ready" : "is-pending"
-                    }`.trim()}
+              <div
+                className={`shipping-settings-workbench ${
+                  activeWorkspaceTab === "summary" ? "is-summary-view" : "is-dispatch-view"
+                }`.trim()}
+              >
+                <div className="shipping-settings-main-panel" hidden={activeWorkspaceTab !== "dispatch"}>
+                  <form
+                    className="auth-form seller-settings-form shipping-settings-form"
+                    onSubmit={handleSettingsSave}
                   >
-                    <span className="shipping-settings-preview-label">
-                      {shippingOverview.pickupReady ? "Pickup desk ready" : "Pickup details pending"}
-                    </span>
-                    <strong>
-                      {shippingOverview.pickupPreview ||
-                        "Add a complete pickup address to make dispatch handoffs smoother."}
-                    </strong>
-                    <span>
-                      {shippingOverview.pickupReady
-                        ? `Active window ${shippingOverview.pickupWindow}${
-                            shippingOverview.pickupContact
-                              ? ` • Contact ${shippingOverview.pickupContact}`
-                              : ""
-                          } for ${shippingOverview.storeLabel}.`
-                        : "Line 1, city, state, and pincode together create the dispatch-ready pickup profile."}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="shipping-settings-metrics">
-                  <article className="shipping-settings-metric">
-                    <span>Shipping method</span>
-                    <strong>{shippingOverview.methodLabel}</strong>
-                    <p>Default service promise shown across fulfillment ops.</p>
-                  </article>
-                  <article className="shipping-settings-metric">
-                    <span>Delivery owner</span>
-                    <strong>{shippingOverview.deliveryManagerLabel}</strong>
-                    <p>Who usually completes the final doorstep handoff.</p>
-                  </article>
-                  <article className="shipping-settings-metric">
-                    <span>Partner preference</span>
-                    <strong>{shippingOverview.courierLabel}</strong>
-                    <p>Default label used when a delivery boy or courier handles the order.</p>
-                  </article>
-                  <article className="shipping-settings-metric">
-                    <span>Base shipping</span>
-                    <strong>{money(shippingOverview.deliveryCharge)}</strong>
-                    <p>Default charge applied before free-shipping rules.</p>
-                  </article>
-                  <article className="shipping-settings-metric">
-                    <span>Free shipping</span>
-                    <strong>
-                      {shippingOverview.freeThreshold > 0
-                        ? money(shippingOverview.freeThreshold)
-                        : "Disabled"}
-                    </strong>
-                    <p>Threshold customers need to unlock free delivery.</p>
-                  </article>
-                  <article className="shipping-settings-metric">
-                    <span>Processing window</span>
-                    <strong>{shippingOverview.processingWindow}</strong>
-                    <p>Estimated seller-side turnaround before courier handoff.</p>
-                  </article>
-                  <article className="shipping-settings-metric">
-                    <span>Delivery regions</span>
-                    <strong>
-                      {shippingOverview.deliveryRegions.length > 0
-                        ? `${shippingOverview.deliveryRegions.length} zones`
-                        : "All India"}
-                    </strong>
-                    <p>Regions currently covered by this seller dispatch setup.</p>
-                  </article>
-                </div>
-              </div>
-
-              <form className="auth-form seller-settings-form shipping-settings-form" onSubmit={handleSettingsSave}>
-                <div className="shipping-settings-form-grid">
+                    <div className="shipping-settings-form-grid">
                   <section
-                    className="shipping-settings-block seller-anchor-section"
+                    className="shipping-settings-block is-rates seller-anchor-section"
                     id="shipping-rates"
                   >
                     <div className="shipping-settings-block-head">
-                      <span>Rate logic</span>
+                      <span>1 / Pricing rules</span>
                       <strong>Define how shipping behaves at checkout</strong>
                     </div>
+                    <p className="shipping-settings-block-copy">
+                      These values appear in product pages, carts, and checkout totals.
+                    </p>
 
                     <div className="field-row">
                       <label className="field">
@@ -662,13 +739,16 @@ export default function SellerShipping() {
                   </section>
 
                   <section
-                    className="shipping-settings-block seller-anchor-section"
+                    className="shipping-settings-block is-pickup seller-anchor-section"
                     id="shipping-pickup"
                   >
                     <div className="shipping-settings-block-head">
-                      <span>Pickup desk</span>
+                      <span>2 / Pickup origin</span>
                       <strong>Make the warehouse handoff unmistakably clear</strong>
                     </div>
+                    <p className="shipping-settings-block-copy">
+                      Courier teams and manual dispatch rely on this address as the pickup source.
+                    </p>
 
                     <div className="field-row">
                       <label className="field">
@@ -751,13 +831,16 @@ export default function SellerShipping() {
                   </section>
 
                   <section
-                    className="shipping-settings-block shipping-settings-block-wide seller-anchor-section"
+                    className="shipping-settings-block is-fulfillment shipping-settings-block-wide seller-anchor-section"
                     id="shipping-fulfillment"
                   >
                     <div className="shipping-settings-block-head">
-                      <span>Fulfillment timing</span>
+                      <span>3 / Dispatch timing</span>
                       <strong>Set expectation before the package enters the courier network</strong>
                     </div>
+                    <p className="shipping-settings-block-copy">
+                      Use this section for preparation window and seller-side handling instructions.
+                    </p>
 
                     <div className="field-row">
                       <label className="field">
@@ -809,31 +892,89 @@ export default function SellerShipping() {
                   </section>
                 </div>
 
-                <div className="seller-settings-actions shipping-settings-actions">
-                <p className="field-hint">
-                    These defaults shape seller dispatch workflow, label preparation, courier routing, and delivery reporting.
-                  </p>
-                  <button className="btn primary" type="submit" disabled={savingSettings}>
-                    {savingSettings ? "Saving..." : "Save shipping settings"}
-                  </button>
+                    <div className="seller-settings-actions shipping-settings-actions">
+                      <p className="field-hint">
+                        These defaults power product page shipping info, cart totals, checkout, and dispatch handoff.
+                      </p>
+                      <button className="btn primary" type="submit" disabled={savingSettings}>
+                        {savingSettings ? "Saving..." : "Save shipping settings"}
+                      </button>
+                    </div>
+                  </form>
                 </div>
-              </form>
+
+                <div
+                  className="shipping-settings-overview-panel shipping-settings-overview-panel--standalone"
+                  hidden={activeWorkspaceTab !== "summary"}
+                >
+                  <div className="shipping-settings-overview-head">
+                    <strong>Customer-facing defaults</strong>
+                    <p className="shipping-settings-overview-copy">
+                      Current shipping rules reflected in product pages and checkout totals.
+                    </p>
+                  </div>
+                  <div className="shipping-settings-metrics">
+                    <article className="shipping-settings-metric">
+                      <span>Base shipping</span>
+                      <strong>{money(shippingOverview.deliveryCharge)}</strong>
+                      <p>Applied when free shipping does not unlock.</p>
+                    </article>
+                    <article className="shipping-settings-metric">
+                      <span>Free shipping</span>
+                      <strong>
+                        {shippingOverview.freeThreshold > 0
+                          ? money(shippingOverview.freeThreshold)
+                          : "Disabled"}
+                      </strong>
+                      <p>Minimum cart value needed for complimentary delivery.</p>
+                    </article>
+                    <article className="shipping-settings-metric">
+                      <span>Processing</span>
+                      <strong>{shippingOverview.processingWindow}</strong>
+                      <p>Average seller-side handoff window.</p>
+                    </article>
+                    <article className="shipping-settings-metric">
+                      <span>Delivery owner</span>
+                      <strong>{shippingOverview.deliveryManagerLabel}</strong>
+                      <p>Who usually completes the final drop.</p>
+                    </article>
+                    <article className="shipping-settings-metric">
+                      <span>Shipping method</span>
+                      <strong>{shippingOverview.methodLabel}</strong>
+                      <p>Default promise shown during fulfillment.</p>
+                    </article>
+                    <article className="shipping-settings-metric">
+                      <span>Partner preference</span>
+                      <strong>{shippingOverview.courierLabel}</strong>
+                      <p>Default label used when external delivery handles the order.</p>
+                    </article>
+                  </div>
+                  <div className="shipping-settings-overview-note">
+                    <strong>Coverage</strong>
+                    <span>
+                      {shippingOverview.deliveryRegions.length > 0
+                        ? shippingOverview.deliveryRegions.join(" • ")
+                        : "All India"}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
 
           <section
             className="seller-panel seller-settings-card seller-anchor-section"
             id="shipment-queue"
+            hidden={activeWorkspaceTab !== "queue"}
           >
             <div className="seller-panel-head">
               <div>
-                <h3>Shipment queue</h3>
                 <p>Update delivery owner, tracking, and AWB details for live seller orders.</p>
               </div>
               <span className="chip">{shipmentQueue.length} active shipments</span>
             </div>
 
-            <div className="payout-grid">
+            <div className="shipment-queue-grid">
               {shipmentQueue.map((order) => {
                 const orderId = asText(order?._id);
                 const draft = shipmentDrafts[orderId] || {
@@ -846,22 +987,31 @@ export default function SellerShipping() {
                   packagingNotes: "",
                 };
                 return (
-                  <article key={orderId} className="payout-card">
-                    <div className="payout-head">
-                      <span>{orderId.slice(-8).toUpperCase()}</span>
+                  <article key={orderId} className="shipment-queue-card">
+                    <div className="shipment-queue-card-head">
+                      <span className="shipment-queue-order-id">
+                        {orderId.slice(-8).toUpperCase()}
+                      </span>
                       <span className={`status-pill ${getOrderStatusClass(asText(order?.status))}`}>
                         {asText(order?.status).replace(/_/g, " ") || "order"}
                       </span>
                     </div>
-                    <p className="payout-amount">{money(order?.total)}</p>
-                    <p className="payout-sub">
-                      {(order?.product?.name || "Product").trim()} for{" "}
-                      {asText(order?.customer?.name) || "Customer"}
-                    </p>
-                    <p className="field-hint">
+                    <div className="shipment-queue-product-copy">
+                      <strong>{(order?.product?.name || "Product").trim()}</strong>
+                      <span>For {asText(order?.customer?.name) || "Customer"}</span>
+                    </div>
+                    <div className="shipment-queue-highlights">
+                      <strong>{money(order?.total)}</strong>
+                      <span>
+                        {asText(order?.paymentMode).toLowerCase() === "cod"
+                          ? "Cash on delivery"
+                          : "Paid online"}
+                      </span>
+                    </div>
+                    <p className="shipment-queue-note">
                       {buildInlineAddress(order?.shippingAddress) || "Shipping address not available"}
                     </p>
-                    <p className="field-hint">
+                    <p className="shipment-queue-note is-muted">
                       {asText(order?.paymentMode).toLowerCase() === "cod"
                         ? `COD will be collected by ${
                             DELIVERY_MANAGER_LABELS[
@@ -870,34 +1020,36 @@ export default function SellerShipping() {
                           } when this order is delivered.`
                         : "Online payment already settles before final delivery."}
                     </p>
-                    <div className="field-row">
-                      <label className="field">
-                        <span>Delivery handled by</span>
-                        <select
-                          value={draft.deliveryManagedBy}
-                          onChange={(event) =>
-                            handleShipmentDraftChange(orderId, "deliveryManagedBy", event.target.value)
-                          }
-                        >
-                          <option value="seller">Seller team</option>
-                          <option value="delivery_partner">Delivery boy / courier</option>
-                        </select>
-                      </label>
-                      <label className="field">
-                        <span>Shipment status</span>
-                        <select
-                          value={draft.status}
-                          onChange={(event) =>
-                            handleShipmentDraftChange(orderId, "status", event.target.value)
-                          }
-                        >
-                          {Object.entries(SHIPMENT_STATUS_LABELS).map(([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                    <div className="shipment-queue-fields">
+                      <div className="field-row">
+                        <label className="field">
+                          <span>Delivery handled by</span>
+                          <select
+                            value={draft.deliveryManagedBy}
+                            onChange={(event) =>
+                              handleShipmentDraftChange(orderId, "deliveryManagedBy", event.target.value)
+                            }
+                          >
+                            <option value="seller">Seller team</option>
+                            <option value="delivery_partner">Delivery boy / courier</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Shipment status</span>
+                          <select
+                            value={draft.status}
+                            onChange={(event) =>
+                              handleShipmentDraftChange(orderId, "status", event.target.value)
+                            }
+                          >
+                            {Object.entries(SHIPMENT_STATUS_LABELS).map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
                       <label className="field">
                         <span>Dispatch date</span>
                         <input
@@ -908,62 +1060,62 @@ export default function SellerShipping() {
                           }
                         />
                       </label>
-                    </div>
-                    <div className="field-row">
+                      <div className="field-row">
+                        <label className="field">
+                          <span>
+                            {normalizeDeliveryManagedBy(draft.deliveryManagedBy, "seller") === "seller"
+                              ? "Seller runner / note"
+                              : "Courier / rider"}
+                          </span>
+                          <input
+                            type="text"
+                            value={draft.courierName}
+                            onChange={(event) =>
+                              handleShipmentDraftChange(orderId, "courierName", event.target.value)
+                            }
+                            placeholder={
+                              normalizeDeliveryManagedBy(draft.deliveryManagedBy, "seller") === "seller"
+                                ? "Seller staff, local runner, or own vehicle"
+                                : "Courier partner or rider name"
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Tracking ID</span>
+                          <input
+                            type="text"
+                            value={draft.trackingId}
+                            onChange={(event) =>
+                              handleShipmentDraftChange(orderId, "trackingId", event.target.value)
+                            }
+                            placeholder="Tracking reference"
+                          />
+                        </label>
+                      </div>
                       <label className="field">
-                        <span>
-                          {normalizeDeliveryManagedBy(draft.deliveryManagedBy, "seller") === "seller"
-                            ? "Seller runner / note"
-                            : "Courier / rider"}
-                        </span>
+                        <span>AWB number</span>
                         <input
                           type="text"
-                          value={draft.courierName}
+                          value={draft.awbNumber}
                           onChange={(event) =>
-                            handleShipmentDraftChange(orderId, "courierName", event.target.value)
+                            handleShipmentDraftChange(orderId, "awbNumber", event.target.value)
                           }
-                          placeholder={
-                            normalizeDeliveryManagedBy(draft.deliveryManagedBy, "seller") === "seller"
-                              ? "Seller staff, local runner, or own vehicle"
-                              : "Courier partner or rider name"
-                          }
+                          placeholder="Airway bill number"
                         />
                       </label>
                       <label className="field">
-                        <span>Tracking ID</span>
-                        <input
-                          type="text"
-                          value={draft.trackingId}
+                        <span>Packaging notes</span>
+                        <textarea
+                          rows="3"
+                          value={draft.packagingNotes}
                           onChange={(event) =>
-                            handleShipmentDraftChange(orderId, "trackingId", event.target.value)
+                            handleShipmentDraftChange(orderId, "packagingNotes", event.target.value)
                           }
-                          placeholder="Tracking reference"
+                          placeholder="Packed with tissue wrap, fragile sticker applied, include thank-you card."
                         />
                       </label>
                     </div>
-                    <label className="field">
-                      <span>AWB number</span>
-                      <input
-                        type="text"
-                        value={draft.awbNumber}
-                        onChange={(event) =>
-                          handleShipmentDraftChange(orderId, "awbNumber", event.target.value)
-                        }
-                        placeholder="Airway bill number"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Packaging notes</span>
-                      <textarea
-                        rows="3"
-                        value={draft.packagingNotes}
-                        onChange={(event) =>
-                          handleShipmentDraftChange(orderId, "packagingNotes", event.target.value)
-                        }
-                        placeholder="Packed with tissue wrap, fragile sticker applied, include thank-you card."
-                      />
-                    </label>
-                    <div className="seller-settings-actions">
+                    <div className="seller-settings-actions shipment-queue-actions">
                       <button
                         className="btn primary"
                         type="button"
@@ -981,8 +1133,9 @@ export default function SellerShipping() {
               ) : null}
             </div>
           </section>
-        </div>
-      ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

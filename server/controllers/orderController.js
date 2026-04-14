@@ -28,6 +28,10 @@ const {
   verifyRazorpayWebhookSignature,
 } = require("../utils/razorpayGateway");
 const { handleControllerError } = require("../utils/apiError");
+const {
+  allocateSellerDeliveryCharges,
+  buildPublicSellerShippingSummary,
+} = require("../utils/sellerShipping");
 
 const ONLINE_PAYMENT_MODES = new Set(["upi", "card"]);
 const ONLINE_PAYMENT_GATEWAY = "razorpay";
@@ -275,6 +279,7 @@ const buildOrderSellerSnapshot = (seller = {}) => ({
   legalBusinessName: String(seller?.legalBusinessName || "").trim(),
   gstNumber: String(seller?.gstNumber || "").trim(),
   returnWindowDays: normalizeReturnWindowDays(seller?.returnWindowDays),
+  shippingSummary: buildPublicSellerShippingSummary(seller?.sellerShippingSettings),
   billingAddress:
     seller?.billingAddress && typeof seller.billingAddress === "object"
       ? {
@@ -1025,7 +1030,8 @@ const buildInvoicePayload = (order = {}) => {
     0,
     Number(order?.makingCharge || order?.customization?.makingCharge || 0)
   );
-  const grandTotal = Math.max(0, Number(order?.total || subtotal + makingCharge));
+  const deliveryCharge = Math.max(0, Number(order?.deliveryCharge || 0));
+  const grandTotal = Math.max(0, Number(order?.total || subtotal + makingCharge + deliveryCharge));
   const packagingStyleTitle = String(order?.customization?.packagingStyleTitle || "").trim();
   const giftMessage = String(order?.customization?.wishCardText || "").trim();
   const orderNote = String(order?.customization?.specialNote || "").trim();
@@ -1076,6 +1082,8 @@ const buildInvoicePayload = (order = {}) => {
     subtotal: isGenericHamper ? itemizedSubtotal : subtotal,
     makingChargeLabel: isGenericHamper ? "Build fee" : "Customization / packaging",
     makingCharge: isGenericHamper ? assemblyCharge : makingCharge,
+    deliveryLabel: "Delivery",
+    deliveryCharge,
     taxLabel: "Tax included",
     taxAmount: taxBreakdown.taxAmount,
     totalLabel: "Grand total",
@@ -1890,6 +1898,7 @@ const buildOrderDraft = async ({
     quantity: parsedQuantity,
     price,
     makingCharge,
+    deliveryCharge: 0,
     total,
     status: onlineMode ? "pending_payment" : "placed",
     paymentStatus: "pending",
@@ -2495,6 +2504,7 @@ exports.createOrder = async (req, res) => {
       paymentGroupId: onlineMode ? createPaymentGroupId() : "",
       checkoutSource: "web",
     });
+    allocateSellerDeliveryCharges([order]);
 
     let stockChange = null;
     if (!onlineMode) {
@@ -2569,6 +2579,7 @@ exports.createCheckoutSession = async (req, res) => {
       });
       drafts.push(draft);
     }
+    allocateSellerDeliveryCharges(drafts);
 
     if (!onlineMode) {
       const processed = [];
@@ -2799,24 +2810,81 @@ exports.getMyOrderShippingLabel = async (req, res) => {
 
 exports.getSellerOrders = async (req, res) => {
   try {
-    let orders = await Order.find({ seller: req.user.id })
-      .populate("product")
-      .populate("customer", "name email phone")
-      .sort({ createdAt: -1 });
+    const limit = Math.max(0, Math.min(Number(req.query?.limit || 0) || 0, 500));
+    const compact = ["1", "true"].includes(String(req.query?.compact || "").trim().toLowerCase());
+    const productFields = "name category image images price";
+
+    const buildOrdersQuery = (filter) => {
+      const query = Order.find(filter)
+        .populate("product", compact ? productFields : undefined)
+        .populate("customer", compact ? "name" : "name email phone")
+        .sort({ createdAt: -1 });
+      if (compact) {
+        query.select(
+          "_id status total quantity paymentStatus paymentMode createdAt product customer productSnapshot"
+        );
+      }
+      if (limit > 0) {
+        query.limit(limit);
+      }
+      return query;
+    };
+
+    let orders = await buildOrdersQuery({ seller: req.user.id }).lean();
 
     if (orders.length === 0) {
       const sellerProducts = await Product.find({ seller: req.user.id }).select("_id");
       const productIds = sellerProducts.map((product) => product._id);
 
       if (productIds.length > 0) {
-        orders = await Order.find({ product: { $in: productIds } })
-          .populate("product")
-          .populate("customer", "name email phone")
-          .sort({ createdAt: -1 });
+        orders = await buildOrdersQuery({ product: { $in: productIds } }).lean();
       }
     }
 
-    res.json(orders.map((order) => serializeOrderForResponse(order)));
+    if (!compact) {
+      return res.json(orders.map((order) => serializeOrderForResponse(order)));
+    }
+
+    const compactOrders = orders.map((order) => {
+      const productSnapshot = order?.productSnapshot || {};
+      const populatedProduct = order?.product || {};
+      const product =
+        populatedProduct && typeof populatedProduct === "object"
+          ? {
+              _id: populatedProduct?._id || order?.product,
+              name: populatedProduct?.name || productSnapshot?.name,
+              category: populatedProduct?.category || productSnapshot?.category,
+              image: populatedProduct?.image || productSnapshot?.image,
+              images: populatedProduct?.images || productSnapshot?.images,
+              price: populatedProduct?.price ?? productSnapshot?.price,
+            }
+          : productSnapshot && typeof productSnapshot === "object"
+            ? {
+                _id: order?.product,
+                name: productSnapshot?.name,
+                category: productSnapshot?.category,
+                image: productSnapshot?.image,
+                images: productSnapshot?.images,
+                price: productSnapshot?.price,
+              }
+            : undefined;
+
+      return {
+        _id: order?._id,
+        status: order?.status,
+        total: order?.total,
+        quantity: order?.quantity,
+        paymentStatus: order?.paymentStatus,
+        paymentMode: order?.paymentMode,
+        createdAt: order?.createdAt,
+        product,
+        customer: order?.customer
+          ? { name: order.customer?.name }
+          : undefined,
+      };
+    });
+
+    return res.json(compactOrders);
   } catch (error) {
     return handleControllerError(res, error);
   }

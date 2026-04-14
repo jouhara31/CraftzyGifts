@@ -974,6 +974,10 @@ export default function Customization() {
             profileImage: String(
               sellerInfo?.profileImage || sellerProfile?.profileImage || ""
             ).trim(),
+            shippingSummary:
+              (sellerInfo?.shippingSummary && typeof sellerInfo.shippingSummary === "object"
+                ? sellerInfo.shippingSummary
+                : sellerProfile?.shippingSummary) || undefined,
           },
         });
       }
@@ -1013,6 +1017,10 @@ export default function Customization() {
           name: String(sellerProfile?.name || "").trim(),
           storeName: String(sellerProfile?.storeName || "").trim(),
           profileImage: String(sellerProfile?.profileImage || "").trim(),
+          shippingSummary:
+            sellerProfile?.shippingSummary && typeof sellerProfile.shippingSummary === "object"
+              ? sellerProfile.shippingSummary
+              : undefined,
         },
       });
     }

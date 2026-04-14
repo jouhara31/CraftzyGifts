@@ -18,21 +18,16 @@ import {
 } from "../utils/authRoute";
 import { hasActiveSession } from "../utils/authSession";
 import { fetchJsonCached } from "../utils/jsonCache";
+import { loadSellerStore } from "../utils/sellerStoreCache";
+import {
+  buildSellerShippingBreakdown,
+  buildSellerShippingLookupSeed,
+  getCustomizationCharge,
+  getItemPrice,
+  isGenericHamperItem,
+} from "../utils/shippingPricing";
 
 import { API_URL } from "../apiBase";
-
-const isGenericHamperItem = (item) =>
-  Boolean(String(item?.customization?.catalogSellerId || "").trim());
-const getCustomizationCharge = (item) =>
-  Number(item?.customization?.makingCharge || 0);
-const getItemPrice = (item) => {
-  if (isGenericHamperItem(item)) return 0;
-  if (typeof item?.price === "number" && Number.isFinite(item.price)) {
-    return item.price;
-  }
-  const parsed = Number(String(item?.price ?? "").replace(/[^\d.]/g, ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-};
 
 const formatPrice = (value) => Number(value || 0).toLocaleString("en-IN");
 
@@ -70,6 +65,10 @@ export default function Cart() {
   const [recoVisibleCount, setRecoVisibleCount] = useState(getRecoVisibleCount);
   const [recoStartIndex, setRecoStartIndex] = useState(0);
   const [notice, setNotice] = useState("");
+  const [sellerShippingLookup, setSellerShippingLookup] = useState(() =>
+    buildSellerShippingLookupSeed(getCart())
+  );
+  const [shippingLookupLoading, setShippingLookupLoading] = useState(false);
   const [sessionClaims, setSessionClaims] = useState(() => readStoredSessionClaims());
   const navigate = useNavigate();
   const userRole = sessionClaims.role;
@@ -126,6 +125,61 @@ export default function Cart() {
     };
   }, []);
 
+  useEffect(() => {
+    let ignore = false;
+    const seed = buildSellerShippingLookupSeed(items);
+    setSellerShippingLookup(seed);
+
+    const sellerIds = Array.from(
+      new Set(
+        items
+          .map((item) => String(item?.seller?.id || item?.seller?._id || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (sellerIds.length === 0) {
+      setShippingLookupLoading(false);
+      return undefined;
+    }
+
+    const loadSellerShipping = async () => {
+      setShippingLookupLoading(true);
+      try {
+        const results = await Promise.allSettled(
+          sellerIds.map((sellerId) =>
+            loadSellerStore(sellerId, {
+              includeProducts: false,
+              includeFeedbacks: false,
+              includeProductRatings: false,
+            })
+          )
+        );
+        if (ignore) return;
+
+        const nextLookup = { ...seed };
+        results.forEach((result, index) => {
+          if (result.status !== "fulfilled") return;
+          const sellerId = sellerIds[index];
+          const shippingSummary = result.value?.seller?.shippingSummary;
+          if (sellerId && shippingSummary && typeof shippingSummary === "object") {
+            nextLookup[sellerId] = shippingSummary;
+          }
+        });
+        setSellerShippingLookup(nextLookup);
+      } finally {
+        if (!ignore) {
+          setShippingLookupLoading(false);
+        }
+      }
+    };
+
+    loadSellerShipping();
+    return () => {
+      ignore = true;
+    };
+  }, [items]);
+
   const subtotal = items.reduce(
     (sum, item) => sum + getItemPrice(item) * item.quantity,
     0
@@ -139,7 +193,11 @@ export default function Cart() {
       ? "Build total"
       : "Customization charges";
   const itemsTotal = subtotal + customizationTotal;
-  const deliveryCharge = itemsTotal >= 999 ? 0 : 99;
+  const shippingBreakdown = useMemo(
+    () => buildSellerShippingBreakdown(items, sellerShippingLookup),
+    [items, sellerShippingLookup]
+  );
+  const deliveryCharge = shippingBreakdown.totalDeliveryCharge;
   const payableTotal = itemsTotal + deliveryCharge;
 
   const cartIdSet = useMemo(
@@ -186,6 +244,10 @@ export default function Cart() {
       name: String(item?.seller?.name || "").trim(),
       storeName: String(item?.seller?.storeName || "").trim(),
       profileImage: String(item?.seller?.profileImage || "").trim(),
+      shippingSummary:
+        item?.seller?.shippingSummary && typeof item.seller.shippingSummary === "object"
+          ? item.seller.shippingSummary
+          : undefined,
     },
   });
 
@@ -371,6 +433,36 @@ export default function Cart() {
               <span>Delivery costs</span>
               <strong>{deliveryCharge === 0 ? "Free" : `₹${formatPrice(deliveryCharge)}`}</strong>
             </div>
+            {shippingBreakdown.groups.length > 0 && (
+              <div className="cart-shipping-breakdown" aria-label="Seller delivery breakdown">
+                {shippingBreakdown.groups.map((group) => (
+                  <div
+                    key={`cart-shipping-${group.sellerId || group.sellerName}`}
+                    className="cart-shipping-breakdown-row"
+                  >
+                    <div>
+                      <strong>{group.sellerName}</strong>
+                      <p>
+                        {group.deliveryCharge === 0
+                          ? group.qualifiesForFreeShipping &&
+                            group.shippingSummary.freeShippingThreshold > 0
+                            ? `Free above ₹${formatPrice(group.shippingSummary.freeShippingThreshold)}`
+                            : "Complimentary seller delivery"
+                          : group.shippingSummary.freeShippingThreshold > 0
+                            ? `₹${formatPrice(group.remainingForFreeShipping)} away from free shipping`
+                            : "Seller delivery policy applied"}
+                      </p>
+                    </div>
+                    <span>
+                      {group.deliveryCharge === 0 ? "Free" : `₹${formatPrice(group.deliveryCharge)}`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {shippingLookupLoading && (
+              <p className="field-hint">Refreshing seller delivery rules...</p>
+            )}
             <div className="cart-summary-line total">
               <span>Total incl. GST</span>
               <strong>₹{formatPrice(payableTotal)}</strong>

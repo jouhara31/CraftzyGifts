@@ -4452,11 +4452,38 @@ h6 {
 
 .seller-dashboard-actions {
   justify-content: flex-start;
-  gap: 10px;
+  gap: 0;
+  align-items: center;
+  flex-wrap: nowrap;
+  row-gap: 0;
 }
 
 .seller-dashboard-actions .btn {
-  min-height: 42px;
+  min-height: auto;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: rgba(43, 29, 32, 0.82);
+  font-weight: 600;
+  font-size: 0.84rem;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  box-shadow: none;
+}
+
+.seller-dashboard-actions .btn + .btn {
+  border-left: 1px solid rgba(67, 39, 44, 0.18);
+  margin-left: 10px;
+  padding-left: 10px;
+}
+
+.seller-dashboard-actions .btn:hover,
+.seller-dashboard-actions .btn:focus-visible {
+  background: none;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  transform: none;
 }
 
 .seller-dashboard-hero-aside {
@@ -5339,11 +5366,50 @@ h6 {
   gap: 8px;
 }
 
+.seller-orders-page .orders-table {
+  gap: 8px;
+}
+
+.seller-orders-page .seller-orders-head {
+  align-items: center;
+  padding: 0 2px 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid rgba(67, 39, 44, 0.1);
+  background: none;
+}
+
+.seller-orders-page .seller-orders-head h2 {
+  margin-bottom: 2px;
+}
+
+.seller-orders-page .seller-orders-head p {
+  margin: 0;
+  color: rgba(67, 39, 44, 0.68);
+}
+
+.seller-orders-page .seller-orders-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.seller-orders-page .seller-orders-refresh svg {
+  width: 16px;
+  height: 16px;
+}
+
 .order-card {
   border-radius: 14px;
   border: 1px solid rgba(67, 39, 44, 0.1);
   background: rgba(255, 255, 255, 0.76);
   overflow: hidden;
+}
+
+.seller-orders-page .order-card {
+  border-radius: 0;
+  border-color: rgba(67, 39, 44, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 24px rgba(43, 29, 32, 0.06);
 }
 
 .order-row {
@@ -5354,6 +5420,116 @@ h6 {
   padding: 10px 0;
   border-bottom: 1px solid rgba(67, 39, 44, 0.08);
   font-size: 0.9rem;
+}
+
+.seller-orders-page .order-row {
+  padding: 12px 16px;
+  border-bottom-color: rgba(67, 39, 44, 0.08);
+}
+
+.seller-orders-page .order-row.order-head {
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(67, 39, 44, 0.7);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: 1px solid rgba(67, 39, 44, 0.12);
+  border-radius: 0;
+  box-shadow: 0 8px 18px rgba(43, 29, 32, 0.05);
+}
+
+.seller-orders-page .order-row:not(.order-head):hover {
+  background: rgba(249, 245, 239, 0.7);
+}
+
+.seller-orders-page .order-row > span {
+  color: rgba(43, 29, 32, 0.88);
+}
+
+.seller-orders-page .order-row > span + span {
+  border-left: 1px solid rgba(67, 39, 44, 0.08);
+  padding-left: 12px;
+}
+
+.seller-orders-page .order-row.order-head > span + span {
+  border-left-color: rgba(67, 39, 44, 0.12);
+}
+
+.seller-orders-page .order-row > span[data-label="Status"] .status-pill {
+  font-size: 0.74rem;
+}
+
+.seller-orders-page .order-row {
+  grid-template-columns: 0.95fr 0.95fr 1.2fr 1.7fr 0.9fr 0.9fr 1.3fr 1.1fr 0.8fr;
+}
+
+.seller-order-status-cell {
+  display: grid;
+  gap: 8px;
+  align-items: start;
+}
+
+.seller-order-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
+.seller-order-actions-cell {
+  display: grid;
+  gap: 6px;
+  align-items: start;
+}
+
+.seller-order-actions-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.seller-order-action-note {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(67, 39, 44, 0.18);
+  background: rgba(255, 255, 255, 0.82);
+  color: rgba(67, 39, 44, 0.72);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.seller-order-docs-cell {
+  display: grid;
+  gap: 6px;
+  align-items: start;
+}
+
+.seller-order-docs-cell .seller-doc-btn {
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(67, 39, 44, 0.18);
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.seller-order-docs-cell .seller-doc-btn:hover,
+.seller-order-docs-cell .seller-doc-btn:focus-visible {
+  background: rgba(255, 252, 248, 0.98);
+  border-color: rgba(123, 28, 38, 0.28);
+  transform: translateY(-1px);
 }
 
 .order-card .order-row {

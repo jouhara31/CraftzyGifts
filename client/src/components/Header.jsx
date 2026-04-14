@@ -181,6 +181,16 @@ const HeaderBottomNavIcon = ({ kind }) => {
       </svg>
     );
   }
+  if (kind === "orders") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="5" y="4" width="14" height="16" rx="2" />
+        <path d="M8 9h8" />
+        <path d="M8 13h8" />
+        <path d="M8 17h5" />
+      </svg>
+    );
+  }
   if (kind === "profile") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -547,6 +557,12 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
       to: "/products",
       icon: "products",
       active: location.pathname === "/products" || location.pathname.startsWith("/products/"),
+    },
+    {
+      label: "Orders",
+      to: toAuthPath("/orders"),
+      icon: "orders",
+      active: location.pathname === "/orders" || location.pathname.startsWith("/orders/"),
     },
     {
       label: "Wishlist",
@@ -1056,7 +1072,7 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               <circle cx="7" cy="17" r="1.4" />
               <circle cx="17" cy="17" r="1.4" />
             </svg>
-            Complimentary shipping on orders above ₹499
+            Seller-wise shipping is calculated clearly at checkout
           </span>
           <span className="utility-item">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1205,6 +1221,24 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
               {wishlistCount > 0 && <span className="icon-badge">{wishlistCount}</span>}
             </Link>
 
+            <Link className="icon-btn" to={toAuthPath("/orders")} aria-label="Orders">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect
+                  x="5"
+                  y="4"
+                  width="14"
+                  height="16"
+                  rx="2"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <path d="M8 9h8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M8 13h8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M8 17h5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+            </Link>
+
             <Link className="icon-btn" to={toAuthPath("/cart")} aria-label="Cart">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -1243,6 +1277,23 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
                 />
               </svg>
               {wishlistCount > 0 && <span className="icon-badge">{wishlistCount}</span>}
+            </Link>
+            <Link className="icon-btn" to={toAuthPath("/orders")} aria-label="Orders">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect
+                  x="5"
+                  y="4"
+                  width="14"
+                  height="16"
+                  rx="2"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <path d="M8 9h8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M8 13h8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M8 17h5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
             </Link>
             <button
               className={`icon-btn mobile-header-btn ${mobileSearchOpen ? "active" : ""}`}
@@ -1362,6 +1413,9 @@ export default function Header({ variant, onFilterClick, isFilterActive = false 
             )}
             <Link className="header-mobile-link" to={toAuthPath("/wishlist")} onClick={closeMobileMenu}>
               Wishlist
+            </Link>
+            <Link className="header-mobile-link" to={toAuthPath("/orders")} onClick={closeMobileMenu}>
+              Orders
             </Link>
             <Link className="header-mobile-link" to={toAuthPath("/cart")} onClick={closeMobileMenu}>
               Cart

@@ -159,6 +159,15 @@ const buildOrderReferenceLines = (invoice = {}) => {
     }: ${formatCurrency(summary?.makingCharge ?? invoice?.item?.makingCharge ?? 0, currencyCode)}`,
   ];
 
+  if (Number(summary?.deliveryCharge || invoice?.item?.deliveryCharge || 0) > 0) {
+    rows.push(
+      `${asText(summary?.deliveryLabel || "Delivery") || "Delivery"}: ${formatCurrency(
+        summary?.deliveryCharge ?? invoice?.item?.deliveryCharge ?? 0,
+        currencyCode
+      )}`
+    );
+  }
+
   if (taxRate > 0) {
     rows.push(`Applied tax rate: ${taxRate.toLocaleString("en-IN")} %`);
   }
@@ -190,6 +199,18 @@ const buildAmountSummaryRows = (invoice = {}) => {
       value: formatCurrency(summary?.makingCharge ?? invoice?.item?.makingCharge ?? 0, currencyCode),
       tone: "normal",
     },
+    ...(Number(summary?.deliveryCharge ?? invoice?.item?.deliveryCharge ?? 0) > 0
+      ? [
+          {
+            label: asText(summary?.deliveryLabel || "Delivery") || "Delivery",
+            value: formatCurrency(
+              summary?.deliveryCharge ?? invoice?.item?.deliveryCharge ?? 0,
+              currencyCode
+            ),
+            tone: "normal",
+          },
+        ]
+      : []),
     {
       label: asText(summary?.taxLabel || "Tax included") || "Tax included",
       value: formatCurrency(summary?.taxAmount ?? invoice?.item?.taxAmount ?? 0, currencyCode),

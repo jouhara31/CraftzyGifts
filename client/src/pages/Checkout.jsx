@@ -27,20 +27,17 @@ import {
   isBulkHamperCustomization,
 } from "../utils/hamperBuildSummary";
 import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
+import { loadSellerStore } from "../utils/sellerStoreCache";
+import {
+  buildSellerShippingBreakdown,
+  buildSellerShippingLookupSeed,
+  getCustomizationCharge,
+  getItemPrice,
+  isGenericHamperItem,
+  normalizeSellerShippingSummary,
+} from "../utils/shippingPricing";
 
 import { API_URL } from "../apiBase";
-const isGenericHamperItem = (item) =>
-  Boolean(String(item?.customization?.catalogSellerId || "").trim());
-const getCustomizationCharge = (item) =>
-  Number(item?.customization?.makingCharge || 0);
-const getItemPrice = (item) => {
-  if (isGenericHamperItem(item)) return 0;
-  if (typeof item?.price === "number" && Number.isFinite(item.price)) {
-    return item.price;
-  }
-  const parsed = Number(String(item?.price ?? "").replace(/[^\d.]/g, ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-};
 const hasReferenceImages = (customization) => {
   if (!customization || typeof customization !== "object") return false;
   if (Array.isArray(customization.referenceImageUrls)) {
@@ -134,6 +131,10 @@ export default function Checkout() {
     products: [],
     stats: null,
   });
+  const [sellerShippingLookup, setSellerShippingLookup] = useState(() =>
+    buildSellerShippingLookupSeed(getCart())
+  );
+  const [shippingLookupLoading, setShippingLookupLoading] = useState(false);
   const [sessionClaims, setSessionClaims] = useState(() => readStoredSessionClaims());
   const [paymentConfig, setPaymentConfig] = useState({
     onlinePaymentsEnabled: false,
@@ -146,7 +147,7 @@ export default function Checkout() {
   const [addressBookError, setAddressBookError] = useState("");
   const location = useLocation();
   const navigate = useNavigate();
-  const cartItems = getCart();
+  const cartItems = useMemo(() => getCart(), []);
   const storedBuyNowItem = useMemo(
     () => normalizeCheckoutItem(readBuyNowCheckoutItem()),
     []
@@ -156,7 +157,7 @@ export default function Checkout() {
       normalizeCheckoutItem(location.state?.buyNowItem) || storedBuyNowItem,
     [location.state, storedBuyNowItem]
   );
-  const items = buyNowItem ? [buyNowItem] : cartItems;
+  const items = useMemo(() => (buyNowItem ? [buyNowItem] : cartItems), [buyNowItem, cartItems]);
   const primaryItem = items[0] || null;
   const needsReferenceUpload = items.some(
     (item) => Boolean(item?.isCustomizable) && !hasReferenceImages(item?.customization)
@@ -176,7 +177,11 @@ export default function Checkout() {
     items.length > 0 && items.every((item) => isGenericHamperItem(item))
       ? "Build total"
       : "Customization charges";
-  const deliveryCharge = subtotal + customizationTotal >= 999 ? 0 : 99;
+  const shippingBreakdown = useMemo(
+    () => buildSellerShippingBreakdown(items, sellerShippingLookup),
+    [items, sellerShippingLookup]
+  );
+  const deliveryCharge = shippingBreakdown.totalDeliveryCharge;
   const total = subtotal + customizationTotal + deliveryCharge;
   const userRole = sessionClaims.role;
   const sellerStatus = sessionClaims.sellerStatus;
@@ -188,6 +193,15 @@ export default function Checkout() {
   const supportedPaymentModes = paymentConfig.supportedModes.filter(
     (mode) => PAYMENT_MODE_LABELS[mode]
   );
+  const primarySellerShippingSummary = normalizeSellerShippingSummary(
+    sellerPanel?.seller?.shippingSummary || primaryItem?.seller?.shippingSummary
+  );
+  const primarySellerPolicyNote =
+    primarySellerShippingSummary.freeShippingThreshold > 0
+      ? `Free shipping above ₹${formatPrice(primarySellerShippingSummary.freeShippingThreshold)}`
+      : primarySellerShippingSummary.defaultDeliveryCharge > 0
+        ? "Seller delivery rate applied"
+        : "Free shipping";
   const verifyCheckoutPayment = async ({ paymentGroupId, gatewayResponse }) => {
     const { response, data } = await apiFetchJson(
       `${API_URL}/api/orders/checkout-session/verify-payment`,
@@ -402,6 +416,61 @@ export default function Checkout() {
 
   useEffect(() => {
     let ignore = false;
+    const seed = buildSellerShippingLookupSeed(items);
+    setSellerShippingLookup(seed);
+
+    const sellerIds = Array.from(
+      new Set(
+        items
+          .map((item) => String(item?.seller?.id || item?.seller?._id || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (sellerIds.length === 0) {
+      setShippingLookupLoading(false);
+      return undefined;
+    }
+
+    const hydrateSellerShipping = async () => {
+      setShippingLookupLoading(true);
+      try {
+        const results = await Promise.allSettled(
+          sellerIds.map((sellerId) =>
+            loadSellerStore(sellerId, {
+              includeProducts: false,
+              includeFeedbacks: false,
+              includeProductRatings: false,
+            })
+          )
+        );
+        if (ignore) return;
+
+        const nextLookup = { ...seed };
+        results.forEach((result, index) => {
+          if (result.status !== "fulfilled") return;
+          const sellerId = sellerIds[index];
+          const shippingSummary = result.value?.seller?.shippingSummary;
+          if (sellerId && shippingSummary && typeof shippingSummary === "object") {
+            nextLookup[sellerId] = shippingSummary;
+          }
+        });
+        setSellerShippingLookup(nextLookup);
+      } finally {
+        if (!ignore) {
+          setShippingLookupLoading(false);
+        }
+      }
+    };
+
+    hydrateSellerShipping();
+    return () => {
+      ignore = true;
+    };
+  }, [items]);
+
+  useEffect(() => {
+    let ignore = false;
 
     const loadSellerPanel = async () => {
       if (!buyNowItem || !primarySellerId) {
@@ -413,11 +482,11 @@ export default function Checkout() {
 
       setSellerPanel((current) => ({ ...current, loading: true }));
       try {
-        const res = await fetch(`${API_URL}/api/products/seller/${primarySellerId}/public?limit=10`);
-        if (!res.ok) {
-          throw new Error("Unable to load seller panel.");
-        }
-        const data = await res.json();
+        const data = await loadSellerStore(primarySellerId, {
+          limit: 10,
+          includeProducts: true,
+          includeFeedbacks: false,
+        });
         if (ignore) return;
         setSellerPanel({
           loading: false,
@@ -829,8 +898,38 @@ export default function Checkout() {
             )}
             <div className="price-row">
               <span>Delivery</span>
-              <span>{deliveryCharge === 0 ? "Free" : `₹${deliveryCharge}`}</span>
+              <span>{deliveryCharge === 0 ? "Free" : `₹${formatPrice(deliveryCharge)}`}</span>
             </div>
+            {shippingBreakdown.groups.length > 0 && (
+              <div className="checkout-shipping-breakdown" aria-label="Seller delivery breakdown">
+                {shippingBreakdown.groups.map((group) => (
+                  <div
+                    key={`checkout-shipping-${group.sellerId || group.sellerName}`}
+                    className="checkout-shipping-breakdown-row"
+                  >
+                    <div>
+                      <strong>{group.sellerName}</strong>
+                      <p>
+                        {group.deliveryCharge === 0
+                          ? group.qualifiesForFreeShipping &&
+                            group.shippingSummary.freeShippingThreshold > 0
+                            ? `Free above ₹${formatPrice(group.shippingSummary.freeShippingThreshold)}`
+                            : "Complimentary seller delivery"
+                          : group.shippingSummary.freeShippingThreshold > 0
+                            ? `₹${formatPrice(group.remainingForFreeShipping)} more for free shipping`
+                            : "Seller delivery policy applied"}
+                      </p>
+                    </div>
+                    <span>
+                      {group.deliveryCharge === 0 ? "Free" : `₹${formatPrice(group.deliveryCharge)}`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {shippingLookupLoading && (
+              <p className="field-hint">Refreshing seller delivery rules...</p>
+            )}
             <div className="price-row total">
               <span>Total</span>
               <span>₹{formatPrice(total)}</span>
@@ -901,6 +1000,33 @@ export default function Checkout() {
                       "Secure contact form available in store profile"
                   ).trim()}
                 </span>
+              </div>
+              <div className="checkout-seller-row checkout-seller-row-policy">
+                <span className="checkout-mini-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path
+                      d="M5 7.5h14v9H5z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                    />
+                    <path
+                      d="M8 11.5h8M8 14.5h5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </span>
+                <div>
+                  <strong>
+                    {primarySellerShippingSummary.defaultDeliveryCharge > 0
+                      ? `Delivery charge: ₹${formatPrice(primarySellerShippingSummary.defaultDeliveryCharge)}`
+                      : "Free shipping"}
+                  </strong>
+                  <span>{primarySellerPolicyNote}</span>
+                </div>
               </div>
               <Link className="btn ghost checkout-seller-visit" to={`/store/${primarySellerId}`}>
                 Visit Store

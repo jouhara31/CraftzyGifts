@@ -16,6 +16,7 @@ import {
 
 import { API_URL } from "../apiBase";
 import { apiFetch, apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
+const SELLER_ORDERS_CACHE_KEY = "seller_orders_snapshot";
 const LEGACY_OPTION_LABELS = {
   giftBoxes: "Gift box",
   chocolates: "Chocolates",
@@ -179,8 +180,42 @@ const resolveOptionSelection = (product, key, value) => {
   };
 };
 
+const readSellerOrdersSnapshot = () => {
+  try {
+    const raw = sessionStorage.getItem(SELLER_ORDERS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return Array.isArray(parsed.orders) ? parsed.orders : null;
+  } catch {
+    return null;
+  }
+};
+
+const persistSellerOrdersSnapshot = (orders = []) => {
+  try {
+    sessionStorage.setItem(
+      SELLER_ORDERS_CACHE_KEY,
+      JSON.stringify({
+        orders: Array.isArray(orders) ? orders : [],
+      })
+    );
+  } catch {
+    // Ignore sessionStorage failures.
+  }
+};
+
+const clearSellerOrdersSnapshot = () => {
+  try {
+    sessionStorage.removeItem(SELLER_ORDERS_CACHE_KEY);
+  } catch {
+    // Ignore sessionStorage failures.
+  }
+};
+
 export default function SellerOrders() {
-  const [orders, setOrders] = useState([]);
+  const initialOrdersSnapshot = useMemo(() => readSellerOrdersSnapshot(), []);
+  const [orders, setOrders] = useState(() => initialOrdersSnapshot || []);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -192,6 +227,7 @@ export default function SellerOrders() {
   const navigate = useNavigate();
   const statusFilter = asText(searchParams.get("status"));
   const clearAndRedirect = useCallback(() => {
+    clearSellerOrdersSnapshot();
     clearAuthSession();
     navigate("/login", { replace: true });
   }, [navigate]);
@@ -213,6 +249,7 @@ export default function SellerOrders() {
         return;
       }
       setOrders(Array.isArray(data) ? data : []);
+      persistSellerOrdersSnapshot(Array.isArray(data) ? data : []);
       setError("");
     } catch {
       setError("Unable to load seller orders.");
@@ -427,7 +464,7 @@ export default function SellerOrders() {
 
   return (
     <div className="seller-shell-view seller-orders-page">
-      <div className="section-head">
+      <div className="section-head seller-orders-head">
         <div>
           <h2>Order management</h2>
           <p>Track fulfillment status and keep customers updated.</p>
@@ -442,13 +479,23 @@ export default function SellerOrders() {
             </button>
           )}
           <button
-            className="btn ghost"
+            className="btn ghost seller-orders-refresh"
             type="button"
             onClick={handleRefresh}
             disabled={refreshing}
             aria-busy={refreshing}
           >
-            {refreshing ? "Refreshing..." : "Refresh"}
+            {refreshing ? (
+              "Refreshing..."
+            ) : (
+              <>
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M20 5v5h-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Refresh
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -471,6 +518,8 @@ export default function SellerOrders() {
           <span>Product</span>
           <span>Payment</span>
           <span>Status</span>
+          <span>Actions</span>
+          <span>Documents</span>
           <span>Total</span>
         </div>
         {visibleOrders.map((order, index) => {
@@ -550,12 +599,16 @@ export default function SellerOrders() {
                   )}
                 </span>
                 <span data-label="Payment">{paymentLabel}</span>
-                <span data-label="Status">
-                  <span className={`status-pill ${orderStatusClass(orderStatus)}`}>
-                    {orderStatus || "unknown"}
+                <span data-label="Status" className="seller-order-status-cell">
+                  <span className="seller-order-status-pill">
+                    <span className={`status-pill ${orderStatusClass(orderStatus)}`}>
+                      {orderStatus || "unknown"}
+                    </span>
                   </span>
+                </span>
+                <span data-label="Actions" className="seller-order-actions-cell">
                   {next.length > 0 && (
-                    <span className="dropdown-inline">
+                    <span className="seller-order-actions-group">
                       {next.map((status) => (
                         <button
                           key={status}
@@ -569,9 +622,11 @@ export default function SellerOrders() {
                       ))}
                     </span>
                   )}
-
+                  {next.length === 0 && orderStatus === "delivered" ? (
+                    <span className="seller-order-action-note">Done</span>
+                  ) : null}
                   {orderStatus === "return_requested" && (
-                    <span className="dropdown-inline">
+                    <span className="seller-order-actions-group">
                       <button
                         className="btn primary"
                         type="button"
@@ -590,9 +645,11 @@ export default function SellerOrders() {
                       </button>
                     </span>
                   )}
-                  <span className="dropdown-inline">
+                </span>
+                <span data-label="Documents" className="seller-order-docs-cell">
+                  <span className="seller-order-actions-group">
                     <button
-                      className="btn ghost"
+                      className="btn ghost seller-doc-btn"
                       type="button"
                       disabled={!invoiceAvailable || downloadingInvoiceId === orderId}
                       onClick={() => handleInvoiceDownload(orderId)}
@@ -622,7 +679,7 @@ export default function SellerOrders() {
                       )}
                     </button>
                     <button
-                      className="btn ghost"
+                      className="btn ghost seller-doc-btn"
                       type="button"
                       disabled={!shippingLabelAvailable || downloadingLabelId === orderId}
                       onClick={() => handleShippingLabelDownload(orderId)}

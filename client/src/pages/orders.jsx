@@ -132,6 +132,17 @@ const formatDate = (value) => {
   });
 };
 
+const formatDispatchDate = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+};
+
 const normalizeReturnWindowDays = (order = {}) => {
   const parsed = Number.parseInt(order?.seller?.returnWindowDays, 10);
   if (!Number.isInteger(parsed) || parsed < 0) return DEFAULT_RETURN_WINDOW_DAYS;
@@ -208,11 +219,6 @@ const formatDeliveryWindow = (product = {}) => {
   if (min > 0) return `${min} day delivery`;
   return "Made to order";
 };
-
-const shipmentDeliveryManagerLabel = (shipment = {}) =>
-  asText(shipment?.deliveryManagedBy).toLowerCase() === "delivery_partner"
-    ? "Delivery boy / courier"
-    : "Seller team";
 
 const formatAddressLines = (address = {}) => {
   const cityState = [asText(address.city), asText(address.state)].filter(Boolean).join(", ");
@@ -931,41 +937,6 @@ export default function Orders() {
     }
   };
 
-  const summaryCards = useMemo(() => {
-    const activeOrders = orders.filter((order) => ACTIVE_ORDER_STATUSES.has(asText(order?.status))).length;
-    const completedOrders = orders.filter((order) =>
-      COMPLETED_ORDER_STATUSES.has(asText(order?.status))
-    ).length;
-    const awaitingPayment = orders.filter((order) => asText(order?.status) === "pending_payment").length;
-    const totalSpend = orders.reduce((sum, order) => sum + asNumber(order?.total, 0), 0);
-
-    return [
-      {
-        label: "Total orders",
-        value: String(orders.length),
-        note: orders.length === 1 ? "One order placed so far" : "Orders placed through CraftzyGifts",
-      },
-      {
-        label: "In progress",
-        value: String(activeOrders),
-        note: activeOrders === 1 ? "One order is moving" : "Orders being prepared or shipped",
-      },
-      {
-        label: "Completed",
-        value: String(completedOrders),
-        note: completedOrders === 1 ? "One order completed" : "Delivered and refunded orders",
-      },
-      {
-        label: "Total spend",
-        value: `₹${formatCurrency(totalSpend)}`,
-        note:
-          awaitingPayment > 0
-            ? `${awaitingPayment} order${awaitingPayment > 1 ? "s" : ""} awaiting payment`
-            : "Across all your purchases",
-      },
-    ];
-  }, [orders]);
-
   return (
     <div className="page customer-orders-page">
       <Header />
@@ -981,16 +952,6 @@ export default function Orders() {
             Browse products
           </Link>
         </div>
-      </section>
-
-      <section className="customer-orders-summary" aria-label="Order summary">
-        {summaryCards.map((card) => (
-          <article key={card.label} className="customer-orders-stat">
-            <p>{card.label}</p>
-            <strong>{card.value}</strong>
-            <span>{card.note}</span>
-          </article>
-        ))}
       </section>
 
       {error ? (
@@ -1104,6 +1065,7 @@ export default function Orders() {
           const orderCode = formatShortOrderCode(orderId);
           const orderDate = formatDate(order?.createdAt);
           const deliveryWindow = formatDeliveryWindow(order?.product);
+          const trackingId = asText(order?.shipment?.trackingId);
           const sellerName =
             asText(order?.seller?.storeName || order?.seller?.name) || "CraftzyGifts store";
           const metaItems = [
@@ -1133,9 +1095,8 @@ export default function Orders() {
             {
               label: "Delivery",
               value: deliveryWindow,
-              sub: [buildOrderNote(order), `Handled by ${shipmentDeliveryManagerLabel(order?.shipment)}`]
-                .filter(Boolean)
-                .join(" • "),
+              sub: buildOrderNote(order),
+              extra: trackingId ? `Tracking ID: ${trackingId}` : "",
             },
           ];
           const isGenericHamper = Boolean(
@@ -1197,6 +1158,7 @@ export default function Orders() {
                       <span>{item.label}</span>
                       <strong>{item.value}</strong>
                       <small>{item.sub}</small>
+                      {item.extra ? <small>{item.extra}</small> : null}
                     </div>
                   ))}
                 </div>

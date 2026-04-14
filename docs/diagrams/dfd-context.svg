@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 900" role="img" aria-labelledby="title desc">
+  <title id="title">CraftzyGifts Context Diagram</title>
+  <desc id="desc">Context-level DFD showing customers, sellers, admins, payment gateway, and email service interacting with the CraftzyGifts marketplace platform.</desc>
+  <defs>
+    <style>
+      .bg { fill: #fffdfb; }
+      .frame { fill: #fffdfb; stroke: #d7c9b8; stroke-width: 2; }
+      .header { fill: #6f2b34; }
+      .header-text { font: 700 30px 'Segoe UI', Arial, sans-serif; fill: #fffaf5; }
+      .sub-text { font: 500 15px 'Segoe UI', Arial, sans-serif; fill: #6f6258; }
+      .entity { fill: #f7efe4; stroke: #6f2b34; stroke-width: 2.2; }
+      .process { fill: #ffffff; stroke: #243447; stroke-width: 2.8; }
+      .entity-title { font: 700 22px 'Segoe UI', Arial, sans-serif; fill: #6f2b34; }
+      .process-title { font: 700 30px 'Segoe UI', Arial, sans-serif; fill: #243447; }
+      .body { font: 500 15px 'Segoe UI', Arial, sans-serif; fill: #334155; }
+      .connector { fill: none; stroke: #6f2b34; stroke-width: 3; marker-end: url(#arrow); }
+      .connector-back { fill: none; stroke: #607086; stroke-width: 2.4; marker-end: url(#arrowBack); }
+      .note { fill: #fffaf3; stroke: #d3c4b1; stroke-width: 1.4; }
+      .note-text { font: 500 13px 'Segoe UI', Arial, sans-serif; fill: #4b5563; }
+      .small-cap { font: 700 14px 'Segoe UI', Arial, sans-serif; fill: #6f2b34; letter-spacing: 1px; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#6f2b34" />
+    </marker>
+    <marker id="arrowBack" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#607086" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1400" height="900" />
+  <rect class="frame" x="24" y="24" width="1352" height="852" rx="28" />
+  <rect class="header" x="24" y="24" width="1352" height="86" rx="28" />
+  <text class="header-text" x="700" y="77" text-anchor="middle">Figure 7.1 Context Diagram of CraftzyGifts</text>
+  <text class="sub-text" x="700" y="136" text-anchor="middle">Context-level view of the marketplace platform and its external entities</text>
+
+  <rect class="entity" x="560" y="180" width="280" height="110" rx="22" />
+  <text class="entity-title" x="700" y="225" text-anchor="middle">Admin</text>
+  <text class="body" x="700" y="255" text-anchor="middle">Approvals, moderation,</text>
+  <text class="body" x="700" y="276" text-anchor="middle">settings, payout control</text>
+
+  <rect class="entity" x="80" y="315" width="260" height="124" rx="22" />
+  <text class="entity-title" x="210" y="360" text-anchor="middle">Customer</text>
+  <text class="body" x="210" y="390" text-anchor="middle">Registers, browses,</text>
+  <text class="body" x="210" y="411" text-anchor="middle">places orders, tracks status</text>
+
+  <rect class="entity" x="1060" y="315" width="260" height="124" rx="22" />
+  <text class="entity-title" x="1190" y="360" text-anchor="middle">Seller</text>
+  <text class="body" x="1190" y="390" text-anchor="middle">Manages products,</text>
+  <text class="body" x="1190" y="411" text-anchor="middle">shipping, settlements, payouts</text>
+
+  <rect class="entity" x="120" y="650" width="250" height="118" rx="22" />
+  <text class="entity-title" x="245" y="695" text-anchor="middle">Payment Gateway</text>
+  <text class="body" x="245" y="725" text-anchor="middle">Payment initiation</text>
+  <text class="body" x="245" y="746" text-anchor="middle">and webhook response</text>
+
+  <rect class="entity" x="1030" y="650" width="250" height="118" rx="22" />
+  <text class="entity-title" x="1155" y="695" text-anchor="middle">Email Service</text>
+  <text class="body" x="1155" y="725" text-anchor="middle">Verification, reset,</text>
+  <text class="body" x="1155" y="746" text-anchor="middle">status notifications</text>
+
+  <rect class="process" x="390" y="295" width="620" height="310" rx="34" />
+  <text class="small-cap" x="700" y="352" text-anchor="middle">P0</text>
+  <text class="process-title" x="700" y="392" text-anchor="middle">CraftzyGifts Marketplace Platform</text>
+  <text class="body" x="700" y="440" text-anchor="middle">Authentication, catalog, customization, checkout, orders,</text>
+  <text class="body" x="700" y="464" text-anchor="middle">seller workspace, admin control, messaging, settlements, and reporting</text>
+  <text class="body" x="700" y="512" text-anchor="middle">Backend API + MongoDB data layer + role-based frontend interface</text>
+
+  <path class="connector" d="M340 365 C410 365, 350 365, 390 365" />
+  <path class="connector-back" d="M390 410 C350 410, 410 410, 340 410" />
+  <rect class="note" x="318" y="446" width="208" height="70" rx="16" />
+  <text class="note-text" x="422" y="472" text-anchor="middle">Register, login, browse,</text>
+  <text class="note-text" x="422" y="492" text-anchor="middle">checkout, order tracking</text>
+
+  <path class="connector" d="M1060 365 C1020 365, 1075 365, 1010 365" />
+  <path class="connector-back" d="M1010 410 C1075 410, 1020 410, 1060 410" />
+  <rect class="note" x="882" y="446" width="208" height="70" rx="16" />
+  <text class="note-text" x="986" y="472" text-anchor="middle">Product data, shipping,</text>
+  <text class="note-text" x="986" y="492" text-anchor="middle">payout request, replies</text>
+
+  <path class="connector" d="M700 290 C700 270, 700 300, 700 295" />
+  <path class="connector-back" d="M740 295 C740 280, 740 300, 740 290" />
+  <rect class="note" x="772" y="202" width="178" height="62" rx="16" />
+  <text class="note-text" x="861" y="228" text-anchor="middle">Approvals, categories,</text>
+  <text class="note-text" x="861" y="247" text-anchor="middle">reports, finance control</text>
+
+  <path class="connector" d="M540 605 C470 640, 410 670, 370 695" />
+  <path class="connector-back" d="M410 730 C455 708, 505 682, 570 650" />
+  <rect class="note" x="384" y="735" width="230" height="68" rx="16" />
+  <text class="note-text" x="499" y="760" text-anchor="middle">Payment request and</text>
+  <text class="note-text" x="499" y="780" text-anchor="middle">webhook/payment outcome</text>
+
+  <path class="connector" d="M860 605 C930 640, 980 668, 1030 695" />
+  <path class="connector-back" d="M1005 730 C960 708, 920 686, 850 650" />
+  <rect class="note" x="786" y="735" width="214" height="68" rx="16" />
+  <text class="note-text" x="893" y="760" text-anchor="middle">Verification, reset,</text>
+  <text class="note-text" x="893" y="780" text-anchor="middle">alert and status emails</text>
+</svg>

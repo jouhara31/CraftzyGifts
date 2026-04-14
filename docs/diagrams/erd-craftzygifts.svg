@@ -1,0 +1,208 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1880 1240" role="img" aria-labelledby="title desc">
+  <title id="title">CraftzyGifts ER Diagram</title>
+  <desc id="desc">Entity relationship diagram for the CraftzyGifts marketplace database including users, products, orders, settlements, payout batches, conversations, messages, notifications, categories, and platform settings.</desc>
+  <defs>
+    <style>
+      .bg { fill: #fffdfb; }
+      .frame { fill: #fffdfb; stroke: #d7c9b8; stroke-width: 2; }
+      .header { fill: #6f2b34; }
+      .header-text { font: 700 30px 'Segoe UI', Arial, sans-serif; fill: #fffaf5; }
+      .sub-text { font: 500 15px 'Segoe UI', Arial, sans-serif; fill: #6f6258; }
+      .entity-box { fill: #ffffff; stroke: #243447; stroke-width: 2.3; }
+      .entity-band { fill: #f7efe4; stroke: #243447; stroke-width: 2.3; }
+      .entity-title { font: 700 20px 'Segoe UI', Arial, sans-serif; fill: #6f2b34; }
+      .pk { font: 700 13px 'Segoe UI', Arial, sans-serif; fill: #243447; }
+      .attr { font: 500 13px 'Segoe UI', Arial, sans-serif; fill: #334155; }
+      .relation { fill: none; stroke: #6f2b34; stroke-width: 2.8; }
+      .dashed { stroke-dasharray: 8 7; }
+      .card { font: 700 15px 'Segoe UI', Arial, sans-serif; fill: #6f2b34; }
+      .label { font: 600 13px 'Segoe UI', Arial, sans-serif; fill: #4b5563; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1880" height="1240" />
+  <rect class="frame" x="24" y="24" width="1832" height="1192" rx="28" />
+  <rect class="header" x="24" y="24" width="1832" height="86" rx="28" />
+  <text class="header-text" x="940" y="77" text-anchor="middle">Figure 7.5 ER Diagram of CraftzyGifts</text>
+  <text class="sub-text" x="940" y="136" text-anchor="middle">Core marketplace entities and their major relationships</text>
+
+  <line class="relation" x1="390" y1="250" x2="540" y2="250" />
+  <text class="card" x="414" y="239">1</text>
+  <text class="card" x="520" y="239">M</text>
+  <text class="label" x="444" y="226">owns</text>
+
+  <line class="relation" x1="860" y1="250" x2="990" y2="250" />
+  <text class="card" x="884" y="239">1</text>
+  <text class="card" x="968" y="239">M</text>
+  <text class="label" x="898" y="226">categorizes</text>
+
+  <line class="relation" x1="390" y1="510" x2="580" y2="510" />
+  <text class="card" x="414" y="500">1</text>
+  <text class="card" x="560" y="500">M</text>
+  <text class="label" x="458" y="486">places</text>
+
+  <line class="relation" x1="980" y1="510" x2="760" y2="510" />
+  <text class="card" x="958" y="499">M</text>
+  <text class="card" x="784" y="499">1</text>
+  <text class="label" x="850" y="486">contains</text>
+
+  <line class="relation" x1="760" y1="610" x2="760" y2="770" />
+  <text class="card" x="772" y="660">1</text>
+  <text class="card" x="772" y="748">0..1</text>
+  <text class="label" x="784" y="706">generates</text>
+
+  <line class="relation" x1="390" y1="950" x2="540" y2="950" />
+  <text class="card" x="414" y="939">1</text>
+  <text class="card" x="520" y="939">M</text>
+  <text class="label" x="444" y="926">receives</text>
+
+  <line class="relation" x1="390" y1="1020" x2="620" y2="1020" />
+  <text class="card" x="414" y="1008">1</text>
+  <text class="card" x="598" y="1008">M</text>
+  <text class="label" x="490" y="995">has</text>
+
+  <line class="relation" x1="940" y1="950" x2="620" y2="950" />
+  <text class="card" x="918" y="939">1</text>
+  <text class="card" x="642" y="939">M</text>
+  <text class="label" x="750" y="926">groups</text>
+
+  <line class="relation" x1="1320" y1="250" x2="1510" y2="250" />
+  <text class="card" x="1342" y="239">1</text>
+  <text class="card" x="1488" y="239">M</text>
+  <text class="label" x="1392" y="226">contains</text>
+
+  <line class="relation" x1="1740" y1="510" x2="1595" y2="510" />
+  <text class="card" x="1716" y="499">M</text>
+  <text class="card" x="1612" y="499">1</text>
+  <text class="label" x="1652" y="486">notifies</text>
+
+  <line class="relation dashed" x1="1320" y1="820" x2="1620" y2="820" />
+  <text class="label" x="1428" y="802">configures commission and delay</text>
+
+  <line class="relation" x1="1140" y1="610" x2="1140" y2="770" />
+  <text class="card" x="1152" y="660">1</text>
+  <text class="card" x="1152" y="748">M</text>
+  <text class="label" x="1164" y="706">includes</text>
+
+  <line class="relation" x1="390" y1="880" x2="940" y2="880" />
+  <text class="card" x="414" y="868">1</text>
+  <text class="card" x="918" y="868">M</text>
+  <text class="label" x="648" y="866">belongs to seller</text>
+
+  <line class="relation" x1="390" y1="1085" x2="1480" y2="1085" />
+  <text class="card" x="414" y="1073">1</text>
+  <text class="card" x="1458" y="1073">M</text>
+  <text class="label" x="908" y="1072">owns conversations and support interactions</text>
+
+  <g transform="translate(80,170)">
+    <rect class="entity-box" width="310" height="240" rx="20" />
+    <rect class="entity-band" width="310" height="56" rx="20" />
+    <text class="entity-title" x="155" y="35" text-anchor="middle">User</text>
+    <text class="pk" x="18" y="82">PK _id</text>
+    <text class="attr" x="18" y="106">name</text>
+    <text class="attr" x="18" y="130">email</text>
+    <text class="attr" x="18" y="154">role</text>
+    <text class="attr" x="18" y="178">sellerBankDetails</text>
+    <text class="attr" x="18" y="202">refreshSessions</text>
+    <text class="attr" x="18" y="226">verification / reset state</text>
+  </g>
+
+  <g transform="translate(540,170)">
+    <rect class="entity-box" width="320" height="240" rx="20" />
+    <rect class="entity-band" width="320" height="56" rx="20" />
+    <text class="entity-title" x="160" y="35" text-anchor="middle">Product</text>
+    <text class="pk" x="18" y="82">PK _id</text>
+    <text class="attr" x="18" y="106">seller</text>
+    <text class="attr" x="18" y="130">category</text>
+    <text class="attr" x="18" y="154">name, description, price</text>
+    <text class="attr" x="18" y="178">stock, variants, media</text>
+    <text class="attr" x="18" y="202">customization flags</text>
+    <text class="attr" x="18" y="226">moderation status</text>
+  </g>
+
+  <g transform="translate(990,170)">
+    <rect class="entity-box" width="330" height="190" rx="20" />
+    <rect class="entity-band" width="330" height="56" rx="20" />
+    <text class="entity-title" x="165" y="35" text-anchor="middle">CategoryMaster</text>
+    <text class="pk" x="18" y="82">PK _id</text>
+    <text class="attr" x="18" y="106">title</text>
+    <text class="attr" x="18" y="130">slug</text>
+    <text class="attr" x="18" y="154">subcategories / metadata</text>
+  </g>
+
+  <g transform="translate(1510,170)">
+    <rect class="entity-box" width="300" height="190" rx="20" />
+    <rect class="entity-band" width="300" height="56" rx="20" />
+    <text class="entity-title" x="150" y="35" text-anchor="middle">Message</text>
+    <text class="pk" x="18" y="82">PK _id</text>
+    <text class="attr" x="18" y="106">conversation</text>
+    <text class="attr" x="18" y="130">sender</text>
+    <text class="attr" x="18" y="154">body and timestamps</text>
+  </g>
+
+  <g transform="translate(1320,170)">
+    <rect class="entity-box" width="320" height="190" rx="20" />
+    <rect class="entity-band" width="320" height="56" rx="20" />
+    <text class="entity-title" x="160" y="35" text-anchor="middle">Conversation</text>
+    <text class="pk" x="18" y="82">PK _id</text>
+    <text class="attr" x="18" y="106">participants</text>
+    <text class="attr" x="18" y="130">subject / channel</text>
+    <text class="attr" x="18" y="154">last message meta</text>
+  </g>
+
+  <g transform="translate(580,410)">
+    <rect class="entity-box" width="400" height="260" rx="20" />
+    <rect class="entity-band" width="400" height="56" rx="20" />
+    <text class="entity-title" x="200" y="35" text-anchor="middle">Order</text>
+    <text class="pk" x="18" y="82">PK _id</text>
+    <text class="attr" x="18" y="106">customer, seller, product</text>
+    <text class="attr" x="18" y="130">status and paymentStatus</text>
+    <text class="attr" x="18" y="154">shipping details</text>
+    <text class="attr" x="18" y="178">customization snapshot</text>
+    <text class="attr" x="18" y="202">review data</text>
+    <text class="attr" x="18" y="226">invoice / timestamps</text>
+  </g>
+
+  <g transform="translate(980,410)">
+    <rect class="entity-box" width="320" height="190" rx="20" />
+    <rect class="entity-band" width="320" height="56" rx="20" />
+    <text class="entity-title" x="160" y="35" text-anchor="middle">Notification</text>
+    <text class="pk" x="18" y="82">PK _id</text>
+    <text class="attr" x="18" y="106">user</text>
+    <text class="attr" x="18" y="130">type, title, message</text>
+    <text class="attr" x="18" y="154">read state / link</text>
+  </g>
+
+  <g transform="translate(1320,730)">
+    <rect class="entity-box" width="390" height="180" rx="20" />
+    <rect class="entity-band" width="390" height="56" rx="20" />
+    <text class="entity-title" x="195" y="35" text-anchor="middle">PlatformSettings</text>
+    <text class="pk" x="18" y="82">PK _id</text>
+    <text class="attr" x="18" y="106">sellerCommissionPercent</text>
+    <text class="attr" x="18" y="130">settlementDelayDays</text>
+    <text class="attr" x="18" y="154">maintenance / notification flags</text>
+  </g>
+
+  <g transform="translate(540,770)">
+    <rect class="entity-box" width="400" height="220" rx="20" />
+    <rect class="entity-band" width="400" height="56" rx="20" />
+    <text class="entity-title" x="200" y="35" text-anchor="middle">SellerSettlement</text>
+    <text class="pk" x="18" y="82">PK _id</text>
+    <text class="attr" x="18" y="106">seller, order, payoutBatch</text>
+    <text class="attr" x="18" y="130">status, orderStatus, paymentStatus</text>
+    <text class="attr" x="18" y="154">gross, commission, payoutableAmount</text>
+    <text class="attr" x="18" y="178">eligibleAt, requestedAt</text>
+    <text class="attr" x="18" y="202">notes and sync timestamps</text>
+  </g>
+
+  <g transform="translate(940,770)">
+    <rect class="entity-box" width="380" height="210" rx="20" />
+    <rect class="entity-band" width="380" height="56" rx="20" />
+    <text class="entity-title" x="190" y="35" text-anchor="middle">SellerPayoutBatch</text>
+    <text class="pk" x="18" y="82">PK _id</text>
+    <text class="attr" x="18" y="106">seller</text>
+    <text class="attr" x="18" y="130">reference, status, totalAmount</text>
+    <text class="attr" x="18" y="154">settlementIds</text>
+    <text class="attr" x="18" y="178">requestedAt / processedAt</text>
+  </g>
+</svg>

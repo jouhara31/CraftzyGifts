@@ -17,6 +17,9 @@ import {
   loadSellerStore as loadCachedSellerStore,
   prefetchSellerStore,
 } from "../utils/sellerStoreCache";
+import {
+  normalizeSellerShippingSummary,
+} from "../utils/shippingPricing";
 
 import { API_URL } from "../apiBase";
 const SELLER_STORE_SUMMARY_OPTIONS = {
@@ -346,6 +349,9 @@ export default function ProductDetail() {
       ? sellerStoreData.seller
       : product?.seller || {};
   const sellerDisplayName = sellerProfile?.storeName || sellerProfile?.name || sellerName || "Seller";
+  const sellerShippingSummary = normalizeSellerShippingSummary(
+    sellerProfile?.shippingSummary || product?.seller?.shippingSummary
+  );
   const sellerAbout = String(sellerProfile?.about || "").trim();
   const sellerDisplayRating = Number(
     sellerStoreData?.stats?.displayRating || sellerStoreData?.stats?.avgRating || 0
@@ -400,6 +406,12 @@ export default function ProductDetail() {
       : deliveryMinDays > 0
         ? `${deliveryMinDays} day(s)`
         : "";
+  const shippingMetaText =
+    sellerShippingSummary.defaultDeliveryCharge > 0
+      ? sellerShippingSummary.freeShippingThreshold > 0
+        ? `Delivery charge ₹${formatPrice(sellerShippingSummary.defaultDeliveryCharge)} • Free above ₹${formatPrice(sellerShippingSummary.freeShippingThreshold)}`
+        : `Delivery charge ₹${formatPrice(sellerShippingSummary.defaultDeliveryCharge)}`
+      : "Free shipping";
 
   const occasionOptions = useMemo(() => {
     const direct = cleanTextList(product?.occasions, 8);
@@ -643,6 +655,7 @@ export default function ProductDetail() {
         name: String(sellerProfile?.name || "").trim(),
         storeName: String(sellerDisplayName || "").trim(),
         profileImage: String(sellerProfile?.profileImage || "").trim(),
+        shippingSummary: sellerShippingSummary,
       },
       ...(selectedVariant
         ? {
@@ -751,6 +764,10 @@ export default function ProductDetail() {
         name: String(item?.seller?.name || "").trim(),
         storeName: String(item?.seller?.storeName || "").trim(),
         profileImage: String(item?.seller?.profileImage || "").trim(),
+        shippingSummary:
+          item?.seller?.shippingSummary && typeof item.seller.shippingSummary === "object"
+            ? item.seller.shippingSummary
+            : undefined,
       },
       ...(preferredVariant
         ? {
@@ -876,6 +893,9 @@ export default function ProductDetail() {
                     {deliveryWindowText
                       ? `Delivery in ${deliveryWindowText}`
                       : "Delivery timeline will be confirmed soon"}
+                  </p>
+                  <p className="pdp-price-meta-sub pdp-price-meta-shipping">
+                    {shippingMetaText}
                   </p>
                 </div>
               </div>
@@ -1299,6 +1319,7 @@ export default function ProductDetail() {
                   View store
                 </button>
               </section>
+
             </aside>
           </div>
 

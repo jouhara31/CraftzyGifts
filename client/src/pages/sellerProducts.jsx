@@ -13,6 +13,7 @@ import { getProductImage } from "../utils/productMedia";
 import { apiFetchJson, clearAuthSession, hasActiveSession } from "../utils/authSession";
 
 import { API_URL } from "../apiBase";
+const SELLER_PRODUCTS_CACHE_KEY = "seller_products_snapshot";
 const MAX_SELLING_PRICE = 200000;
 const MAX_MRP = 500000;
 const MAX_SURCHARGE = 50000;
@@ -44,6 +45,39 @@ const BULK_IMPORT_TEMPLATE = [
   "name,description,category,subcategory,brand,productType,price,mrp,sku,hsnCode,taxRate,stock,lowStockThreshold,weightGrams,lengthCm,widthCm,heightCm,deliveryMinDays,deliveryMaxDays,tags,shippingInfo,returnPolicy,occasions,includedItems,highlights,isCustomizable,makingCharge,buildYourOwnPercent,buildYourOwnEnabled,status,images,variants",
   '"Rose Celebration Box","Luxury floral gifting box","Flowers","Gift Box","Craftzy Select","Floral Hamper",1499,1899,ROSE-BOX-01,4819,18,12,4,850,28,22,14,2,4,"birthday|anniversary","Ships in rigid outer box","Replacement only for transit damage","Birthday|Anniversary","Preserved rose dome|Greeting card","Premium finish|Hand packed",false,0,10,false,active,"https://example.com/image-1.jpg|https://example.com/image-2.jpg|https://example.com/image-3.jpg","[{""id"":""variant_s_red"",""size"":""Standard"",""color"":""Red"",""material"":""Rose"",""sku"":""ROSE-RED-STD"",""price"":1499,""stock"":7,""active"":true},{""id"":""variant_s_pink"",""size"":""Standard"",""color"":""Pink"",""material"":""Rose"",""sku"":""ROSE-PINK-STD"",""price"":1549,""stock"":5,""active"":true}]"',
 ].join("\n");
+
+const readSellerProductsSnapshot = () => {
+  try {
+    const raw = sessionStorage.getItem(SELLER_PRODUCTS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return Array.isArray(parsed.products) ? parsed.products : null;
+  } catch {
+    return null;
+  }
+};
+
+const persistSellerProductsSnapshot = (products = []) => {
+  try {
+    sessionStorage.setItem(
+      SELLER_PRODUCTS_CACHE_KEY,
+      JSON.stringify({
+        products: Array.isArray(products) ? products : [],
+      })
+    );
+  } catch {
+    // Ignore sessionStorage failures.
+  }
+};
+
+const clearSellerProductsSnapshot = () => {
+  try {
+    sessionStorage.removeItem(SELLER_PRODUCTS_CACHE_KEY);
+  } catch {
+    // Ignore sessionStorage failures.
+  }
+};
 
 const resolveCategorySelectValue = (formState, categoryTree) => {
   if (formState.categoryMode === "custom") return CUSTOM_CATEGORY_OPTION;
@@ -1003,9 +1037,13 @@ const mapProductToForm = (product = {}) => {
 };
 
 export default function SellerProducts() {
+  const initialProductsSnapshot = useMemo(() => readSellerProductsSnapshot(), []);
   const { showConfirm } = useDialog();
   const [searchParams] = useSearchParams();
-  const [products, setProducts] = useState([]);
+  const [products, setProducts] = useState(() => initialProductsSnapshot || []);
+  const [hasLoadedProducts, setHasLoadedProducts] = useState(
+    () => Boolean(initialProductsSnapshot && initialProductsSnapshot.length > 0)
+  );
   const [query, setQuery] = useState(() => searchParams.get("q") || "");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -1037,6 +1075,7 @@ export default function SellerProducts() {
   const editNameInputRef = useRef(null);
   const navigate = useNavigate();
   const clearAndRedirect = useCallback(() => {
+    clearSellerProductsSnapshot();
     clearAuthSession();
     navigate("/login");
   }, [navigate]);
@@ -1083,15 +1122,19 @@ export default function SellerProducts() {
         setError(data.message || "Unable to load your products.");
         return;
       }
-      setProducts(Array.isArray(data) ? data : []);
+      const nextProducts = Array.isArray(data) ? data : [];
+      setProducts(nextProducts);
+      persistSellerProductsSnapshot(nextProducts);
     } catch {
       setError("Unable to load your products.");
+    } finally {
+      setHasLoadedProducts(true);
     }
   }, [clearAndRedirect]);
 
   useEffect(() => {
     loadProducts();
-  }, [loadProducts]);
+  }, [initialProductsSnapshot, loadProducts]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1789,7 +1832,7 @@ export default function SellerProducts() {
               <ProductSummaryIcon kind="total" />
             </span>
             <div className="seller-products-summary-copy">
-              <strong>{productSummary.total}</strong>
+              <strong>{hasLoadedProducts || products.length > 0 ? productSummary.total : "—"}</strong>
               <span>Total</span>
             </div>
           </article>
@@ -1798,7 +1841,7 @@ export default function SellerProducts() {
               <ProductSummaryIcon kind="active" />
             </span>
             <div className="seller-products-summary-copy">
-              <strong>{productSummary.active}</strong>
+              <strong>{hasLoadedProducts || products.length > 0 ? productSummary.active : "—"}</strong>
               <span>Active</span>
             </div>
           </article>
@@ -1807,7 +1850,7 @@ export default function SellerProducts() {
               <ProductSummaryIcon kind="drafts" />
             </span>
             <div className="seller-products-summary-copy">
-              <strong>{productSummary.drafts}</strong>
+              <strong>{hasLoadedProducts || products.length > 0 ? productSummary.drafts : "—"}</strong>
               <span>Drafts</span>
             </div>
           </article>
@@ -1816,7 +1859,7 @@ export default function SellerProducts() {
               <ProductSummaryIcon kind="lowStock" />
             </span>
             <div className="seller-products-summary-copy">
-              <strong>{productSummary.lowStock}</strong>
+              <strong>{hasLoadedProducts || products.length > 0 ? productSummary.lowStock : "—"}</strong>
               <span>Low stock</span>
             </div>
           </article>

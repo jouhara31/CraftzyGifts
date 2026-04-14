@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1820 1120" role="img" aria-labelledby="title desc">
+  <title id="title">Level-1 DFD for Admin Module</title>
+  <desc id="desc">Admin-focused data flow diagram for CraftzyGifts showing governance, monitoring, settings, and payout queue control.</desc>
+  <defs>
+    <style>
+      .bg { fill: #fffdfb; }
+      .frame { fill: #fffdfb; stroke: #d7c9b8; stroke-width: 2; }
+      .header { fill: #6f2b34; }
+      .header-text { font: 700 30px 'Segoe UI', Arial, sans-serif; fill: #fffaf5; }
+      .sub-text { font: 500 15px 'Segoe UI', Arial, sans-serif; fill: #6f6258; }
+      .entity { fill: #f7efe4; stroke: #6f2b34; stroke-width: 2.1; }
+      .process { fill: #ffffff; stroke: #243447; stroke-width: 2.6; }
+      .store { fill: #f3f6fa; stroke: #607086; stroke-width: 2.1; }
+      .entity-title { font: 700 22px 'Segoe UI', Arial, sans-serif; fill: #6f2b34; }
+      .process-title { font: 700 21px 'Segoe UI', Arial, sans-serif; fill: #243447; }
+      .store-title { font: 700 17px 'Segoe UI', Arial, sans-serif; fill: #243447; }
+      .body { font: 500 14px 'Segoe UI', Arial, sans-serif; fill: #334155; }
+      .small { font: 500 12px 'Segoe UI', Arial, sans-serif; fill: #556273; }
+      .connector { fill: none; stroke: #6f2b34; stroke-width: 3; marker-end: url(#arrow); }
+      .note { fill: #fffaf3; stroke: #d3c4b1; stroke-width: 1.2; }
+      .note-text { font: 500 12px 'Segoe UI', Arial, sans-serif; fill: #4b5563; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#6f2b34" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1820" height="1120" />
+  <rect class="frame" x="24" y="24" width="1772" height="1072" rx="28" />
+  <rect class="header" x="24" y="24" width="1772" height="86" rx="28" />
+  <text class="header-text" x="910" y="77" text-anchor="middle">Figure 7.4 Level-1 DFD for Admin Module</text>
+  <text class="sub-text" x="910" y="136" text-anchor="middle">Admin control over moderation, platform settings, reports, notifications, and payout batches</text>
+
+  <rect class="entity" x="70" y="460" width="225" height="118" rx="22" />
+  <text class="entity-title" x="182" y="508" text-anchor="middle">Admin</text>
+  <text class="body" x="182" y="538" text-anchor="middle">Uses control dashboard</text>
+
+  <rect class="process" x="350" y="150" width="470" height="126" rx="28" />
+  <text class="process-title" x="585" y="199" text-anchor="middle">1.0 Admin Access and Dashboard Control</text>
+  <text class="body" x="585" y="229" text-anchor="middle">Protected admin login, dashboard summary, alert review</text>
+
+  <rect class="process" x="350" y="340" width="470" height="126" rx="28" />
+  <text class="process-title" x="585" y="389" text-anchor="middle">2.0 Seller, Product, and Category Governance</text>
+  <text class="body" x="585" y="419" text-anchor="middle">Approve sellers, moderate products, manage categories and inventory</text>
+
+  <rect class="process" x="350" y="530" width="470" height="126" rx="28" />
+  <text class="process-title" x="585" y="579" text-anchor="middle">3.0 Order, Message, and Notification Monitoring</text>
+  <text class="body" x="585" y="609" text-anchor="middle">Monitor orders, chats, notifications, customers, and reports</text>
+
+  <rect class="process" x="350" y="720" width="470" height="126" rx="28" />
+  <text class="process-title" x="585" y="769" text-anchor="middle">4.0 Platform Settings and Payout Queue Control</text>
+  <text class="body" x="585" y="799" text-anchor="middle">Commission, maintenance, payout batch review, settlement release decisions</text>
+
+  <rect class="store" x="1020" y="110" width="300" height="92" rx="18" />
+  <line x1="1046" y1="110" x2="1046" y2="202" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1068" y="146">D1 User</text>
+  <text class="small" x="1068" y="170">roles, seller approval</text>
+
+  <rect class="store" x="1020" y="250" width="300" height="92" rx="18" />
+  <line x1="1046" y1="250" x2="1046" y2="342" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1068" y="286">D2 Product</text>
+  <text class="small" x="1068" y="310">catalog moderation</text>
+
+  <rect class="store" x="1020" y="390" width="300" height="92" rx="18" />
+  <line x1="1046" y1="390" x2="1046" y2="482" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1068" y="426">D3 Order</text>
+  <text class="small" x="1068" y="450">platform orders</text>
+
+  <rect class="store" x="1020" y="530" width="300" height="92" rx="18" />
+  <line x1="1046" y1="530" x2="1046" y2="622" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1068" y="566">D4 CategoryMaster</text>
+  <text class="small" x="1068" y="590">category structure</text>
+
+  <rect class="store" x="1370" y="110" width="320" height="92" rx="18" />
+  <line x1="1396" y1="110" x2="1396" y2="202" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1418" y="146">D5 Conversation / Message</text>
+  <text class="small" x="1418" y="170">chat and support threads</text>
+
+  <rect class="store" x="1370" y="250" width="320" height="92" rx="18" />
+  <line x1="1396" y1="250" x2="1396" y2="342" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1418" y="286">D6 Notification</text>
+  <text class="small" x="1418" y="310">system alerts and events</text>
+
+  <rect class="store" x="1370" y="390" width="320" height="92" rx="18" />
+  <line x1="1396" y1="390" x2="1396" y2="482" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1418" y="426">D7 PlatformSettings</text>
+  <text class="small" x="1418" y="450">commission, maintenance</text>
+
+  <rect class="store" x="1370" y="530" width="320" height="92" rx="18" />
+  <line x1="1396" y1="530" x2="1396" y2="622" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1418" y="566">D8 SellerSettlement</text>
+  <text class="small" x="1418" y="590">finance snapshots</text>
+
+  <rect class="store" x="1370" y="670" width="320" height="92" rx="18" />
+  <line x1="1396" y1="670" x2="1396" y2="762" stroke="#607086" stroke-width="2.1" />
+  <text class="store-title" x="1418" y="706">D9 SellerPayoutBatch</text>
+  <text class="small" x="1418" y="730">payout queue records</text>
+
+  <path class="connector" d="M295 519 L350 213" />
+  <path class="connector" d="M295 519 L350 403" />
+  <path class="connector" d="M295 519 L350 593" />
+  <path class="connector" d="M295 519 L350 783" />
+
+  <path class="connector" d="M820 213 L1020 156" />
+  <path class="connector" d="M820 213 L1370 296" />
+  <path class="connector" d="M820 403 L1020 296" />
+  <path class="connector" d="M820 403 L1020 576" />
+  <path class="connector" d="M820 593 L1020 436" />
+  <path class="connector" d="M820 593 L1370 156" />
+  <path class="connector" d="M820 593 L1370 296" />
+  <path class="connector" d="M820 783 L1370 436" />
+  <path class="connector" d="M820 783 L1370 576" />
+  <path class="connector" d="M820 783 L1370 716" />
+
+  <rect class="note" x="170" y="195" width="158" height="42" rx="12" />
+  <text class="note-text" x="249" y="220" text-anchor="middle">admin auth and KPIs</text>
+
+  <rect class="note" x="171" y="386" width="170" height="42" rx="12" />
+  <text class="note-text" x="256" y="411" text-anchor="middle">moderation actions</text>
+
+  <rect class="note" x="164" y="575" width="182" height="42" rx="12" />
+  <text class="note-text" x="255" y="600" text-anchor="middle">monitoring and reporting</text>
+
+  <rect class="note" x="165" y="769" width="178" height="42" rx="12" />
+  <text class="note-text" x="254" y="794" text-anchor="middle">settings and payout control</text>
+</svg>

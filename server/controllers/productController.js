@@ -5,6 +5,7 @@ const { ensureCustomizationMaster } = require("../utils/customizationMaster");
 const { ensureCategoryMaster, syncCategoryMaster } = require("../utils/categoryMaster");
 const { maybeCreateInventoryNotifications } = require("../utils/sellerNotifications");
 const { handleControllerError } = require("../utils/apiError");
+const { buildPublicSellerShippingSummary } = require("../utils/sellerShipping");
 
 const MAX_SELLING_PRICE = 200000;
 const MAX_MRP = 500000;
@@ -137,9 +138,28 @@ const buildProductReviewStats = (summary = {}) => {
 };
 const EMPTY_PRODUCT_REVIEW_STATS = buildProductReviewStats();
 const STORE_PRODUCT_CARD_SELECT = "name category subcategory price mrp stock image images createdAt";
+const attachPublicSellerShippingSummary = (seller) => {
+  if (!seller || typeof seller !== "object") return seller;
+  const normalized = typeof seller.toObject === "function" ? seller.toObject() : { ...seller };
+  delete normalized.sellerShippingSettings;
+  return {
+    ...normalized,
+    shippingSummary: buildPublicSellerShippingSummary(seller?.sellerShippingSettings),
+  };
+};
+
+const attachProductSellerShippingSummary = (product) => {
+  if (!product || typeof product !== "object") return product;
+  const normalized = typeof product.toObject === "function" ? product.toObject() : { ...product };
+  if (normalized.seller && typeof normalized.seller === "object") {
+    normalized.seller = attachPublicSellerShippingSummary(normalized.seller);
+  }
+  return normalized;
+};
+
 const withProductReviewStats = async (products = []) => {
   const normalizedProducts = (Array.isArray(products) ? products : []).map((item) =>
-    item && typeof item.toObject === "function" ? item.toObject() : item
+    attachProductSellerShippingSummary(item)
   );
   const productIds = normalizedProducts.map((item) => item?._id).filter(Boolean);
   if (productIds.length === 0) {
@@ -977,7 +997,7 @@ exports.getProducts = async (req, res) => {
 
     if (!usePagination) {
       const products = await Product.find(filter)
-        .populate("seller", "name storeName")
+        .populate("seller", "name storeName profileImage sellerShippingSettings")
         .sort(sortConfig);
       const productsWithRatings = await withProductReviewStats(products);
       return res.json(productsWithRatings);
@@ -989,7 +1009,7 @@ exports.getProducts = async (req, res) => {
 
     const [items, total] = await Promise.all([
       Product.find(filter)
-        .populate("seller", "name storeName")
+        .populate("seller", "name storeName profileImage sellerShippingSettings")
         .sort(sortConfig)
         .skip(skip)
         .limit(perPage),
@@ -1027,12 +1047,12 @@ exports.getProductById = async (req, res) => {
       $and: visibility.$and,
     }).populate(
       "seller",
-      "name storeName"
+      "name storeName profileImage sellerShippingSettings"
     );
     if (!product) return res.status(404).json({ message: "Product not found" });
     const includeFeedback = parseBoolean(req.query?.includeFeedback, false);
     if (!includeFeedback) {
-      return res.json(product);
+      return res.json(attachProductSellerShippingSummary(product));
     }
 
     const feedbackLimit = Math.min(parsePositiveInt(req.query?.feedbackLimit, 4), 12);
@@ -1187,7 +1207,7 @@ exports.getProductById = async (req, res) => {
       ratingBreakdown,
     };
 
-    const payload = typeof product.toObject === "function" ? product.toObject() : product;
+    const payload = attachProductSellerShippingSummary(product);
     return res.json({
       ...payload,
       reviewStats,
@@ -1200,11 +1220,23 @@ exports.getProductById = async (req, res) => {
 
 exports.getSellerProducts = async (req, res) => {
   try {
-    const products = await Product.find({ seller: req.user.id })
-      .sort({
-        createdAt: -1,
-      })
-      .lean();
+    const limit = Math.max(0, Math.min(Number(req.query?.limit || 0) || 0, 500));
+    const compact = ["1", "true"].includes(String(req.query?.compact || "").trim().toLowerCase());
+    const baseQuery = Product.find({ seller: req.user.id }).sort({
+      createdAt: -1,
+    });
+    if (limit > 0) {
+      baseQuery.limit(limit);
+    }
+
+    if (compact) {
+      const products = await baseQuery
+        .select("_id name price stock status image images category createdAt")
+        .lean();
+      return res.json(products);
+    }
+
+    const products = await baseQuery.lean();
     const productIds = products.map((entry) => entry?._id).filter(Boolean);
     const statsByProduct = await buildSellerOrderStatsByProduct(productIds);
     res.json(
@@ -1367,8 +1399,8 @@ exports.getPublicSellerStore = async (req, res) => {
     const seller = await User.findOne(sellerFilter)
       .select(
         isOwner
-          ? "name storeName profileImage storeCoverImage about supportEmail phone instagramUrl pickupAddress createdAt"
-          : "name storeName profileImage storeCoverImage about instagramUrl pickupAddress createdAt"
+          ? "name storeName profileImage storeCoverImage about supportEmail phone instagramUrl pickupAddress createdAt sellerShippingSettings"
+          : "name storeName profileImage storeCoverImage about instagramUrl pickupAddress createdAt sellerShippingSettings"
       )
       .lean();
     if (!seller) {
@@ -1537,7 +1569,7 @@ exports.getPublicSellerStore = async (req, res) => {
     );
 
     res.json({
-      seller,
+      seller: attachPublicSellerShippingSummary(seller),
       products: productsWithReviewStats,
       feedbacks,
       stats: {
